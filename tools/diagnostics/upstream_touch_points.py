@@ -29,7 +29,7 @@ TOUCH_POINTS: dict[str, str] = {
     "app/build.gradle.kts": "2: Compose plugin, buildFeatures.compose, dependencies, simple source dirs",
     "app/src/main/AndroidManifest.xml": "3: SimpleActivity declaration",
     "app/src/main/res/menu/main_drawer_menu.xml": "4: 'New interface' drawer item",
-    "app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt": "5: SimpleUi.redirect and the drawer handler",
+    "app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt": "5: SimpleUi.redirect in onCreate/onNewIntent and the drawer handler",
     "app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt": "6: SimpleHooks service start/stop",
     "app/src/main/java/io/nekohasekai/sagernet/group/RemoteRouteUpdater.kt": "7: SimpleConfigRepo.refresh",
 }
@@ -57,7 +57,7 @@ def changed_files(base: str) -> dict[str, str]:
         changes[path] = status[:1]
     for path in git("ls-files", "--others", "--exclude-standard", "-z").split("\0"):
         if path:
-            changes[path] = "A"
+            changes.setdefault(path, "A")  # keep a base-relative status (git rm --cached leaves a D)
     return changes
 
 

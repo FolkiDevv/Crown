@@ -233,6 +233,7 @@ class MainActivity : ThemedActivity(),
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (SimpleUi.redirect(this, intent)) return
 
         if (intent.getBooleanExtra(PlatformNotifications.EXTRA_WIFI_PERMISSION, false)) {
             wifiFlow.run()

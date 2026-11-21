@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.simple
 
+import android.app.ActivityManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,6 +37,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.ktx.Logs
 
 /**
  * The simple interface (openspec simple-ui-redesign). Opened by [SimpleUi.redirect] from MainActivity, which stays
@@ -51,6 +54,20 @@ class SimpleActivity : ComponentActivity() {
             SimpleTheme {
                 SimpleApp(onOpenClassic = { SimpleUi.switchTo(this, simple = false) })
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Same as MainActivity.onResume: MainActivity finishes before its onResume when it redirects here
+        if (DataStore.hideFromRecentApps) excludeFromRecents()
+    }
+
+    private fun excludeFromRecents() {
+        try {
+            getSystemService(ActivityManager::class.java)?.appTasks?.firstOrNull()?.setExcludeFromRecents(true)
+        } catch (e: Exception) {
+            Logs.w("Failed to set excludeFromRecents: ${e.message}")
         }
     }
 }

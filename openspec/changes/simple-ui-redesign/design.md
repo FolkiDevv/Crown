@@ -44,7 +44,7 @@
 | 2 | `app/build.gradle.kts` | применение плагина, `buildFeatures.compose`, зависимости Compose, три `srcDir` |
 | 3 | `app/src/main/AndroidManifest.xml` | объявление `simple.SimpleActivity` (фильтры лаунчера остаются на `MainActivity`) |
 | 4 | `app/src/main/res/menu/main_drawer_menu.xml` | пункт «Новый интерфейс» (заголовок — строка из `strings_simple.xml`) |
-| 5 | `app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt` | в начале `onCreate` — `if (SimpleUi.redirect(this)) return`; обработчик пункта меню — `SimpleUi.switchTo(this, simple = true)` |
+| 5 | `app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt` | в начале `onCreate` — `if (SimpleUi.redirect(this)) return`, в начале `onNewIntent` — `if (SimpleUi.redirect(this, intent)) return` (повторно используемый singleTask-экземпляр); обработчик пункта меню — `SimpleUi.switchTo(this, simple = true)` |
 | 6 | `app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt` | вызовы `SimpleHooks.onServiceStarted/onServiceStopped` (запуск и остановка наблюдателя сети) |
 | 7 | `app/src/main/java/io/nekohasekai/sagernet/group/RemoteRouteUpdater.kt` (или место вызова `RouteRepo.refresh()`) | вызов `SimpleConfigRepo.refresh()` рядом с обновлением снимка маршрутов |
 

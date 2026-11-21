@@ -87,13 +87,13 @@ object SimpleUi {
         isSimpleSelected(store) && !opensClassic(action, extraKeys)
 
     /**
-     * Called by [MainActivity.onCreate] before its content is set: opens [SimpleActivity] instead when the simple
-     * interface is chosen and finishes [activity]. Returns true when it did, and onCreate returns right away.
+     * Called by [MainActivity.onCreate] before its content is set, and by [MainActivity.onNewIntent] for a reused
+     * singleTask instance (one kept open by a classic-only intent): opens [SimpleActivity] instead when the simple
+     * interface is chosen and finishes [activity]. Returns true when it did, and the caller returns right away.
      */
-    fun redirect(activity: Activity): Boolean {
+    fun redirect(activity: Activity, intent: Intent? = activity.intent): Boolean {
         val store = store(activity)
         recordInstallKind(activity, store)
-        val intent = activity.intent
         val extras = intent?.extras?.keySet().orEmpty()
         if (!shouldRedirect(store, intent?.action, extras)) return false
         activity.startActivity(simpleIntent(activity, intent))

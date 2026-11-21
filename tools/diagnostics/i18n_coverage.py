@@ -260,6 +260,17 @@ def check_simple(simple_res: Path, main_res: Path) -> tuple[list[str], int]:
                 issues.append(f"{rel(d)}/{SIMPLE_FILE}: only {', '.join(SIMPLE_LOCALES)} is allowed")
     if (main_res / "values" / SIMPLE_FILE).exists():
         issues.append(f"{rel(main_res / 'values')}/{SIMPLE_FILE}: belongs to app/src/simple/res")
+    # nor may any other XML of another simple locale carry text resources, whatever the file is called
+    for d in sorted(simple_res.glob("values-*")):
+        if d.name in SIMPLE_LOCALES:
+            continue
+        for xml in sorted(d.glob("*.xml")):
+            if xml.name == SIMPLE_FILE:
+                continue  # reported above
+            x_strings, x_plurals, x_arrays = collect_entries(parse_xml(xml, issues))
+            names = sorted(set(x_strings) | set(x_plurals) | set(x_arrays))
+            if names:
+                issues.append(f"{rel(xml)}: text resources outside {', '.join(SIMPLE_LOCALES)}: {names}")
 
     for locale in SIMPLE_LOCALES:
         label = f"{locale}/{SIMPLE_FILE}"
@@ -269,12 +280,18 @@ def check_simple(simple_res: Path, main_res: Path) -> tuple[list[str], int]:
             continue
         issues.extend(f"{label}: {d}" for d in duplicates(loc_root))
         l_strings, l_plurals, l_arrays = collect_entries(loc_root)
-        present = set(l_strings) | set(l_plurals) | set(l_arrays)
-        for name in sorted(present):
+        for name in sorted(l_arrays):
+            issues.append(f"{label}: string-array is not supported here: {name}")
+        # a translation counts only when it has the resource kind of its base entry
+        present = (set(l_strings) & set(b_strings)) | (set(l_plurals) & set(b_plurals))
+        for name in sorted(set(l_strings) | set(l_plurals)):
             if name in nontranslatable:
                 issues.append(f"{label}: non-translatable leak: {name}")
             elif name not in base_names:
                 issues.append(f"{label}: extra entry not in base: {name}")
+            elif name not in present:
+                base_kind = "string" if name in b_strings else "plurals"
+                issues.append(f"{label}: kind mismatch: {name} is <{base_kind}> in the base")
         for name in sorted(base_names - present):
             issues.append(f"{label}: missing string: {name}")
         for name, el in l_strings.items():
