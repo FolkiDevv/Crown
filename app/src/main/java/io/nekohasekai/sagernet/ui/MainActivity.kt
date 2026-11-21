@@ -47,6 +47,7 @@ import io.nekohasekai.sagernet.ktx.launchCustomTab
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.outbound.`import`.ProfileImport
+import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.ui.route.RouteImports
 import io.nekohasekai.sagernet.ui.settings.DnsSettingsFragment
 import io.nekohasekai.sagernet.ui.settings.XrayGeoSettingsFragment
@@ -83,6 +84,7 @@ class MainActivity : ThemedActivity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (SimpleUi.redirect(this)) return
         MessageStore.setCurrentActivity(this)
         val animateInitialControls = savedInstanceState == null
 
@@ -416,6 +418,10 @@ class MainActivity : ThemedActivity(),
             }
 
             R.id.nav_about -> displayFragment(AboutFragment())
+            R.id.nav_simple_ui -> {
+                SimpleUi.switchTo(this, simple = true)
+                return false
+            }
 
             else -> return false
         }

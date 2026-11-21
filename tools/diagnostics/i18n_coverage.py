@@ -7,10 +7,15 @@ Read-only checks against app/src/main/res:
   - missing CLDR plural quantity categories per locale
   - duplicate names and XML parse errors
 
-Run from the repository root:
-    uv run tools/diagnostics/i18n_coverage.py [--lang values-it] [--summary]
+and against app/src/simple/res (the simple UI, its own base strings_simple.xml; not counted in the classic base):
+  - only values-ru translates it; strings_simple.xml in any other locale dir (of either root) is an issue
+  - values-ru/strings_simple.xml covers every translatable base entry, no extras, same placeholders
 
-Exit code 0 when every checked locale is clean, 1 when any issue is found.
+Run from the repository root:
+    uv run tools/diagnostics/i18n_coverage.py [--scope all|classic|simple] [--lang values-it] [--summary]
+
+--lang limits the classic check to one locale. Exit code 0 when every checked locale is clean, 1 when any issue
+is found.
 """
 
 from __future__ import annotations
@@ -218,16 +223,86 @@ def check_locale(
     return issues
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--res-dir", type=Path, default=DEFAULT_RES_DIR,
-                        help="resource directory (default: app/src/main/res)")
-    parser.add_argument("--lang", help="only check one locale dir, e.g. values-it")
-    parser.add_argument("--summary", action="store_true",
-                        help="print per-locale counts only, no item details")
-    args = parser.parse_args()
+SIMPLE_RES_DIR = REPO_ROOT / "app" / "src" / "simple" / "res"
+SIMPLE_FILE = "strings_simple.xml"
+# design.md D9 / i18n spec: the simple UI ships English (values) and Russian only; other locales fall back to English.
+SIMPLE_LOCALES = ("values-ru",)
 
-    res_dir: Path = args.res_dir
+
+def rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def check_simple(simple_res: Path, main_res: Path) -> tuple[list[str], int]:
+    """Issues of app/src/simple/res/*/strings_simple.xml and the number of checked locales."""
+    issues: list[str] = []
+    base_root = parse_xml(simple_res / "values" / SIMPLE_FILE, issues)
+    if base_root is None:
+        issues.append(f"values/{SIMPLE_FILE}: missing base")
+        return issues, 0
+    issues.extend(f"values/{SIMPLE_FILE}: {d}" for d in duplicates(base_root))
+    b_strings, b_plurals, b_arrays = collect_entries(base_root)
+    if b_arrays:
+        issues.append(f"values/{SIMPLE_FILE}: string-array is not supported here: {sorted(b_arrays)}")
+    base_names = {n for n, el in list(b_strings.items()) + list(b_plurals.items()) if is_translatable(el)}
+    nontranslatable = {n for n, el in list(b_strings.items()) + list(b_plurals.items()) if not is_translatable(el)}
+    for name in sorted(base_names | nontranslatable):
+        if not name.startswith("simple_"):
+            issues.append(f"values/{SIMPLE_FILE}: name without the simple_ prefix: {name}")
+
+    # strings_simple.xml must not appear in any other locale, in either resource root
+    for root in (simple_res, main_res):
+        for d in sorted(root.glob("values-*")):
+            if (d / SIMPLE_FILE).exists() and not (root == simple_res and d.name in SIMPLE_LOCALES):
+                issues.append(f"{rel(d)}/{SIMPLE_FILE}: only {', '.join(SIMPLE_LOCALES)} is allowed")
+    if (main_res / "values" / SIMPLE_FILE).exists():
+        issues.append(f"{rel(main_res / 'values')}/{SIMPLE_FILE}: belongs to app/src/simple/res")
+
+    for locale in SIMPLE_LOCALES:
+        label = f"{locale}/{SIMPLE_FILE}"
+        loc_root = parse_xml(simple_res / locale / SIMPLE_FILE, issues)
+        if loc_root is None:
+            issues.append(f"{label}: missing file")
+            continue
+        issues.extend(f"{label}: {d}" for d in duplicates(loc_root))
+        l_strings, l_plurals, l_arrays = collect_entries(loc_root)
+        present = set(l_strings) | set(l_plurals) | set(l_arrays)
+        for name in sorted(present):
+            if name in nontranslatable:
+                issues.append(f"{label}: non-translatable leak: {name}")
+            elif name not in base_names:
+                issues.append(f"{label}: extra entry not in base: {name}")
+        for name in sorted(base_names - present):
+            issues.append(f"{label}: missing string: {name}")
+        for name, el in l_strings.items():
+            if name in b_strings:
+                check_placeholders(f"{label}/{name}", b_strings[name], el, issues)
+        required = REQUIRED_QUANTITIES.get(locale_language(locale), DEFAULT_QUANTITIES)
+        for name, el in l_plurals.items():
+            if name not in b_plurals:
+                continue
+            base_items = plural_items(b_plurals[name])
+            loc_items = plural_items(el)
+            missing_q = required - set(loc_items)
+            if missing_q:
+                issues.append(f"{label}/{name}: missing plural quantities: {sorted(missing_q)}")
+            fallback = base_items.get("other") or next(iter(base_items.values()), "")
+            for quantity, text in loc_items.items():
+                base_text = base_items.get(quantity, fallback)
+                if placeholders(base_text) != placeholders(text):
+                    issues.append(
+                        f"{label}/{name}[{quantity}]: placeholder mismatch "
+                        f"base={sorted(placeholders(base_text).elements())} "
+                        f"locale={sorted(placeholders(text).elements())}"
+                    )
+    return issues, len(SIMPLE_LOCALES)
+
+
+def run_classic(res_dir: Path, lang: str | None, summary: bool) -> int:
+    """Checks the classic base and locales of res_dir; returns the number of issues."""
     base_issues: list[str] = []
     base_strings_root = parse_xml(res_dir / "values" / "strings.xml", base_issues)
     base_arrays_root = parse_xml(res_dir / "values" / "arrays.xml", base_issues)
@@ -235,7 +310,7 @@ def main() -> int:
         for line in base_issues:
             print(f"BASE: {line}")
         print("FATAL: cannot parse base resources")
-        return 1
+        return max(1, len(base_issues))
 
     b_strings, b_plurals, _ = collect_entries(base_strings_root)
     _, _, b_arrays = collect_entries(base_arrays_root)
@@ -253,10 +328,10 @@ def main() -> int:
         d for d in res_dir.glob("values-*")
         if d.is_dir() and (d / "strings.xml").exists()
     )
-    if args.lang:
-        locale_dirs = [d for d in locale_dirs if d.name == args.lang]
+    if lang:
+        locale_dirs = [d for d in locale_dirs if d.name == lang]
         if not locale_dirs:
-            print(f"FATAL: no locale dir matching {args.lang}")
+            print(f"FATAL: no locale dir matching {lang}")
             return 1
 
     total_issues = 0
@@ -282,12 +357,43 @@ def main() -> int:
             f"placeholder={counts['placeholder']} plural_qty={counts['plural_qty']} "
             f"other={counts['other']} total={len(issues)}"
         )
-        if not args.summary:
+        if not summary:
             for line in issues:
                 print(f"  - {line}")
 
-    print(f"checked {len(locale_dirs)} locale(s), {total_issues} issue(s)")
-    return 1 if total_issues else 0
+    print(f"classic: checked {len(locale_dirs)} locale(s), {total_issues} issue(s)")
+    return total_issues
+
+
+def run_simple(simple_res: Path, main_res: Path, summary: bool) -> int:
+    issues, checked = check_simple(simple_res, main_res)
+    print(f"simple ({SIMPLE_FILE}): checked {checked} locale(s), {len(issues)} issue(s)")
+    if not summary:
+        for line in issues:
+            print(f"  - {line}")
+    return len(issues)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--res-dir", type=Path, default=DEFAULT_RES_DIR,
+                        help="classic resource directory (default: app/src/main/res)")
+    parser.add_argument("--simple-res-dir", type=Path, default=SIMPLE_RES_DIR,
+                        help="simple UI resource directory (default: app/src/simple/res)")
+    parser.add_argument("--scope", choices=("all", "classic", "simple"), default="all",
+                        help="which resources to check (default: all)")
+    parser.add_argument("--lang", help="only check one classic locale dir, e.g. values-it")
+    parser.add_argument("--summary", action="store_true",
+                        help="print per-locale counts only, no item details")
+    args = parser.parse_args()
+
+    total = 0
+    if args.scope in ("all", "classic"):
+        total += run_classic(args.res_dir, args.lang, args.summary)
+    if args.scope in ("all", "simple"):
+        total += run_simple(args.simple_res_dir, args.res_dir, args.summary)
+    print(f"total: {total} issue(s)")
+    return 1 if total else 0
 
 
 if __name__ == "__main__":
