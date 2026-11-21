@@ -48,13 +48,17 @@ def git(*args: str) -> str:
 
 
 def changed_files(base: str) -> dict[str, str]:
-    """path -> status letter (A/M/D/T) of the working tree against base; untracked files count as added."""
+    """path -> status letter (A/M/D/T) against base, of the working tree and of the index (a staged change stays
+    visible when the working copy was restored); untracked files count as added."""
     changes: dict[str, str] = {}
-    out = git("diff", "--name-status", "--no-renames", "-z", base, "--")
-    parts = out.split("\0")
-    for i in range(0, len(parts) - 1, 2):
-        status, path = parts[i], parts[i + 1]
-        changes[path] = status[:1]
+    for cached in (False, True):
+        args = ["diff", "--name-status", "--no-renames", "-z"] + (["--cached"] if cached else []) + [base, "--"]
+        parts = git(*args).split("\0")
+        for i in range(0, len(parts) - 1, 2):
+            status, path = parts[i], parts[i + 1]
+            # an A in either comparison is only A when the path is missing from base; any other status wins
+            if changes.get(path) in (None, "A"):
+                changes[path] = status[:1]
     for path in git("ls-files", "--others", "--exclude-standard", "-z").split("\0"):
         if path:
             changes.setdefault(path, "A")  # keep a base-relative status (git rm --cached leaves a D)

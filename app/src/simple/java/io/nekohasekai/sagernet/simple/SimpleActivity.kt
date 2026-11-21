@@ -2,7 +2,7 @@ package io.nekohasekai.sagernet.simple
 
 import android.app.ActivityManager
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.StringRes
@@ -24,7 +24,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.adaptive.navigationsuite.ExperimentalMaterial3AdaptiveNavigationSuiteApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +38,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.window.core.layout.WindowWidthSizeClass
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
@@ -45,7 +48,7 @@ import io.nekohasekai.sagernet.ktx.Logs
  * the entry point of the launcher, notification, tile and shortcuts. Batch 1: the adaptive three-section frame
  * (bottom bar on narrow windows, navigation rail on medium/wide ones) and the switch to the classic interface.
  */
-class SimpleActivity : ComponentActivity() {
+class SimpleActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -82,7 +85,14 @@ enum class SimpleSection(@StringRes val label: Int, val icon: ImageVector) {
 @Composable
 fun SimpleApp(onOpenClassic: () -> Unit) {
     var section by rememberSaveable { mutableStateOf(SimpleSection.HOME) }
+    // Rail whenever the window is not narrow, by width only: the library default keeps the bottom bar on any window
+    // of compact height, i.e. on every phone in landscape (simple-ui spec: bar on narrow, side panel on medium/wide)
+    val adaptiveInfo = currentWindowAdaptiveInfo()
+    val layoutType = if (adaptiveInfo.windowPosture.isTabletop ||
+        adaptiveInfo.windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.COMPACT
+    ) NavigationSuiteType.NavigationBar else NavigationSuiteType.NavigationRail
     NavigationSuiteScaffold(
+        layoutType = layoutType,
         navigationSuiteItems = {
             SimpleSection.entries.forEach { item ->
                 item(
