@@ -11,6 +11,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleDefaults
 import io.nekohasekai.sagernet.simple.SimpleUi
+import io.nekohasekai.sagernet.simple.modes.TrafficModeApplier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -82,12 +83,6 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
 
     private val eventChannel = Channel<AddEvent>(Channel.BUFFERED)
     val events: Flow<AddEvent> = eventChannel.receiveAsFlow()
-
-    /**
-     * Turns on «Авто» as the server and the «Авто» traffic mode after the first subscription (ModesViewModel, which
-     * owns the managed entities); true when it did.
-     */
-    var setUpAuto: (suspend () -> Boolean)? = null
 
     /** One import at a time; a second request waits for the first. */
     private val imports = Mutex()
@@ -231,28 +226,26 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(busy = AddBusy.SUBSCRIPTION) }
         // The download and its finishing touches (the update interval, or removing a group that never loaded) run in
         // the import scope, not in this ViewModel's: leaving the screen must not strand a half-added subscription.
-        val (result, updateHours) = SimpleImport.scope.async {
+        val outcome = SimpleImport.scope.async {
             // «Send HWID» and the provider's interval are on before the first download (SimpleDefaults).
             SimpleDefaults.apply(getApplication())
             val subscribed = SimpleImport.subscribe(plan)
-            val hours = if (subscribed is SimpleImport.SubscribeResult.Done) {
-                SimpleImport.updateAutomatically(subscribed.gid, plan)
-            } else {
-                0
-            }
-            subscribed to hours
+            if (subscribed !is SimpleImport.SubscribeResult.Done) return@async Triple(subscribed, 0, false)
+            val hours = SimpleImport.updateAutomatically(subscribed.gid, plan)
+            // The ready settings come with the first subscription added here (simple-ui "Готовые настройки"); the
+            // flag is written only once they are in effect, so a failed setup is tried again with the next one.
+            val auto = !prefs.getBoolean(KEY_FIRST_SUBSCRIPTION, false) &&
+                runCatching { TrafficModeApplier.setUpAuto(getApplication()) }
+                    .onFailure { Logs.w("simple add: the ready settings", it) }.getOrDefault(false)
+            if (auto) prefs.edit().putBoolean(KEY_FIRST_SUBSCRIPTION, true).commit()
+            Triple(subscribed, hours, auto)
         }.await()
+        val (result, updateHours, auto) = outcome
         when (result) {
             is SimpleImport.SubscribeResult.Failed -> show(AddDialog.SubscriptionFailed(result.detail))
             is SimpleImport.SubscribeResult.Done -> {
                 val enabled = ArrayList<Enabled>()
-                // The ready settings come with the first subscription added here (simple-ui "Готовые настройки").
-                val first = !prefs.getBoolean(KEY_FIRST_SUBSCRIPTION, false)
-                val auto = first && (setUpAuto?.invoke() ?: false)
-                if (auto) {
-                    prefs.edit().putBoolean(KEY_FIRST_SUBSCRIPTION, true).apply()
-                    enabled.add(Enabled.AUTO_SERVER)
-                }
+                if (auto) enabled.add(Enabled.AUTO_SERVER)
                 if (updateHours > 0) enabled.add(Enabled.AUTO_UPDATE)
                 if (auto) enabled.add(Enabled.AUTO_MODE)
                 eventChannel.send(AddEvent.Added)

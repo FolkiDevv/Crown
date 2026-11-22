@@ -133,7 +133,6 @@ class SimpleActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        add.setUpAuto = { modes.setUpAuto() }
         // Subscription defaults of the simple UI (HWID, the provider's interval), once per install.
         lifecycleScope.launch(Dispatchers.IO) { SimpleDefaults.apply(applicationContext) }
         setContent {

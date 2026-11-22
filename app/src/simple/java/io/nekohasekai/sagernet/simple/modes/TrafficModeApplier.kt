@@ -70,6 +70,24 @@ object TrafficModeApplier {
         }
     }
 
+    /**
+     * The ready settings of the first subscription (simple-ui "Готовые настройки после импорта подписки"): the
+     * managed «Авто» selector becomes the server and «Авто» the traffic mode. True when both were set. Independent of
+     * any screen, so the add flow runs it together with the download it follows.
+     */
+    suspend fun setUpAuto(context: Context): Boolean = withContext(Dispatchers.IO) {
+        val auto = ensure(context).ids.auto
+        if (auto <= 0L) return@withContext false
+        val before = DataStore.selectedProxy
+        DataStore.selectedProxy = auto
+        val result = select(context, TrafficMode.AUTO)
+        // The applier compares with the server already switched above; a running service follows here.
+        if (before != auto && result.change == ServiceChange.NONE && DataStore.serviceState.canStop) {
+            SagerNet.reloadService()
+        }
+        true
+    }
+
     /** A counter of service starts (SimpleHooks), to tell whether the service started during an app list edit. */
     fun serviceStarts(): Long = DataStore.configurationStore.getLong(SimpleHooks.KEY_SERVICE_STARTS) ?: 0L
 
