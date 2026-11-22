@@ -94,6 +94,33 @@ class HomeStatusTest {
     }
 
     @Test
+    fun hiddenServerProblemStaysHiddenWhileFailing() {
+        assertNull(
+            HomeStatus.problem(
+                null, connected = true, urlTestFailures = 4, autoSelectorExhausted = true, serverProblemHidden = true,
+            )
+        )
+        // hiding the server problem does not hide a loss once stopped
+        val lost = HomeProblem.ConnectionLost(null)
+        assertEquals(
+            lost,
+            HomeStatus.problem(
+                lost, connected = false, urlTestFailures = 0, autoSelectorExhausted = false, serverProblemHidden = true,
+            ),
+        )
+    }
+
+    @Test
+    fun serviceDeathIsALossOnlyWhenItRanAndNoStopWasAsked() {
+        assertTrue(HomeStatus.isLossOnServiceDeath(State.Connected, userStopping = false))
+        assertTrue(HomeStatus.isLossOnServiceDeath(State.Connecting, userStopping = false))
+        assertFalse(HomeStatus.isLossOnServiceDeath(State.Connected, userStopping = true))
+        assertFalse(HomeStatus.isLossOnServiceDeath(State.Stopped, userStopping = false))
+        // the second of onServiceDisconnected/onBinderDied finds the state already Idle
+        assertFalse(HomeStatus.isLossOnServiceDeath(State.Idle, userStopping = false))
+    }
+
+    @Test
     fun durationFormat() {
         assertEquals("0:00", HomeStatus.formatDuration(0))
         assertEquals("0:00", HomeStatus.formatDuration(-5))

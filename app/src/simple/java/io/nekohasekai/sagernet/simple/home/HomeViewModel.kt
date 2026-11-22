@@ -83,6 +83,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     private var userStopping = false
     private var lost: HomeProblem.ConnectionLost? = null
     private var urlTestFailures = 0
+
+    /** The user hid «Сервер не отвечает»; it stays hidden until a check succeeds or the connection changes. */
+    private var serverProblemHidden = false
     private var autoStatus = AutoSelectorStatus.IDLE
     private var foreground = false
     private var checkJob: Job? = null
@@ -164,7 +167,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             lost = null
             viewModelScope.launch(Dispatchers.IO) { clearServiceError() }
         }
-        if (mutableState.value.problem == HomeProblem.ServerNotResponding) urlTestFailures = 0
+        // Stays hidden while the server keeps failing; the next successful check or connection shows it again.
+        if (mutableState.value.problem == HomeProblem.ServerNotResponding) serverProblemHidden = true
         publish()
     }
 
@@ -195,14 +199,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         onState(state, null, restartPending = false)
     }
 
-    override fun onServiceDisconnected() = onState(BaseService.State.Idle, null)
+    /**
+     * The service process went away; the framework calls this before (or instead of) [onBinderDied], so both note
+     * the loss from the state before either. A service Android restarts reports Connecting, which clears it again.
+     */
+    override fun onServiceDisconnected() {
+        noteServiceDeath()
+        onState(BaseService.State.Idle, null)
+    }
 
     override fun onBinderDied() {
-        val wasActive = serviceState.started && !userStopping
-        if (wasActive) lost = HomeProblem.ConnectionLost(null)
+        noteServiceDeath()
         onState(BaseService.State.Idle, null)
         connection.disconnect(getApplication())
         connection.connect(getApplication(), this)
+    }
+
+    private fun noteServiceDeath() {
+        if (HomeStatus.isLossOnServiceDeath(serviceState, userStopping)) lost = HomeProblem.ConnectionLost(null)
     }
 
     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
@@ -232,10 +246,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         val connected = state == BaseService.State.Connected
         if (connected && !wasConnected) {
             urlTestFailures = 0
+            serverProblemHidden = false
             if (foreground) restartChecks(FIRST_CHECK_MS)
         } else if (!connected && wasConnected) {
             checkJob?.cancel()
             urlTestFailures = 0
+            serverProblemHidden = false
             liveLatency = null
         }
         mutableState.update {
@@ -288,6 +304,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     result == null -> Unit
                     result > 0 -> {
                         urlTestFailures = 0
+                        serverProblemHidden = false
                         liveLatency = result
                     }
 
@@ -376,7 +393,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         }
         val exhausted = running != null && running.exhaustedSinceMs > 0L
         mutableState.update {
-            it.copy(server = server, problem = HomeStatus.problem(lost, connected, urlTestFailures, exhausted))
+            it.copy(
+                server = server,
+                problem = HomeStatus.problem(lost, connected, urlTestFailures, exhausted, serverProblemHidden),
+            )
         }
     }
 

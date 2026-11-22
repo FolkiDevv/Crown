@@ -81,17 +81,28 @@ object HomeStatus {
      * [connected]: the service is Connected; the server checks only count then.
      * [urlTestFailures]: failed URL tests of the running connection in a row.
      * [autoSelectorExhausted]: the running auto-selector reports that none of its servers works.
+     * [serverProblemHidden]: the user hid «Сервер не отвечает» and nothing changed since.
      */
     fun problem(
         lost: HomeProblem.ConnectionLost?,
         connected: Boolean,
         urlTestFailures: Int,
         autoSelectorExhausted: Boolean,
+        serverProblemHidden: Boolean = false,
     ): HomeProblem? = when {
-        connected && (urlTestFailures >= FAILURES_FOR_BANNER || autoSelectorExhausted) -> HomeProblem.ServerNotResponding
+        connected && !serverProblemHidden && (urlTestFailures >= FAILURES_FOR_BANNER || autoSelectorExhausted) ->
+            HomeProblem.ServerNotResponding
+
         connected -> null
         else -> lost
     }
+
+    /**
+     * Whether the death of the service process is a loss the banner reports: it ran ([previous] was a started state)
+     * and no stop was asked for here.
+     */
+    fun isLossOnServiceDeath(previous: BaseService.State, userStopping: Boolean): Boolean =
+        previous.started && !userStopping
 
     /** Whether a Stopped carrying [msg] is a loss the banner reports: not asked for here, and with a reason. */
     fun isLoss(msg: String?, userStopping: Boolean): Boolean = !userStopping && !msg.isNullOrBlank()

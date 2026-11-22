@@ -6,6 +6,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -81,31 +83,71 @@ fun HomeScreen(
     var repairDialog by rememberSaveable { mutableStateOf(false) }
     var addDialog by rememberSaveable { mutableStateOf(false) }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        val content = Modifier.widthIn(max = 560.dp).fillMaxWidth()
+    val banner: @Composable (Modifier) -> Unit = { bannerModifier ->
         state.problem?.let { problem ->
-            ProblemBanner(problem, onRepair = { repairDialog = true }, onDismiss = onDismissProblem, modifier = content)
+            ProblemBanner(problem, onRepair = { repairDialog = true }, onDismiss = onDismissProblem, modifier = bannerModifier)
             Spacer(Modifier.height(16.dp))
         }
-        when (state.hasServers) {
-            null -> Unit
-            false -> NoServers(onAdd = { addDialog = true }, modifier = content)
-            true -> {
-                Spacer(Modifier.height(16.dp))
-                ConnectButton(state.phase, onToggle)
-                Spacer(Modifier.height(20.dp))
-                Status(state)
-                Spacer(Modifier.height(28.dp))
-                ServerCardView(state, actions.openServers, content)
-                Spacer(Modifier.height(12.dp))
-                ModeCard(onModeStub, content)
-                Spacer(Modifier.height(16.dp))
+    }
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        // A wide but low window (a phone in landscape): the button and its status beside the banner and the cards,
+        // so whether the VPN is on is visible without scrolling.
+        val sideBySide = state.hasServers == true && maxWidth > maxHeight && maxWidth >= 560.dp
+        if (sideBySide) {
+            Row(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    ConnectButton(state.phase, onToggle)
+                    Spacer(Modifier.height(16.dp))
+                    Status(state)
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    val content = Modifier.fillMaxWidth()
+                    banner(content)
+                    ServerCardView(state, actions.openServers, content)
+                    Spacer(Modifier.height(12.dp))
+                    ModeCard(onModeStub, content)
+                }
+            }
+        } else {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                val content = Modifier.widthIn(max = 560.dp).fillMaxWidth()
+                banner(content)
+                when (state.hasServers) {
+                    null -> Unit
+                    false -> NoServers(onAdd = { addDialog = true }, modifier = content)
+                    true -> {
+                        Spacer(Modifier.height(16.dp))
+                        ConnectButton(state.phase, onToggle)
+                        Spacer(Modifier.height(20.dp))
+                        Status(state)
+                        Spacer(Modifier.height(28.dp))
+                        ServerCardView(state, actions.openServers, content)
+                        Spacer(Modifier.height(12.dp))
+                        ModeCard(onModeStub, content)
+                        Spacer(Modifier.height(16.dp))
+                    }
+                }
             }
         }
     }
