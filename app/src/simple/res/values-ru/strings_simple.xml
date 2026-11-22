@@ -73,6 +73,7 @@
     <string name="simple_mode_fallback_auto">Включён режим «Авто»: не выбрано ни одного приложения</string>
     <string name="simple_mode_apps_none_chosen">Выберите хотя бы одно приложение, чтобы включить этот режим.</string>
     <string name="simple_mode_apply_failed">Не удалось применить режим трафика.</string>
+    <string name="simple_settings_mode_custom">Сейчас действуют свои правила из классического интерфейса. Выберите режим, чтобы вернуться к нему.</string>
 
     <!-- Режимы трафика: карточка режима на главной -->
     <string name="simple_mode_card_auto_smart">Авто · умный режим</string>

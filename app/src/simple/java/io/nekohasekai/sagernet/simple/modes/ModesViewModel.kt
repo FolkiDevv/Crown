@@ -41,6 +41,8 @@ data class ModesUiState(
     val fallback: Boolean = false,
     /** A mode is being applied. */
     val busy: Boolean = false,
+    /** Counts finished applications, so the home screen reads the server again after one (it may have changed). */
+    val applied: Int = 0,
 )
 
 /**
@@ -74,6 +76,9 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
     /** An application is running; the screen disables the choices meanwhile. */
     @Volatile
     private var busy = false
+
+    @Volatile
+    private var applied = 0
 
     init {
         GroupRepo.addListener(this)
@@ -134,11 +139,18 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
         }
     }
 
-    /** Opens [list] in AppManagerActivity: the per-app keys are set to it first, as that screen edits them. */
+    /**
+     * Opens [list] in AppManagerActivity: the per-app keys are set to it first, as that screen edits them. The keys in
+     * effect before are kept and put back when it closes, so the application then compares against the scope the
+     * service really runs with (otherwise an added bypass app looks like no change and the TUN keeps the old list).
+     */
     fun edit(list: AppList, openAppList: (AppList) -> Unit) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val apps = if (list == AppList.SELECTED) TrafficModes.selectedApps() else TrafficModes.bypassApps()
+                saved[KEY_PRE_PROXY_APPS] = DataStore.proxyApps
+                saved[KEY_PRE_BYPASS] = DataStore.bypass
+                saved[KEY_PRE_INDIVIDUAL] = DataStore.individual
                 DataStore.proxyApps = true
                 DataStore.bypass = list == AppList.BYPASS
                 DataStore.individual = apps.joinToString("\n")
@@ -157,7 +169,9 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
         viewModelScope.launch {
             val own = getApplication<Application>().packageName
             val apps = withContext(Dispatchers.IO) {
-                TrafficModePlan.parseList(DataStore.individual) - own
+                val edited = TrafficModePlan.parseList(DataStore.individual) - own
+                restorePreEditScope()
+                edited
             }
             applying {
                 withContext(Dispatchers.IO) {
@@ -175,6 +189,17 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
                 }
             }
         }
+    }
+
+    /** The per-app keys [edit] found, back in DataStore; nothing when they were not recorded. */
+    private fun restorePreEditScope() {
+        val proxyApps = saved.get<Boolean>(KEY_PRE_PROXY_APPS) ?: return
+        DataStore.proxyApps = proxyApps
+        DataStore.bypass = saved.get<Boolean>(KEY_PRE_BYPASS) ?: true
+        DataStore.individual = saved.get<String>(KEY_PRE_INDIVIDUAL).orEmpty()
+        saved.remove<Boolean>(KEY_PRE_PROXY_APPS)
+        saved.remove<Boolean>(KEY_PRE_BYPASS)
+        saved.remove<String>(KEY_PRE_INDIVIDUAL)
     }
 
     fun dismissFallback() {
@@ -224,6 +249,7 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
                 message(R.string.simple_mode_apply_failed)
             } finally {
                 busy = false
+                applied++
                 publish()
             }
         }
@@ -251,11 +277,14 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
                 null
             }
         } ?: return
-        mutableState.value = next.copy(busy = busy)
+        mutableState.value = next.copy(busy = busy, applied = applied)
     }
 
     private companion object {
         const val KEY_EDITING = "modes_editing"
         const val KEY_CHOOSING = "modes_choosing_apps"
+        const val KEY_PRE_PROXY_APPS = "modes_pre_proxy_apps"
+        const val KEY_PRE_BYPASS = "modes_pre_bypass"
+        const val KEY_PRE_INDIVIDUAL = "modes_pre_individual"
     }
 }

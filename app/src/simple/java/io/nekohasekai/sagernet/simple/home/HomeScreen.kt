@@ -305,7 +305,9 @@ private fun elapsedSince(since: Long): Long {
 
 @Composable
 private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Modifier) {
-    val server = state.server
+    val server = state.server?.let { card ->
+        card.localizedName?.let { card.copy(name = stringResource(it)) } ?: card
+    }
     val headline: String
     val supporting: String?
     when {

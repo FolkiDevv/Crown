@@ -279,6 +279,8 @@ private fun HomeSection(home: HomeViewModel, modes: ModesViewModel, actions: Hom
     }
     // A mode applied while the service starts or reloads: read what is in effect once the state settles.
     LaunchedEffect(state.phase) { modes.refresh() }
+    // A mode applied (also from Settings while the VPN is off) may have switched the managed auto-selector.
+    LaunchedEffect(modesState.applied) { if (modesState.applied > 0) home.refreshServer() }
     SectionScaffold(SimpleSection.HOME, snackbar) { modifier ->
         HomeScreen(
             state = state,

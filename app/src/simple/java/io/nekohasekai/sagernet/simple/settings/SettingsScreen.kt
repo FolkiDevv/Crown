@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.simple.modes.AppList
+import io.nekohasekai.sagernet.simple.modes.ModeCard
 import io.nekohasekai.sagernet.simple.modes.ModesUiState
 import io.nekohasekai.sagernet.simple.modes.TrafficMode
 
@@ -54,10 +55,22 @@ fun SettingsScreen(state: ModesUiState, actions: SettingsActions, modifier: Modi
         if (state.fallback) {
             item { FallbackNotice(actions.dismissFallback) }
         }
+        val custom = state.card == ModeCard.CUSTOM
+        if (custom) {
+            // A routing profile picked in the classic interface is in effect, so no mode shows as chosen.
+            item {
+                Text(
+                    stringResource(R.string.simple_settings_mode_custom),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                )
+            }
+        }
         item {
             Column(Modifier.selectableGroup()) {
                 TrafficMode.entries.forEach { mode ->
-                    ModeOption(mode, selected = state.mode == mode, enabled = !state.busy) { actions.selectMode(mode) }
+                    ModeOption(mode, selected = !custom && state.mode == mode, enabled = !state.busy) { actions.selectMode(mode) }
                 }
             }
         }

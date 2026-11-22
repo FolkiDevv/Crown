@@ -6,6 +6,7 @@ import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.SpeedDisplayData
@@ -22,6 +23,7 @@ import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
+import io.nekohasekai.sagernet.simple.modes.Managed
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +48,11 @@ data class ServerCard(
     val autoSelected: String = "",
     /** The latest measured delay in ms, null when unknown. */
     val latencyMs: Int? = null,
+    /**
+     * For a managed auto-selector of the traffic modes, its name in the current language (the stored name is in the
+     * language it was created in); null otherwise.
+     */
+    @StringRes val localizedName: Int? = null,
 )
 
 data class HomeUiState(
@@ -339,11 +346,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
 
     private var selectedProfile: ProxyEntity? = null
 
+    /** The managed auto-selectors of the traffic modes, read with the profiles. */
+    private var managed: Managed? = null
+
+    /** Reads the selected server again (a traffic mode may have switched the managed auto-selector). */
+    fun refreshServer() = refreshProfiles()
+
     private fun refreshProfiles() {
         profilesJob?.cancel()
         profilesJob = viewModelScope.launch {
             val (profile, fallback, hasServers) = withContext(Dispatchers.IO) {
                 try {
+                    managed = TrafficModes.managedIds()
                     val selected = ProfileManager.getProfile(DataStore.selectedProxy)
                     val first = if (selected == null) firstProfile() else null
                     // The managed auto-selectors of the traffic modes are no server of their own.
@@ -393,6 +407,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 auto = auto,
                 autoSelected = running?.selectedName.orEmpty(),
                 latencyMs = if (connected) liveLatency else it.latency.takeIf { ms -> ms > 0 && !auto },
+                localizedName = when (it.id) {
+                    managed?.auto -> R.string.simple_selector_auto_name
+                    managed?.autoWhitelist -> R.string.simple_selector_auto_whitelist_name
+                    else -> null
+                },
             )
         }
         val exhausted = running != null && running.exhaustedSinceMs > 0L

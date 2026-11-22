@@ -82,6 +82,7 @@
     <string name="simple_mode_fallback_auto">Switched to Auto: no apps are selected</string>
     <string name="simple_mode_apps_none_chosen">Choose at least one app to turn this mode on.</string>
     <string name="simple_mode_apply_failed">Could not apply the traffic mode.</string>
+    <string name="simple_settings_mode_custom">Custom routing from the classic interface is in effect. Choose a mode to switch back.</string>
 
     <!-- Traffic modes: the mode card on the home screen -->
     <string name="simple_mode_card_auto_smart">Auto · smart mode</string>
