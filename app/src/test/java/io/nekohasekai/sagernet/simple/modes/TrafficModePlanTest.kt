@@ -157,6 +157,22 @@ class TrafficModePlanTest {
     }
 
     @Test
+    fun aStartThatMayHaveReadTheStagedKeysIsSeen() {
+        // Nothing started while the list was open: the restored keys are what runs.
+        assertFalse(TrafficModePlan.stagedScopeMayRun(startsAtEdit = 5, startsNow = 5, startInProgress = false))
+        // A completed start (fresh: counted at Connected; restart in place: counted when the old core stopped).
+        assertTrue(TrafficModePlan.stagedScopeMayRun(startsAtEdit = 5, startsNow = 6, startInProgress = false))
+        // The list closes after a fresh start read its settings but before it counted itself at Connected.
+        assertTrue(TrafficModePlan.stagedScopeMayRun(startsAtEdit = 5, startsNow = 5, startInProgress = true))
+        // The counter recorded at edit time was lost (process death): assume the worst.
+        assertTrue(TrafficModePlan.stagedScopeMayRun(startsAtEdit = null, startsNow = 5, startInProgress = false))
+        // Either way the application then rebuilds the TUN even though the restored keys match.
+        val scope = PerAppScope(false, true, emptyList())
+        val mayRun = TrafficModePlan.stagedScopeMayRun(startsAtEdit = 5, startsNow = 5, startInProgress = true)
+        assertEquals(ServiceChange.RESTART, TrafficModePlan.change(applied(10, scope), applied(10, scope), stagedScopeMayRun = mayRun))
+    }
+
+    @Test
     fun scopesThatTheTunnelSeesAlikeAreNoChange() {
         // Per-app off: whatever list and flag are stored, the TUN takes every app.
         val offA = PerAppScope(false, false, listOf(browser))

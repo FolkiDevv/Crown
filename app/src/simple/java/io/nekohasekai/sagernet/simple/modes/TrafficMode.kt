@@ -128,6 +128,17 @@ object TrafficModePlan {
         else -> ServiceChange.NONE
     }
 
+    /**
+     * Whether a core may have built its TUN from the per-app keys an app list edit staged (ModesViewModel.edit):
+     * - [startsAtEdit] / [startsNow]: SimpleHooks' start counter when the list opened and when it closed (null when the
+     *   value was lost). A restart in place is counted as soon as the old core stops, before the new one reads its
+     *   settings; a completed fresh start is counted at Connected.
+     * - [startInProgress]: the service is «Подключение…» right now. A fresh start reads its settings while connecting
+     *   and counts itself only at Connected, so a list closed in between is caught here.
+     */
+    fun stagedScopeMayRun(startsAtEdit: Long?, startsNow: Long, startInProgress: Boolean): Boolean =
+        startsAtEdit == null || startsNow != startsAtEdit || startInProgress
+
     /** The upstream keys a mode sets: `currentRouteId`, the per-app scope and `selectedProxy`. */
     data class Applied(val routeId: Long, val scope: PerAppScope, val server: Long)
 

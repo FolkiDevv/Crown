@@ -175,9 +175,11 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
             val apps = withContext(Dispatchers.IO) {
                 val edited = TrafficModePlan.parseList(DataStore.individual) - own
                 val startsBefore = saved.get<Long>(KEY_PRE_STARTS)
-                // A fresh start still connecting may have read the staged keys before it counts itself.
-                stagedScopeMayRun = startsBefore == null || TrafficModeApplier.serviceStarts() != startsBefore ||
-                    DataStore.serviceState == BaseService.State.Connecting
+                stagedScopeMayRun = TrafficModePlan.stagedScopeMayRun(
+                    startsAtEdit = startsBefore,
+                    startsNow = TrafficModeApplier.serviceStarts(),
+                    startInProgress = DataStore.serviceState == BaseService.State.Connecting,
+                )
                 saved.remove<Long>(KEY_PRE_STARTS)
                 restorePreEditScope()
                 edited
