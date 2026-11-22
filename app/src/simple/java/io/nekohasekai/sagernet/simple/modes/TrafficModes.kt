@@ -109,15 +109,22 @@ object TrafficModes {
         setMode(mode)
     }
 
+    /** What [ensureManaged] found or made: the ids, and the routing profiles whose content it rewrote. */
+    data class Ensured(val ids: Managed, val changedRoutes: Set<Long>)
+
     /**
      * Creates the managed entities that are missing (or were deleted in the classic interface) and brings the
-     * generated ones up to date with [config]: the whitelist route's DNS, the auto-selectors' tiers and their groups.
+     * generated ones up to date with [config]: the whitelist route's rules and DNS, the auto-selectors' tiers and their
+     * groups. A running core keeps a rewritten route until it reloads; TrafficModeApplier takes care of that.
      */
-    suspend fun ensureManaged(context: Context, config: SimpleConfig = SimpleConfigRepo.current()): Managed {
+    suspend fun ensureManaged(context: Context, config: SimpleConfig = SimpleConfigRepo.current()): Ensured {
         val smart = guarded(0L) { ensureSmartRoute() }
-        val whitelist = guarded(0L) { ensureWhitelistRoute(context, config) }
+        val (whitelist, whitelistChanged) = guarded(0L to false) { ensureWhitelistRoute(context, config) }
         val (auto, autoWhitelist) = guarded(0L to 0L) { ensureSelectors(context, config) }
-        return Managed(smart, whitelist, auto, autoWhitelist)
+        return Ensured(
+            Managed(smart, whitelist, auto, autoWhitelist),
+            if (whitelistChanged && whitelist > 0L) setOf(whitelist) else emptySet(),
+        )
     }
 
     // ------------------------------------------------------------------------------------------------ routes
@@ -144,24 +151,33 @@ object TrafficModes {
     /**
      * «Белые списки»: DNS hijacked into the DNS module, private networks direct, everything else through the proxy;
      * its own DNS keeps remote lookups in the tunnel and resolves the server addresses with the whitelisted DNS servers
-     * of the configuration. The user's global DNS settings are left alone.
+     * of the configuration. The user's global DNS settings are left alone. Any edit made in the classic interface (a
+     * rule field such as `invert`, the default outbound, the DNS) is put back. Returns the id and whether the stored
+     * content changed.
      */
-    private fun ensureWhitelistRoute(context: Context, config: SimpleConfig): Long {
+    private fun ensureWhitelistRoute(context: Context, config: SimpleConfig): Pair<Long, Boolean> {
         val stored = store.getLong(KEY_MANAGED_WHITELIST_ROUTE) ?: 0L
         val existing = if (stored > 0L) RouteManager.get(stored)?.takeIf { !it.is_raw } else null
         val profile = existing ?: RouteProfile().apply { name = context.getString(R.string.simple_route_whitelist_name) }
-        val dns = RouteDns(remoteDns = DataStore.remoteDns, directDns = config.whitelistDns.joinToString(", "))
-        val rules = whitelistRules()
-        val upToDate = existing != null && existing.custom_dns && existing.dns == dns &&
-            existing.default_outbound_id == OutboundIds.PROXY && sameRules(existing.rules, rules)
-        if (upToDate) return existing!!.id
-        profile.default_outbound_id = OutboundIds.PROXY
+        val desired = RouteProfile().apply {
+            default_outbound_id = OutboundIds.PROXY
+            custom_dns = true
+            dns = RouteDns(remoteDns = DataStore.remoteDns, directDns = config.whitelistDns.joinToString(", "))
+            rules = whitelistRules()
+        }
+        // The fingerprint of a remote route update covers every persisted rule column, `invert` included.
+        val upToDate = existing != null && existing.custom_dns && existing.dns == desired.dns &&
+            RemoteRouteUpdater.routeFingerprint(existing) == RemoteRouteUpdater.routeFingerprint(desired)
+        if (upToDate) return existing!!.id to false
+        profile.default_outbound_id = desired.default_outbound_id
+        profile.is_raw = false
+        profile.raw_route = ""
         profile.custom_dns = true
-        profile.dns = dns
-        profile.rules = rules
+        profile.dns = desired.dns
+        profile.rules = desired.rules
         val id = RouteManager.save(profile)
         if (id != stored) store.putLong(KEY_MANAGED_WHITELIST_ROUTE, id)
-        return id
+        return id to true
     }
 
     private fun whitelistRules(): MutableList<RouteRule> = mutableListOf(
@@ -177,17 +193,6 @@ object TrafficModes {
             outbound_id = OutboundIds.DIRECT
         },
     )
-
-    private fun sameRules(a: List<RouteRule>, b: List<RouteRule>): Boolean =
-        a.size == b.size && a.zip(b).all { (x, y) ->
-            x.action == y.action && x.protocol == y.protocol && x.ip_is_private == y.ip_is_private &&
-                x.outbound_id == y.outbound_id && !x.disabled && x.isOnly(y)
-        }
-
-    /** Nothing else set on a rule the user may have edited in the classic interface. */
-    private fun RouteRule.isOnly(expected: RouteRule): Boolean =
-        domain.isEmpty() && domain_suffix.isEmpty() && domain_keyword.isEmpty() && domain_regex.isEmpty() &&
-            ip_cidr.isEmpty() && rule_set.isEmpty() && name == expected.name
 
     // ------------------------------------------------------------------------------------------------ auto-selectors
 

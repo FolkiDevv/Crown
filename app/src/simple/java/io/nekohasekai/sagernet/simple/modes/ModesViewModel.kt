@@ -95,7 +95,7 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
                 if (applyNow) {
                     TrafficModeApplier.apply(getApplication())
                 } else {
-                    withContext(Dispatchers.IO) { TrafficModes.ensureManaged(getApplication()) }
+                    TrafficModeApplier.ensure(getApplication())
                 }
             }
         }
@@ -111,7 +111,7 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
                 try {
                     val ids = TrafficModes.managedIds()
                     if (TrafficModes.isModeStored() && listOf(ids.smartRoute, ids.whitelistRoute, ids.auto, ids.autoWhitelist).any { it <= 0L }) {
-                        work.withLock { TrafficModes.ensureManaged(getApplication()) }
+                        work.withLock { TrafficModeApplier.ensure(getApplication()) }
                     }
                 } catch (e: Exception) {
                     Logs.w(e)
@@ -151,6 +151,7 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
                 saved[KEY_PRE_PROXY_APPS] = DataStore.proxyApps
                 saved[KEY_PRE_BYPASS] = DataStore.bypass
                 saved[KEY_PRE_INDIVIDUAL] = DataStore.individual
+                saved[KEY_PRE_STARTS] = TrafficModeApplier.serviceStarts()
                 DataStore.proxyApps = true
                 DataStore.bypass = list == AppList.BYPASS
                 DataStore.individual = apps.joinToString("\n")
@@ -168,8 +169,13 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
         choosingAppsMode = false
         viewModelScope.launch {
             val own = getApplication<Application>().packageName
+            // A core started meanwhile (a reconnect, a switch from the notification) built its TUN from the staged keys.
+            var stagedScopeMayRun = false
             val apps = withContext(Dispatchers.IO) {
                 val edited = TrafficModePlan.parseList(DataStore.individual) - own
+                val startsBefore = saved.get<Long>(KEY_PRE_STARTS)
+                stagedScopeMayRun = startsBefore == null || TrafficModeApplier.serviceStarts() != startsBefore
+                saved.remove<Long>(KEY_PRE_STARTS)
                 restorePreEditScope()
                 edited
             }
@@ -178,14 +184,14 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
                     if (list == AppList.SELECTED) TrafficModes.setSelectedApps(apps) else TrafficModes.setBypassApps(apps)
                 }
                 when {
-                    choosing && apps.isNotEmpty() -> TrafficModeApplier.select(getApplication(), TrafficMode.APPS)
+                    choosing && apps.isNotEmpty() -> TrafficModeApplier.select(getApplication(), TrafficMode.APPS, stagedScopeMayRun)
                     choosing -> {
                         // Nothing chosen: the mode stays as it was, and the per-app keys go back to it.
                         mutableMessages.tryEmit(R.string.simple_mode_apps_none_chosen)
-                        TrafficModeApplier.apply(getApplication())
+                        TrafficModeApplier.apply(getApplication(), stagedScopeMayRun)
                     }
 
-                    else -> TrafficModeApplier.apply(getApplication())
+                    else -> TrafficModeApplier.apply(getApplication(), stagedScopeMayRun)
                 }
             }
         }
@@ -225,7 +231,7 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
             work.withLock {
                 withContext(Dispatchers.IO) {
                     try {
-                        TrafficModes.ensureManaged(getApplication())
+                        TrafficModeApplier.ensure(getApplication())
                     } catch (e: Exception) {
                         Logs.w(e)
                     }
@@ -286,5 +292,6 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
         const val KEY_PRE_PROXY_APPS = "modes_pre_proxy_apps"
         const val KEY_PRE_BYPASS = "modes_pre_bypass"
         const val KEY_PRE_INDIVIDUAL = "modes_pre_individual"
+        const val KEY_PRE_STARTS = "modes_pre_service_starts"
     }
 }

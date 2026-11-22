@@ -35,8 +35,12 @@ data class SimpleConfig(
         /** Longer entries are not a plausible configuration either. */
         const val MAX_ITEM_LENGTH = 256
 
-        /** Parses and validates [text]; throws [InvalidConfigException] when it is damaged or incomplete. */
-        fun parse(text: String): SimpleConfig {
+        /**
+         * Parses and validates [text]; throws [InvalidConfigException] when it is damaged or incomplete. Each
+         * `whitelistDns` entry must pass the syntax check [isDnsServer] and [dnsAccepted] — on the device the route DNS
+         * parser itself (DnsServers.parseDnsAddress), which needs Android resources for its messages.
+         */
+        fun parse(text: String, dnsAccepted: (String) -> Boolean = { true }): SimpleConfig {
             val root = try {
                 JSONTokener(text).nextValue()
             } catch (e: JSONException) {
@@ -49,15 +53,15 @@ data class SimpleConfig(
                 version = version,
                 probesAllowed = list(probes, "probes.allowed", "allowed", ::isProbeUrl),
                 probesBlocked = list(probes, "probes.blocked", "blocked", ::isProbeUrl),
-                whitelistDns = list(root, "whitelistDns", "whitelistDns", ::isDnsServer),
+                whitelistDns = list(root, "whitelistDns", "whitelistDns") { isDnsServer(it) && dnsAccepted(it) },
                 wlKeywords = list(root, "wlKeywords", "wlKeywords") { it.isNotBlank() },
                 timeHosts = list(root, "timeHosts", "timeHosts", ::isHostName),
             )
         }
 
         /** [parse], or null when the text is refused. */
-        fun parseOrNull(text: String): SimpleConfig? = try {
-            parse(text)
+        fun parseOrNull(text: String, dnsAccepted: (String) -> Boolean = { true }): SimpleConfig? = try {
+            parse(text, dnsAccepted)
         } catch (_: InvalidConfigException) {
             null
         }
@@ -98,8 +102,55 @@ data class SimpleConfig(
 
         internal fun isHostName(value: String): Boolean = HOST.matches(value)
 
-        /** A plain IP address, a host name or `scheme://address` — one server per entry (the list joins them). */
-        internal fun isDnsServer(value: String): Boolean =
-            value.none { it.isWhitespace() || it == ',' || it == ';' } && value.any { it.isLetterOrDigit() }
+        private val PLAIN_DNS_SCHEMES = setOf("udp", "tcp", "tls", "quic")
+        private val PATH_DNS_SCHEMES = setOf("https", "h3")
+        private val IPV4 = Regex("^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$")
+        private val IPV6 = Regex("^[0-9A-Fa-f:.]+$")
+        private val PORT = Regex("^[1-9]\\d{0,4}$")
+
+        /**
+         * One network DNS server in the syntax of the route DNS settings (DnsServers.parseDnsAddress): an IP address or
+         * host name, or `udp|tcp|tls|quic://host[:port]`, `https|h3://host[:port][/path]`. `local` and `dhcp://` are
+         * no whitelisted server, and a list separator would make one entry several servers.
+         */
+        internal fun isDnsServer(value: String): Boolean {
+            if (value.any { it.isWhitespace() || it == ',' || it == ';' }) return false
+            val schemeEnd = value.indexOf("://")
+            val scheme = if (schemeEnd < 0) "udp" else value.substring(0, schemeEnd).lowercase()
+            var rest = if (schemeEnd < 0) value else value.substring(schemeEnd + 3)
+            if (scheme !in PLAIN_DNS_SCHEMES && scheme !in PATH_DNS_SCHEMES) return false
+            val slash = rest.indexOf('/')
+            if (slash >= 0) {
+                if (scheme !in PATH_DNS_SCHEMES) return false
+                rest = rest.substring(0, slash)
+            }
+            var host = rest
+            var port: String? = null
+            when {
+                rest.startsWith('[') -> {
+                    val close = rest.indexOf(']')
+                    if (close < 0) return false
+                    host = rest.substring(1, close)
+                    val tail = rest.substring(close + 1)
+                    if (tail.isNotEmpty()) {
+                        if (!tail.startsWith(':')) return false
+                        port = tail.substring(1)
+                    }
+                    if (!host.contains(':') || !IPV6.matches(host)) return false
+                }
+
+                rest.count { it == ':' } > 1 -> return IPV6.matches(rest)
+                else -> {
+                    val colon = rest.indexOf(':')
+                    if (colon >= 0) {
+                        host = rest.substring(0, colon)
+                        port = rest.substring(colon + 1)
+                    }
+                    val ipLike = host.isNotEmpty() && host.all { it.isDigit() || it == '.' }
+                    if (if (ipLike) !IPV4.matches(host) else !isHostName(host)) return false
+                }
+            }
+            return port == null || (PORT.matches(port) && port.toInt() in 1..65535)
+        }
     }
 }

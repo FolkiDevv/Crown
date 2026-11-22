@@ -5,6 +5,7 @@ import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.SimpleHooks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -33,25 +34,44 @@ object TrafficModeApplier {
     )
 
     /** The user chose [mode]: it is stored (a new mode revision, design.md D6) and applied. */
-    suspend fun select(context: Context, mode: TrafficMode): Result = withContext(Dispatchers.IO) {
-        lock.withLock {
-            TrafficModes.setFallbackNotice(false)
-            TrafficModes.setMode(mode)
-            TrafficModes.bumpModeRevision()
-            applyLocked(context)
+    suspend fun select(context: Context, mode: TrafficMode, stagedScopeMayRun: Boolean = false): Result =
+        withContext(Dispatchers.IO) {
+            lock.withLock {
+                TrafficModes.setFallbackNotice(false)
+                TrafficModes.setMode(mode)
+                TrafficModes.bumpModeRevision()
+                applyLocked(context, stagedScopeMayRun)
+            }
         }
-    }
 
     /**
      * Applies the stored mode again (after a list changed, or on the first start of the simple UI, which takes the
      * classic per-app list over first, see [TrafficModes.seedFromClassic]).
      */
-    suspend fun apply(context: Context): Result = withContext(Dispatchers.IO) {
+    suspend fun apply(context: Context, stagedScopeMayRun: Boolean = false): Result = withContext(Dispatchers.IO) {
         lock.withLock {
             TrafficModes.seedFromClassic()
-            applyLocked(context)
+            applyLocked(context, stagedScopeMayRun)
         }
     }
+
+    /**
+     * Brings the managed entities up to date without applying a mode; a running service reloads when the routing
+     * profile it runs was rewritten (a newer configuration, a classic edit put back).
+     */
+    suspend fun ensure(context: Context): TrafficModes.Ensured = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val ensured = TrafficModes.ensureManaged(context)
+            if (DataStore.currentRouteId in ensured.changedRoutes && DataStore.serviceState.canStop) {
+                Logs.i("simple modes: the routing profile in use was updated, reload of the running service")
+                SagerNet.reloadService()
+            }
+            ensured
+        }
+    }
+
+    /** A counter of service starts (SimpleHooks), to tell whether the service started during an app list edit. */
+    fun serviceStarts(): Long = DataStore.configurationStore.getLong(SimpleHooks.KEY_SERVICE_STARTS) ?: 0L
 
     /**
      * Whether the per-app keys hold an include list without apps, which Android would turn into "every app through
@@ -60,8 +80,9 @@ object TrafficModeApplier {
     fun hasEmptyIncludeList(): Boolean =
         DataStore.proxyApps && !DataStore.bypass && TrafficModePlan.parseList(DataStore.individual).isEmpty()
 
-    private suspend fun applyLocked(context: Context): Result {
-        val managed = TrafficModes.ensureManaged(context)
+    private suspend fun applyLocked(context: Context, stagedScopeMayRun: Boolean = false): Result {
+        val ensured = TrafficModes.ensureManaged(context)
+        val managed = ensured.ids
         var mode = TrafficModes.mode()
         val selected = TrafficModes.selectedApps()
         val applicable = TrafficModePlan.applicable(mode, selected)
@@ -95,7 +116,7 @@ object TrafficModeApplier {
             DataStore.individual = scope.individual
             if (after.server != before.server) DataStore.selectedProxy = after.server
         }
-        val change = TrafficModePlan.change(before, after)
+        val change = TrafficModePlan.change(before, after, ensured.changedRoutes, stagedScopeMayRun)
         if (change != ServiceChange.NONE && DataStore.serviceState.canStop) {
             Logs.i("simple modes: «${mode.key}» applied, ${change.name.lowercase()} of the running service")
             SagerNet.reloadService()

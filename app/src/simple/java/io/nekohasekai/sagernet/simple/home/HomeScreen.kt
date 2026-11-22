@@ -428,7 +428,7 @@ private fun HomeCard(
                         it,
                         style = MaterialTheme.typography.bodyMedium,
                         color = secondary,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }

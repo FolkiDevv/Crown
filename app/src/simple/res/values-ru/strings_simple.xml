@@ -57,7 +57,7 @@
     <string name="simple_mode_auto_summary">Сам выбирает режим под сеть. Пока работает как «Умный».</string>
     <string name="simple_mode_smart_summary">Российские сайты — напрямую, остальные — через VPN.</string>
     <string name="simple_mode_whitelist">Белые списки</string>
-    <string name="simple_mode_whitelist_summary">Всё через VPN, кроме локальной сети. Для сетей, где открываются только разрешённые сайты.</string>
+    <string name="simple_mode_whitelist_summary">Всё через VPN, кроме локальной сети и приложений без VPN. Для сетей, где открываются только разрешённые сайты.</string>
     <string name="simple_mode_apps">Только выбранные приложения</string>
     <string name="simple_mode_apps_summary">Через VPN идут только выбранные вами приложения.</string>
     <string name="simple_settings_apps_selected">Выбрать приложения</string>
@@ -78,7 +78,7 @@
     <!-- Режимы трафика: карточка режима на главной -->
     <string name="simple_mode_card_auto_smart">Авто · умный режим</string>
     <string name="simple_mode_card_auto_whitelist">Авто · белые списки</string>
-    <string name="simple_mode_card_whitelist_hint">Весь трафик идёт через VPN</string>
+    <string name="simple_mode_card_whitelist_hint">Через VPN, кроме локальной сети и приложений без VPN</string>
     <string name="simple_mode_card_custom">Свои правила</string>
     <string name="simple_mode_card_custom_hint">Заданы в классическом интерфейсе</string>
 

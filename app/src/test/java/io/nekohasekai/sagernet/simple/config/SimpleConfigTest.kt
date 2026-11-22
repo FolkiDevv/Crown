@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.simple.config
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -108,6 +109,33 @@ class SimpleConfigTest {
         val tooMany = (1..SimpleConfig.MAX_ITEMS + 1).joinToString(",", "[", "]") { "\"k$it\"" }
         assertRefused(config(keywords = tooMany))
         assertRefused(config(keywords = "[\"${"x".repeat(SimpleConfig.MAX_ITEM_LENGTH + 1)}\"]"))
+    }
+
+    @Test
+    fun dnsServersMustBeUsableByTheRouteDnsSettings() {
+        for (ok in listOf(
+            "77.88.8.8", "udp://77.88.8.1:53", "tcp://77.88.8.8", "tls://common.dot.dns.yandex.net",
+            "quic://dns.example.org:853", "https://common.dot.dns.yandex.net/dns-query", "h3://dns.example.org/q",
+            "https://77.88.8.8/dns-query", "[2a02:6b8::feed:0ff]:53", "2a02:6b8::feed:0ff", "dns.example.org",
+        )) {
+            assertTrue(ok, SimpleConfig.isDnsServer(ok))
+        }
+        for (bad in listOf(
+            "https://", "udp://", "https:///dns-query", "tls://host/path", "local", "localhost", "dhcp://auto",
+            "ftp://77.88.8.8", "77.88.8.256", "1.2.3", "77.88.8.8:0", "77.88.8.8:70000", "77.88.8.8:", "[2a02:6b8::1",
+            "[2a02:6b8::1]x", "[77.88.8.8]", "-bad-.example.org", "a, b",
+        )) {
+            assertFalse(bad, SimpleConfig.isDnsServer(bad))
+        }
+        assertRefused(config(dns = """["https://"]"""))
+        assertRefused(config(dns = """["77.88.8.8", "local"]"""))
+    }
+
+    @Test
+    fun theDeviceDnsParserCanRefuseAnEntry() {
+        val text = config(dns = """["77.88.8.8", "dns.example.org"]""")
+        assertNotNull(SimpleConfig.parseOrNull(text))
+        assertNull(SimpleConfig.parseOrNull(text) { it != "dns.example.org" })
     }
 
     @Test

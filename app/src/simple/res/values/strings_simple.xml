@@ -68,7 +68,7 @@
     <string name="simple_mode_auto_summary">Picks the mode that suits the network. For now it works like Smart.</string>
     <string name="simple_mode_smart_summary">Russian sites go directly, everything else through the VPN.</string>
     <string name="simple_mode_whitelist">Whitelists</string>
-    <string name="simple_mode_whitelist_summary">Everything goes through the VPN except the local network. For networks where only allowed sites open.</string>
+    <string name="simple_mode_whitelist_summary">Everything goes through the VPN except the local network and apps without VPN. For networks where only allowed sites open.</string>
     <string name="simple_mode_apps">Selected apps only</string>
     <string name="simple_mode_apps_summary">Only the apps you choose go through the VPN.</string>
     <string name="simple_settings_apps_selected">Choose apps</string>
@@ -87,7 +87,7 @@
     <!-- Traffic modes: the mode card on the home screen -->
     <string name="simple_mode_card_auto_smart">Auto · smart mode</string>
     <string name="simple_mode_card_auto_whitelist">Auto · whitelists</string>
-    <string name="simple_mode_card_whitelist_hint">All traffic goes through the VPN</string>
+    <string name="simple_mode_card_whitelist_hint">Through the VPN, except the local network and apps without VPN</string>
     <string name="simple_mode_card_custom">Custom routing</string>
     <string name="simple_mode_card_custom_hint">Set in the classic interface</string>
 

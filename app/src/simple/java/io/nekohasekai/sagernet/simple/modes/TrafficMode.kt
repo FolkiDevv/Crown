@@ -107,10 +107,24 @@ object TrafficModePlan {
         return if (routing == Routing.WHITELIST && autoWhitelist > 0L) autoWhitelist else if (auto > 0L) auto else selected
     }
 
-    /** What the running service has to do after the applied state went from [before] to [after]. */
-    fun change(before: Applied, after: Applied): ServiceChange = when {
-        before.scope.normalized() != after.scope.normalized() -> ServiceChange.RESTART
-        before.routeId != after.routeId || before.server != after.server -> ServiceChange.RELOAD
+    /**
+     * What the running service has to do after the applied state went from [before] to [after].
+     *
+     * [changedRoutes]: routing profiles whose content was rewritten under the same id (the managed whitelist route
+     * after a configuration update or a classic edit); the running core keeps the old content until it reloads.
+     * [stagedScopeMayRun]: the service started while an app list edit had other per-app keys in place, so it may run
+     * with those rather than with [before]'s; the TUN is then rebuilt whatever [before] says.
+     */
+    fun change(
+        before: Applied,
+        after: Applied,
+        changedRoutes: Set<Long> = emptySet(),
+        stagedScopeMayRun: Boolean = false,
+    ): ServiceChange = when {
+        stagedScopeMayRun || before.scope.normalized() != after.scope.normalized() -> ServiceChange.RESTART
+        before.routeId != after.routeId || before.server != after.server || after.routeId in changedRoutes ->
+            ServiceChange.RELOAD
+
         else -> ServiceChange.NONE
     }
 

@@ -141,6 +141,22 @@ class TrafficModePlanTest {
     }
 
     @Test
+    fun aRewrittenRouteInUseReloads() {
+        val scope = PerAppScope(true, true, listOf(bank))
+        assertEquals(ServiceChange.RELOAD, TrafficModePlan.change(applied(11, scope), applied(11, scope), changedRoutes = setOf(11L)))
+        // A rewritten route that does not run changes nothing.
+        assertEquals(ServiceChange.NONE, TrafficModePlan.change(applied(10, scope), applied(10, scope), changedRoutes = setOf(11L)))
+    }
+
+    @Test
+    fun aStartDuringAnAppListEditRebuildsTheTunnel() {
+        // The keys look unchanged, but the core that started meanwhile built its TUN from the staged editor keys.
+        val scope = PerAppScope(false, true, emptyList())
+        assertEquals(ServiceChange.RESTART, TrafficModePlan.change(applied(10, scope), applied(10, scope), stagedScopeMayRun = true))
+        assertEquals(ServiceChange.NONE, TrafficModePlan.change(applied(10, scope), applied(10, scope), stagedScopeMayRun = false))
+    }
+
+    @Test
     fun scopesThatTheTunnelSeesAlikeAreNoChange() {
         // Per-app off: whatever list and flag are stored, the TUN takes every app.
         val offA = PerAppScope(false, false, listOf(browser))
