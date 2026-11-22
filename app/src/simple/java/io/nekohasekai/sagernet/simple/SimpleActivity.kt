@@ -153,6 +153,8 @@ class SimpleActivity : AppCompatActivity() {
                 add.events.collect { event ->
                     when (event) {
                         AddEvent.Added -> {
+                            // The new subscription group was created in :bg: the «Авто» selectors take it in here.
+                            modes.syncGroups()
                             home.refreshServer()
                             modes.refresh()
                         }
@@ -179,6 +181,8 @@ class SimpleActivity : AppCompatActivity() {
         super.onStart()
         home.setForeground(true)
         modes.refresh()
+        // Groups added meanwhile in :bg (a subscription added in the classic interface) join the «Авто» selectors.
+        modes.syncGroups()
         clipboardCheck = true
     }
 
