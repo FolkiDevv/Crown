@@ -1,5 +1,9 @@
 package io.nekohasekai.sagernet.simple.servers
 
+import java.time.Instant
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+
 /**
  * What the subscription card warns about (design.md Open Questions, settled in batch 5): the end of the subscription
  * from [EXPIRY_WARNING_DAYS] days before it, and the traffic once less than [LOW_TRAFFIC_PERCENT] % of the quota or
@@ -25,9 +29,16 @@ object SubscriptionHealth {
         else -> Expiry.OK
     }
 
-    /** Whole days left, rounded up (an end in 3 h is «1 day»); 0 once it is over. */
-    fun daysLeft(expire: Long, nowSeconds: Long): Int =
-        if (expire <= nowSeconds) 0 else ((expire - nowSeconds + DAY_SECONDS - 1) / DAY_SECONDS).toInt()
+    /**
+     * Calendar days in [zone] from today to the day of [expire], the date the card shows next to it: 0 for an end later
+     * today or one that is over, 1 for tomorrow.
+     */
+    fun daysLeft(expire: Long, nowSeconds: Long, zone: ZoneId = ZoneId.systemDefault()): Int {
+        if (expire <= nowSeconds) return 0
+        val today = Instant.ofEpochSecond(nowSeconds).atZone(zone).toLocalDate()
+        val end = Instant.ofEpochSecond(expire).atZone(zone).toLocalDate()
+        return ChronoUnit.DAYS.between(today, end).toInt().coerceAtLeast(0)
+    }
 
     /** [hasQuota]: the provider reported traffic at all; [total] 0 with it = unlimited. */
     fun traffic(hasQuota: Boolean, total: Long, used: Long): Traffic {

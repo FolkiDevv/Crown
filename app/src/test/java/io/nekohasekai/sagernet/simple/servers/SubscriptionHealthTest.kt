@@ -4,6 +4,7 @@ import io.nekohasekai.sagernet.simple.servers.SubscriptionHealth.Expiry
 import io.nekohasekai.sagernet.simple.servers.SubscriptionHealth.Traffic
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.ZoneOffset
 
 class SubscriptionHealthTest {
 
@@ -23,12 +24,19 @@ class SubscriptionHealthTest {
     }
 
     @Test
-    fun daysLeft() {
-        assertEquals(1, SubscriptionHealth.daysLeft(now + 3 * 3600, now))
-        assertEquals(1, SubscriptionHealth.daysLeft(now + day, now))
-        assertEquals(2, SubscriptionHealth.daysLeft(now + day + 1, now))
-        assertEquals(3, SubscriptionHealth.daysLeft(now + 3 * day, now))
-        assertEquals(0, SubscriptionHealth.daysLeft(now - 1, now))
+    fun daysLeftCountsCalendarDays() {
+        // now = 2027-01-15 08:00 UTC
+        val utc = ZoneOffset.UTC
+        assertEquals(0, SubscriptionHealth.daysLeft(now + 3 * 3600, now, utc))
+        assertEquals(1, SubscriptionHealth.daysLeft(now + day, now, utc))
+        // A few seconds or hours past two days is still the date two days ahead (no rounding up).
+        assertEquals(2, SubscriptionHealth.daysLeft(now + 2 * day + 30, now, utc))
+        assertEquals(2, SubscriptionHealth.daysLeft(now + 2 * day + 3600, now, utc))
+        assertEquals(3, SubscriptionHealth.daysLeft(now + 3 * day, now, utc))
+        // Late evening: an end shortly after midnight is tomorrow.
+        val evening = now + 15 * 3600
+        assertEquals(1, SubscriptionHealth.daysLeft(evening + 2 * 3600, evening, utc))
+        assertEquals(0, SubscriptionHealth.daysLeft(now - 1, now, utc))
     }
 
     @Test

@@ -195,6 +195,7 @@
         <item quantity="many">Закончится через %1$d дней, %2$s</item>
         <item quantity="other">Закончится через %1$d дня, %2$s</item>
     </plurals>
+    <string name="simple_sub_expires_today">Закончится сегодня</string>
     <string name="simple_sub_updated_now">Обновлено только что</string>
     <plurals name="simple_sub_updated_minutes">
         <item quantity="one">Обновлено %d минуту назад</item>

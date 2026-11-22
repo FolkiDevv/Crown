@@ -206,6 +206,7 @@
         <item quantity="one">Ends in %1$d day, on %2$s</item>
         <item quantity="other">Ends in %1$d days, on %2$s</item>
     </plurals>
+    <string name="simple_sub_expires_today">Ends today</string>
     <string name="simple_sub_updated_now">Updated just now</string>
     <plurals name="simple_sub_updated_minutes">
         <item quantity="one">Updated %d minute ago</item>

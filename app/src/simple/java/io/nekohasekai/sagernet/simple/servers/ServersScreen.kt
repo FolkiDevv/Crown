@@ -321,7 +321,11 @@ private fun SubscriptionCardView(card: SubscriptionCard, locale: Locale, onUpdat
                     SubscriptionHealth.Expiry.OK -> InfoLine(stringResource(R.string.simple_summary_expires, date), normal)
                     SubscriptionHealth.Expiry.SOON -> {
                         val days = SubscriptionHealth.daysLeft(card.expire, now)
-                        InfoLine(pluralStringResource(R.plurals.simple_sub_expires_soon, days, days, date), warning)
+                        InfoLine(
+                            if (days == 0) stringResource(R.string.simple_sub_expires_today)
+                            else pluralStringResource(R.plurals.simple_sub_expires_soon, days, days, date),
+                            warning,
+                        )
                     }
 
                     SubscriptionHealth.Expiry.EXPIRED -> InfoLine(stringResource(R.string.simple_summary_expired, date), error)
