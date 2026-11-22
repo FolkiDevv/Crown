@@ -208,9 +208,15 @@ object SimpleImport {
             vplural(R.plurals.validation_import_imported, 0).trim(),
             vtr(R.string.validation_import_first_download_failed, groupName).trim(),
         )
+        // "Could not download the subscription: <reason>" — the dialog says the first half already.
+        val fetchFailed = vtr(R.string.validation_import_fetch_failed, MARK).substringBefore(MARK)
         return text.lines().map { it.trim() }.filter { it.isNotEmpty() && it !in frame }
+            .map { if (fetchFailed.isNotBlank() && it.startsWith(fetchFailed)) it.removePrefix(fetchFailed).trim() else it }
+            .filter { it.isNotEmpty() }
             .joinToString("\n").takeIf { it.isNotEmpty() }
     }
+
+    private const val MARK = "\u0000"
 
     private fun drainError(reports: Channel<SubscriptionClient.Report>, gid: Long): String? {
         var detail: String? = null
