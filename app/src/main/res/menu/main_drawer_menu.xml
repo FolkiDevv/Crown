@@ -57,4 +57,12 @@
             android:title="@string/menu_about" />
     </group>
 
+    <!-- simple UI (openspec simple-ui-redesign, design.md D2) -->
+    <group android:id="@+id/simple_ui">
+        <item
+            android:id="@+id/nav_simple_ui"
+            android:icon="@drawable/simple_ic_new_ui"
+            android:title="@string/simple_switch_to_new" />
+    </group>
+
 </menu>

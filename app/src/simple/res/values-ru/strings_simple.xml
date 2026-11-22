@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="simple_nav_home">Главная</string>
+    <string name="simple_nav_servers">Серверы</string>
+    <string name="simple_nav_settings">Настройки</string>
+    <string name="simple_home_placeholder">Скоро здесь появится кнопка подключения.</string>
+    <string name="simple_servers_placeholder">Скоро здесь появится список ваших серверов.</string>
+    <string name="simple_settings_classic">Классический интерфейс</string>
+    <string name="simple_settings_classic_summary">Все функции и настройки полного приложения. Вернуться можно из его меню.</string>
+    <string name="simple_switch_to_new">Новый интерфейс</string>
+</resources>

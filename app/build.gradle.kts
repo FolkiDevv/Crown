@@ -5,6 +5,7 @@ plugins {
     id("kotlin-android")
     id("com.google.devtools.ksp")
     id("kotlin-parcelize")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 setupApp()
@@ -32,6 +33,7 @@ android {
         buildConfig = true
         viewBinding = true
         aidl = true
+        compose = true
     }
     namespace = "io.nekohasekai.sagernet"
     packaging {
@@ -44,6 +46,10 @@ android {
     }
     sourceSets.named("main") {
         assets.srcDir(generatedLicenseAssets)
+        // simple UI (openspec simple-ui-redesign, design.md D2)
+        java.srcDir("src/simple/java")
+        res.srcDir("src/simple/res")
+        assets.srcDir("src/simple/assets")
     }
 }
 
@@ -94,4 +100,15 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
+
+    // simple UI (openspec simple-ui-redesign, design.md D1)
+    implementation(platform("androidx.compose:compose-bom:2025.05.01"))
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material3:material3-adaptive-navigation-suite")
+    implementation("androidx.compose.material3.adaptive:adaptive-layout:1.1.0")
+    implementation("androidx.compose.material3.adaptive:adaptive-navigation:1.1.0")
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 }

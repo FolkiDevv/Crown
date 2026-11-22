@@ -189,6 +189,12 @@
                 <data android:scheme="json" />
             </intent-filter>
         </activity>
+        <!-- simple UI (openspec simple-ui-redesign, design.md D2/D3): opened by MainActivity, no own filters -->
+        <activity
+            android:name="io.nekohasekai.sagernet.simple.SimpleActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:theme="@style/simple_theme" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.VpnRequestActivity"
             android:excludeFromRecents="true"

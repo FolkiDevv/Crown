@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window theme of SimpleActivity: Compose draws everything, the window only needs no action bar and a
+         background that matches the light/dark surface while the first frame is drawn. -->
+    <style name="simple_theme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/simple_window_background</item>
+    </style>
+</resources>
