@@ -61,6 +61,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.simple.add.AddActions
+import io.nekohasekai.sagernet.simple.add.Welcome
 import io.nekohasekai.sagernet.simple.modes.ModeCard
 import kotlinx.coroutines.delay
 
@@ -70,8 +72,8 @@ class HomeActions(
     val requestStart: () -> Unit,
     /** The «Серверы» section. */
     val openServers: () -> Unit,
-    /** The classic interface for one visit, without changing the choice (adding servers until batch 4). */
-    val openClassicOnce: () -> Unit,
+    /** The ways to add a server, shown on the welcome screen while there is none (batch 4). */
+    val add: AddActions,
     /** The traffic mode settings. */
     val openMode: () -> Unit,
 )
@@ -88,7 +90,6 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
 ) {
     var repairDialog by rememberSaveable { mutableStateOf(false) }
-    var addDialog by rememberSaveable { mutableStateOf(false) }
 
     val banner: @Composable (Modifier, Dp) -> Unit = { bannerModifier, gap ->
         state.problem?.let { problem ->
@@ -145,7 +146,7 @@ fun HomeScreen(
                 banner(cardWidth, 16.dp)
                 when (content) {
                     HomeContent.LOADING -> Unit
-                    HomeContent.NO_SERVERS -> NoServers(onAdd = { addDialog = true }, low = low, modifier = cardWidth)
+                    HomeContent.NO_SERVERS -> Welcome(actions.add, low = low, modifier = cardWidth)
                     HomeContent.CONTROLS -> {
                         Spacer(Modifier.height(16.dp))
                         ConnectButton(state.phase, onToggle)
@@ -164,22 +165,6 @@ fun HomeScreen(
 
     if (repairDialog) {
         RepairStubDialog((state.problem as? HomeProblem.ConnectionLost)?.detail) { repairDialog = false }
-    }
-    if (addDialog) {
-        AlertDialog(
-            onDismissRequest = { addDialog = false },
-            title = { Text(stringResource(R.string.simple_add_server_interim_title)) },
-            text = { Text(stringResource(R.string.simple_add_server_interim_text)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    addDialog = false
-                    actions.openClassicOnce()
-                }) { Text(stringResource(R.string.simple_open_classic)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { addDialog = false }) { Text(stringResource(R.string.simple_cancel)) }
-            },
-        )
     }
 }
 
@@ -490,39 +475,6 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
     }
 }
 
-@Composable
-private fun NoServers(onAdd: () -> Unit, low: Boolean, modifier: Modifier) {
-    Column(
-        modifier.padding(top = if (low) 8.dp else 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest) {
-            Icon(
-                painterResource(R.drawable.simple_ic_power),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .padding(if (low) 16.dp else 28.dp)
-                    .size(if (low) 32.dp else 48.dp),
-            )
-        }
-        Spacer(Modifier.height(if (low) 12.dp else 24.dp))
-        Text(
-            stringResource(R.string.simple_no_servers_title),
-            style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            stringResource(R.string.simple_no_servers_text),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(if (low) 16.dp else 24.dp))
-        Button(onClick = onAdd) { Text(stringResource(R.string.simple_add_server)) }
-    }
-}
 
 /** «Починка» arrives in batch 7; the banner and the settings already lead here. */
 @Composable

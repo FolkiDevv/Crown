@@ -26,12 +26,7 @@
     <string name="simple_action_cancel">Отменить подключение</string>
     <string name="simple_vpn_permission_denied">Android не разрешил VPN-подключение.</string>
 
-    <string name="simple_no_servers_title">Серверов пока нет</string>
-    <string name="simple_no_servers_text">Добавьте сервер или ссылку на подписку от вашего VPN-сервиса, чтобы подключиться.</string>
     <string name="simple_add_server">Добавить сервер</string>
-    <string name="simple_add_server_interim_title">Добавление сервера</string>
-    <string name="simple_add_server_interim_text">Добавление серверов прямо здесь появится в одном из ближайших обновлений. Пока добавьте сервер в классическом интерфейсе и вернитесь.</string>
-    <string name="simple_open_classic">Открыть классический интерфейс</string>
 
     <string name="simple_card_server">Сервер</string>
     <string name="simple_server_none">Не выбран</string>
@@ -86,4 +81,79 @@
     <string name="simple_route_whitelist_name">Белые списки (простой интерфейс)</string>
     <string name="simple_selector_auto_name">Авто</string>
     <string name="simple_selector_auto_whitelist_name">Авто · белые списки</string>
+
+    <string name="simple_welcome_title">Добро пожаловать</string>
+    <string name="simple_welcome_text">Чтобы подключиться, добавьте сервер. Быстрее всего — по ссылке от вашего VPN-сервиса.</string>
+    <string name="simple_welcome_where_title">Где взять ссылку?</string>
+    <string name="simple_welcome_where_text">Её даёт ваш VPN-сервис после регистрации или оплаты: в личном кабинете на сайте, в Telegram-боте или в письме. Скопируйте её и нажмите «Вставить из буфера обмена».</string>
+    <string name="simple_add_title">Добавить сервер</string>
+    <string name="simple_add_paste">Вставить из буфера обмена</string>
+    <string name="simple_add_paste_summary">Скопированная ссылка на подписку или сервер</string>
+    <string name="simple_add_scan">Сканировать QR-код</string>
+    <string name="simple_add_scan_summary">Камерой или с картинки</string>
+    <string name="simple_add_link">Ввести ссылку</string>
+    <string name="simple_add_link_summary">Набрать или вставить самому</string>
+    <string name="simple_add_file">Открыть файл</string>
+    <string name="simple_add_file_summary">Конфигурация или резервная копия Throne</string>
+    <string name="simple_add_link_title">Ввести ссылку</string>
+    <string name="simple_add_link_text">Ссылка на подписку или на сервер от вашего VPN-сервиса.</string>
+    <string name="simple_add_link_field">Ссылка</string>
+    <string name="simple_add_action">Добавить</string>
+    <string name="simple_add_busy_reading">Читаем…</string>
+    <string name="simple_add_busy_subscription">Загружаем подписку…</string>
+    <string name="simple_add_busy_servers">Добавляем серверы…</string>
+    <string name="simple_add_clipboard_empty">Буфер обмена пуст. Сначала скопируйте ссылку.</string>
+    <string name="simple_add_subscription_exists">Эта подписка уже добавлена.</string>
+    <string name="simple_add_servers_exist">Уже есть среди ваших серверов.</string>
+    <plurals name="simple_add_servers_added">
+        <item quantity="one">Добавлен %d сервер</item>
+        <item quantity="few">Добавлено %d сервера</item>
+        <item quantity="many">Добавлено %d серверов</item>
+        <item quantity="other">Добавлено %d сервера</item>
+    </plurals>
+    <string name="simple_add_unknown_title">Это не ссылка VPN-сервиса</string>
+    <string name="simple_add_unknown_text">Это не похоже на ссылку VPN-сервиса, поэтому ничего не добавлено. Скопируйте ссылку на подписку или сервер, которую дал ваш VPN-сервис, и попробуйте снова.</string>
+    <string name="simple_add_failed_title">Не удалось добавить</string>
+    <string name="simple_add_failed_text">При добавлении что-то пошло не так. Попробуйте ещё раз.</string>
+    <string name="simple_add_subscription_failed_title">Подписка не загрузилась</string>
+    <string name="simple_add_subscription_failed_text">Не удалось скачать подписку, поэтому ничего не добавлено. Проверьте интернет и ссылку и попробуйте снова.</string>
+    <string name="simple_add_file_failed_title">Не удалось открыть файл</string>
+    <string name="simple_add_file_unreadable">Файл «%1$s» не читается или не является конфигурацией.</string>
+    <string name="simple_add_file_too_large">Файл «%1$s» слишком большой для конфигурации.</string>
+    <string name="simple_add_no_file_picker">Нет приложения для выбора файлов.</string>
+    <string name="simple_group_my_servers">Мои серверы</string>
+
+    <string name="simple_summary_title">Подписка добавлена</string>
+    <plurals name="simple_summary_servers">
+        <item quantity="one">%d сервер</item>
+        <item quantity="few">%d сервера</item>
+        <item quantity="many">%d серверов</item>
+        <item quantity="other">%d сервера</item>
+    </plurals>
+    <plurals name="simple_summary_countries">
+        <item quantity="one">%d страна</item>
+        <item quantity="few">%d страны</item>
+        <item quantity="many">%d стран</item>
+        <item quantity="other">%d страны</item>
+    </plurals>
+    <string name="simple_summary_servers_countries">%1$s · %2$s</string>
+    <string name="simple_summary_traffic_left">Осталось трафика: %1$s</string>
+    <string name="simple_summary_traffic_unlimited">Трафик: без ограничений</string>
+    <string name="simple_summary_expires">Действует до %1$s</string>
+    <string name="simple_summary_expired">Срок истёк %1$s</string>
+    <string name="simple_summary_enabled">Мы включили:</string>
+    <string name="simple_summary_enabled_auto_server">«Авто»: лучший сервер выбирается сам</string>
+    <string name="simple_summary_enabled_daily">Ежедневное обновление подписки</string>
+    <string name="simple_summary_enabled_auto_mode">Режим трафика «Авто»</string>
+    <string name="simple_summary_done">Готово</string>
+
+    <string name="simple_offer_title">Добавить из буфера обмена?</string>
+    <string name="simple_offer_subscription">В буфере обмена ссылка на подписку (%1$s).</string>
+    <plurals name="simple_offer_servers">
+        <item quantity="one">В буфере обмена %d сервер.</item>
+        <item quantity="few">В буфере обмена %d сервера.</item>
+        <item quantity="many">В буфере обмена %d серверов.</item>
+        <item quantity="other">В буфере обмена %d сервера.</item>
+    </plurals>
+    <string name="simple_offer_later">Не сейчас</string>
 </resources>

@@ -7,6 +7,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProxyGroup
@@ -218,6 +219,31 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
             withContext(Dispatchers.IO) { TrafficModes.setFallbackNotice(false) }
             publish()
         }
+    }
+
+    /**
+     * The ready settings of the first subscription (simple-ui "Готовые настройки после импорта подписки"): the
+     * managed «Авто» selector becomes the server and «Авто» the traffic mode. True when both were set.
+     */
+    suspend fun setUpAuto(): Boolean {
+        var done = false
+        applying {
+            withContext(Dispatchers.IO) {
+                val app = getApplication<android.app.Application>()
+                val auto = TrafficModes.ensureManaged(app).auto
+                if (auto <= 0L) return@withContext null
+                val before = DataStore.selectedProxy
+                DataStore.selectedProxy = auto
+                val result = TrafficModeApplier.select(app, TrafficMode.AUTO)
+                // The applier compares with the server already switched above; a running service follows here.
+                if (before != auto && result.change == ServiceChange.NONE && DataStore.serviceState.canStop) {
+                    SagerNet.reloadService()
+                }
+                done = true
+                result
+            }
+        }
+        return done
     }
 
     override fun onCleared() {

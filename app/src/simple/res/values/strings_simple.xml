@@ -33,12 +33,7 @@
     <string name="simple_vpn_permission_denied">Android did not allow the VPN connection.</string>
 
     <!-- Home: no servers yet -->
-    <string name="simple_no_servers_title">No servers yet</string>
-    <string name="simple_no_servers_text">Add a server or a subscription link from your VPN provider to connect.</string>
     <string name="simple_add_server">Add server</string>
-    <string name="simple_add_server_interim_title">Add a server</string>
-    <string name="simple_add_server_interim_text">Adding servers right here is coming in an upcoming update. For now, add it in the classic interface and come back.</string>
-    <string name="simple_open_classic">Open classic interface</string>
 
     <!-- Home: server and traffic mode cards -->
     <string name="simple_card_server">Server</string>
@@ -95,4 +90,82 @@
     <string name="simple_route_whitelist_name">Whitelists (simple interface)</string>
     <string name="simple_selector_auto_name">Auto</string>
     <string name="simple_selector_auto_whitelist_name">Auto · whitelists</string>
+
+    <!-- Adding servers (batch 4): the welcome screen, the add sheet and its dialogs -->
+    <string name="simple_welcome_title">Welcome</string>
+    <string name="simple_welcome_text">Add a server to connect. The quickest way is the link from your VPN provider.</string>
+    <string name="simple_welcome_where_title">Where do I get a link?</string>
+    <string name="simple_welcome_where_text">Your VPN provider gives it to you after you sign up or pay: in your account on their website, in their Telegram bot or in an email. Copy it and tap \"Paste from clipboard\".</string>
+    <string name="simple_add_title">Add a server</string>
+    <string name="simple_add_paste">Paste from clipboard</string>
+    <string name="simple_add_paste_summary">A subscription or server link you copied</string>
+    <string name="simple_add_scan">Scan QR code</string>
+    <string name="simple_add_scan_summary">With the camera or from a picture</string>
+    <string name="simple_add_link">Enter a link</string>
+    <string name="simple_add_link_summary">Type or paste it yourself</string>
+    <string name="simple_add_file">Open a file</string>
+    <string name="simple_add_file_summary">A configuration or a Throne backup</string>
+    <string name="simple_add_link_title">Enter a link</string>
+    <string name="simple_add_link_text">A subscription link or a server link from your VPN provider.</string>
+    <string name="simple_add_link_field">Link</string>
+    <string name="simple_add_action">Add</string>
+    <string name="simple_add_busy_reading">Reading…</string>
+    <string name="simple_add_busy_subscription">Loading the subscription…</string>
+    <string name="simple_add_busy_servers">Adding servers…</string>
+    <string name="simple_add_clipboard_empty">The clipboard is empty. Copy the link first.</string>
+    <string name="simple_add_subscription_exists">This subscription is already added.</string>
+    <string name="simple_add_servers_exist">Already among your servers.</string>
+    <plurals name="simple_add_servers_added">
+        <item quantity="one">%d server added</item>
+        <item quantity="other">%d servers added</item>
+    </plurals>
+    <string name="simple_add_unknown_title">Not a VPN link</string>
+    <string name="simple_add_unknown_text">This does not look like a link from a VPN service, so nothing was added. Copy the subscription or server link your provider gave you and try again.</string>
+    <string name="simple_add_failed_title">Could not add</string>
+    <string name="simple_add_failed_text">Something went wrong while adding. Please try again.</string>
+    <string name="simple_add_subscription_failed_title">The subscription did not load</string>
+    <string name="simple_add_subscription_failed_text">Could not download the subscription, so nothing was added. Check the internet connection and the link, then try again.</string>
+    <string name="simple_add_file_failed_title">Cannot open the file</string>
+    <!-- %1$s: the file name -->
+    <string name="simple_add_file_unreadable">\"%1$s\" cannot be read or is not a configuration.</string>
+    <!-- %1$s: the file name -->
+    <string name="simple_add_file_too_large">\"%1$s\" is too large for a configuration.</string>
+    <string name="simple_add_no_file_picker">No app to choose files is available.</string>
+    <!-- The group of servers added by hand -->
+    <string name="simple_group_my_servers">My servers</string>
+
+    <!-- Summary of an added subscription -->
+    <string name="simple_summary_title">Subscription added</string>
+    <plurals name="simple_summary_servers">
+        <item quantity="one">%d server</item>
+        <item quantity="other">%d servers</item>
+    </plurals>
+    <plurals name="simple_summary_countries">
+        <item quantity="one">%d country</item>
+        <item quantity="other">%d countries</item>
+    </plurals>
+    <!-- %1$s: e.g. "12 servers", %2$s: e.g. "5 countries" -->
+    <string name="simple_summary_servers_countries">%1$s · %2$s</string>
+    <!-- %1$s: e.g. "12.3 GB" -->
+    <string name="simple_summary_traffic_left">Traffic left: %1$s</string>
+    <string name="simple_summary_traffic_unlimited">Traffic: unlimited</string>
+    <!-- %1$s: a date -->
+    <string name="simple_summary_expires">Valid until %1$s</string>
+    <!-- %1$s: a date -->
+    <string name="simple_summary_expired">Expired on %1$s</string>
+    <string name="simple_summary_enabled">Turned on for you:</string>
+    <string name="simple_summary_enabled_auto_server">Auto: the best server is picked for you</string>
+    <string name="simple_summary_enabled_daily">Daily subscription update</string>
+    <string name="simple_summary_enabled_auto_mode">Traffic mode: Auto</string>
+    <string name="simple_summary_done">Done</string>
+
+    <!-- Offer to add what is in the clipboard when the app opens -->
+    <string name="simple_offer_title">Add from clipboard?</string>
+    <!-- %1$s: the host of the subscription link -->
+    <string name="simple_offer_subscription">The clipboard holds a subscription link (%1$s).</string>
+    <plurals name="simple_offer_servers">
+        <item quantity="one">The clipboard holds %d server.</item>
+        <item quantity="other">The clipboard holds %d servers.</item>
+    </plurals>
+    <string name="simple_offer_later">Not now</string>
 </resources>

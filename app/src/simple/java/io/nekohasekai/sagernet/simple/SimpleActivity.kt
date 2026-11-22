@@ -3,9 +3,11 @@ package io.nekohasekai.sagernet.simple
 import android.Manifest
 import android.app.ActivityManager
 import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
@@ -14,18 +16,25 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,12 +62,26 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.window.core.layout.WindowWidthSizeClass
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.backup.BackupEntry
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.add.AddActions
+import io.nekohasekai.sagernet.simple.add.AddBusyDialog
+import io.nekohasekai.sagernet.simple.add.AddEvent
+import io.nekohasekai.sagernet.simple.add.AddResultDialog
+import io.nekohasekai.sagernet.simple.add.AddSheet
+import io.nekohasekai.sagernet.simple.add.AddViewModel
+import io.nekohasekai.sagernet.simple.add.ClipboardOfferDialog
+import io.nekohasekai.sagernet.simple.add.LinkDialog
+import io.nekohasekai.sagernet.simple.add.Notice
+import io.nekohasekai.sagernet.simple.home.ConnectionPhase
 import io.nekohasekai.sagernet.simple.home.HomeActions
 import io.nekohasekai.sagernet.simple.home.HomeScreen
 import io.nekohasekai.sagernet.simple.home.HomeViewModel
@@ -68,18 +91,25 @@ import io.nekohasekai.sagernet.simple.settings.SettingsActions
 import io.nekohasekai.sagernet.simple.settings.SettingsScreen
 import io.nekohasekai.sagernet.ui.AppManagerActivity
 import io.nekohasekai.sagernet.ui.MainActivity
+import io.nekohasekai.sagernet.ui.ScannerActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The simple interface (openspec simple-ui-redesign). Opened by [SimpleUi.redirect] from MainActivity, which stays
  * the entry point of the launcher, notification, tile and shortcuts. Batch 1: the adaptive three-section frame
  * (bottom bar on narrow windows, navigation rail on medium/wide ones) and the switch to the classic interface.
  * Batch 2: the home section (connect button with its status, server and mode cards, problem banner).
+ * Batch 4: adding servers (clipboard, QR, link, file; links, files and shares opened from other apps) and the
+ * clipboard offer when the interface opens.
  */
 class SimpleActivity : AppCompatActivity() {
 
     private val home: HomeViewModel by viewModels()
     private val modes: ModesViewModel by viewModels()
+    private val add: AddViewModel by viewModels()
 
     /** The classic app list (AppManagerActivity) editing one of the simple UI's two app lists. */
     private val appList = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -93,28 +123,63 @@ class SimpleActivity : AppCompatActivity() {
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /** «Открыть файл»: any file; a backup goes to the stock restore, the rest to the import. */
+    private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(::openFile)
+    }
+
+    /** The clipboard is looked at once each time the interface comes to the front, when its window has the focus. */
+    private var clipboardCheck = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        add.setUpAuto = { modes.setUpAuto() }
         setContent {
             SimpleTheme {
                 SimpleApp(
                     home = home,
                     modes = modes,
+                    add = add,
+                    launchers = AddLaunchers(::pasteClipboard, ::openScanner, ::chooseFile),
                     openAppList = ::openAppList,
                     requestStart = ::requestStart,
-                    openClassicOnce = ::openClassicOnce,
                     onOpenClassic = { SimpleUi.switchTo(this, simple = false) },
                 )
             }
         }
-        if (savedInstanceState == null) askNotificationsOnce()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                add.events.collect { event ->
+                    when (event) {
+                        AddEvent.Added -> {
+                            home.refreshServer()
+                            modes.refresh()
+                        }
+
+                        is AddEvent.OpenClassic -> openClassicImport(event.text)
+                    }
+                }
+            }
+        }
+        if (savedInstanceState == null) {
+            askNotificationsOnce()
+            handleImportIntent(intent)
+        }
+    }
+
+    /** A link, file, share or QR scan for the running interface (singleTask), handed over by MainActivity. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleImportIntent(intent)
     }
 
     override fun onStart() {
         super.onStart()
         home.setForeground(true)
         modes.refresh()
+        clipboardCheck = true
     }
 
     override fun onStop() {
@@ -127,6 +192,125 @@ class SimpleActivity : AppCompatActivity() {
         // Same as MainActivity.onResume: MainActivity finishes before its onResume when it redirects here
         if (DataStore.hideFromRecentApps) excludeFromRecents()
     }
+
+    /** Android lets only the focused app read the clipboard (10+). */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || !clipboardCheck) return
+        clipboardCheck = false
+        add.checkClipboard(clipboardText(onlyNew = true))
+    }
+
+    // ------------------------------------------------------------------------------------------------ adding
+
+    /**
+     * VIEW links and files, SEND texts and streams, and the QR scanner's texts, as MainActivity took them before
+     * batch 4 — now without the classic choice dialogs.
+     */
+    private fun handleImportIntent(intent: Intent?) {
+        intent ?: return
+        intent.getStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS)?.let {
+            add.importTexts(it)
+            return
+        }
+        when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                val uri = intent.data ?: return
+                val scheme = uri.scheme?.lowercase()
+                if (scheme == "content" || scheme == "file") openFile(uri) else add.importText(uri.toString())
+            }
+
+            Intent.ACTION_SEND -> {
+                @Suppress("DEPRECATION")
+                val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                if (stream != null) {
+                    openFile(stream)
+                } else {
+                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { add.importText(it) }
+                }
+            }
+        }
+    }
+
+    /**
+     * A file opened here or from another app: first BackupEntry.open, which recognises a backup and opens the stock
+     * restore in the classic interface (the hand-off keeps MainActivity from sending it back), then the import.
+     */
+    private fun openFile(uri: Uri) {
+        lifecycleScope.launch {
+            // Sniffing the backup magic may read a cloud file over the network.
+            val backup = withContext(Dispatchers.IO) {
+                SimpleUi.handOffToClassic(uri)
+                val opened = try {
+                    BackupEntry.open(this@SimpleActivity, uri)
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    false
+                }
+                if (!opened) SimpleUi.cancelHandOff(uri)
+                opened
+            }
+            if (!backup) add.importFile(uri)
+        }
+    }
+
+    private fun pasteClipboard() {
+        add.importText(clipboardText(onlyNew = false), fromClipboard = true)
+    }
+
+    private fun openScanner() {
+        try {
+            // It hands the codes to MainActivity (EXTRA_IMPORT_TEXTS), which hands them on here.
+            startActivity(Intent(this, ScannerActivity::class.java))
+        } catch (e: ActivityNotFoundException) {
+            Logs.w(e)
+        }
+    }
+
+    private fun chooseFile() {
+        try {
+            pickFile.launch(arrayOf("*/*"))
+        } catch (e: ActivityNotFoundException) {
+            Logs.w(e)
+            home.message(R.string.simple_add_no_file_picker)
+        }
+    }
+
+    /** A routing profile link: the classic interface imports it, for this visit (the choice of interface stays). */
+    private fun openClassicImport(text: String) {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .putExtra(SimpleUi.EXTRA_OPEN_CLASSIC, true)
+                .putStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS, arrayListOf(text))
+        )
+    }
+
+    /**
+     * The clipboard text; [onlyNew]: null when this clip was looked at already in this process (no second read, so
+     * no second "pasted from your clipboard" notice of Android 12+). Only text clips are read.
+     */
+    private fun clipboardText(onlyNew: Boolean): String? = try {
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        val description = clipboard?.primaryClipDescription
+        when {
+            clipboard == null || description == null || !clipboard.hasPrimaryClip() -> null
+            !description.hasMimeType("text/*") -> null
+            else -> {
+                val stamp = if (Build.VERSION.SDK_INT >= 26) description.timestamp else 0L
+                if (onlyNew && stamp != 0L && stamp == lastClipStamp) {
+                    null
+                } else {
+                    lastClipStamp = stamp
+                    clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+                }
+            }
+        }
+    } catch (e: Exception) {
+        Logs.w(e)
+        null
+    }
+
+    // ------------------------------------------------------------------------------------------------ other
 
     private fun requestStart() {
         try {
@@ -146,11 +330,6 @@ class SimpleActivity : AppCompatActivity() {
             Logs.w(e)
             modes.appListClosed()
         }
-    }
-
-    /** The classic interface on top of this one for a visit; the choice of interface stays. */
-    private fun openClassicOnce() {
-        startActivity(Intent(this, MainActivity::class.java).putExtra(SimpleUi.EXTRA_OPEN_CLASSIC, true))
     }
 
     /**
@@ -188,8 +367,15 @@ class SimpleActivity : AppCompatActivity() {
         /** FirstStartPrompts' own flag: the classic first start has asked for the permission. */
         const val CLASSIC_FIRST_START_PREFS = "first_start"
         const val CLASSIC_FIRST_START_SHOWN = "prompts_shown"
+
+        /** The clip last read in this process (ClipDescription.getTimestamp), see [clipboardText]. */
+        @Volatile
+        var lastClipStamp = 0L
     }
 }
+
+/** What only the activity can do for the add flow: read the clipboard, open the scanner, pick a file. */
+class AddLaunchers(val paste: () -> Unit, val scan: () -> Unit, val file: () -> Unit)
 
 enum class SimpleSection(@StringRes val label: Int, val icon: ImageVector) {
     HOME(R.string.simple_nav_home, Icons.Filled.Home),
@@ -202,12 +388,42 @@ enum class SimpleSection(@StringRes val label: Int, val icon: ImageVector) {
 fun SimpleApp(
     home: HomeViewModel,
     modes: ModesViewModel,
+    add: AddViewModel,
+    launchers: AddLaunchers,
     openAppList: (AppList) -> Unit,
     requestStart: () -> Unit,
-    openClassicOnce: () -> Unit,
     onOpenClassic: () -> Unit,
 ) {
     var section by rememberSaveable { mutableStateOf(SimpleSection.HOME) }
+    var addSheet by rememberSaveable { mutableStateOf(false) }
+    var linkDialog by rememberSaveable { mutableStateOf(false) }
+    val addActions = remember(launchers) {
+        AddActions(
+            paste = {
+                addSheet = false
+                launchers.paste()
+            },
+            scan = {
+                addSheet = false
+                launchers.scan()
+            },
+            link = {
+                addSheet = false
+                linkDialog = true
+            },
+            file = {
+                addSheet = false
+                launchers.file()
+            },
+        )
+    }
+    // One snackbar for every section: the add flow reports from wherever it was started.
+    val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    LaunchedEffect(add) {
+        add.notices.collect { notice -> snackbar.showSnackbar(notice.resolve(context)) }
+    }
+
     // Rail whenever the window is not narrow, by width only: the library default keeps the bottom bar on any window
     // of compact height, i.e. on every phone in landscape (simple-ui spec: bar on narrow, side panel on medium/wide)
     val adaptiveInfo = currentWindowAdaptiveInfo()
@@ -235,44 +451,62 @@ fun SimpleApp(
             Modifier
         }
         Box(contentInsets) {
-            SectionContent(section, home, modes, openAppList, requestStart, openClassicOnce, onOpenClassic) { section = it }
+            when (section) {
+                SimpleSection.HOME -> HomeSection(
+                    home,
+                    modes,
+                    HomeActions(
+                        requestStart = requestStart,
+                        openServers = { section = SimpleSection.SERVERS },
+                        add = addActions,
+                        openMode = { section = SimpleSection.SETTINGS },
+                    ),
+                    snackbar,
+                )
+
+                SimpleSection.SERVERS -> ServersSection(onAdd = { addSheet = true }, snackbar = snackbar)
+                SimpleSection.SETTINGS -> SettingsSection(modes, openAppList, onOpenClassic, snackbar)
+            }
         }
     }
-}
 
-@Composable
-private fun SectionContent(
-    section: SimpleSection,
-    home: HomeViewModel,
-    modes: ModesViewModel,
-    openAppList: (AppList) -> Unit,
-    requestStart: () -> Unit,
-    openClassicOnce: () -> Unit,
-    onOpenClassic: () -> Unit,
-    select: (SimpleSection) -> Unit,
-) {
-    when (section) {
-        SimpleSection.HOME -> HomeSection(
-            home,
-            modes,
-            HomeActions(
-                requestStart = requestStart,
-                openServers = { select(SimpleSection.SERVERS) },
-                openClassicOnce = openClassicOnce,
-                openMode = { select(SimpleSection.SETTINGS) },
-            ),
+    // The add flow over any section.
+    val addState by add.state.collectAsStateWithLifecycle()
+    val homeState by home.state.collectAsStateWithLifecycle()
+    if (addSheet) AddSheet(addActions) { addSheet = false }
+    if (linkDialog) {
+        LinkDialog(onDismiss = { linkDialog = false }) { text ->
+            linkDialog = false
+            add.importText(text)
+        }
+    }
+    val busy = addState.busy
+    val dialog = addState.dialog
+    val offer = addState.offer
+    when {
+        busy != null -> AddBusyDialog(busy)
+        dialog != null -> AddResultDialog(
+            dialog,
+            canConnect = homeState.phase == ConnectionPhase.OFF && homeState.hasServers == true,
+            onConnect = {
+                add.dismissDialog()
+                section = SimpleSection.HOME
+                home.toggle(requestStart)
+            },
+            onDismiss = add::dismissDialog,
         )
 
-        SimpleSection.SERVERS -> PlaceholderSection(section, R.string.simple_servers_placeholder)
-        SimpleSection.SETTINGS -> SettingsSection(modes, openAppList, onOpenClassic)
+        offer != null -> ClipboardOfferDialog(offer, onAccept = add::acceptOffer, onDecline = add::declineOffer)
     }
 }
 
+private fun Notice.resolve(context: Context): String =
+    if (plural != 0) context.resources.getQuantityString(plural, count, count) else context.getString(text)
+
 @Composable
-private fun HomeSection(home: HomeViewModel, modes: ModesViewModel, actions: HomeActions) {
+private fun HomeSection(home: HomeViewModel, modes: ModesViewModel, actions: HomeActions, snackbar: SnackbarHostState) {
     val state by home.state.collectAsStateWithLifecycle()
     val modesState by modes.state.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     LaunchedEffect(home) {
         home.messages.collect { snackbar.showSnackbar(context.getString(it)) }
@@ -310,24 +544,36 @@ private fun SectionScaffold(
     }
 }
 
+/** The server list arrives in batch 5; until then the section only leads to adding one. */
 @Composable
-private fun PlaceholderSection(section: SimpleSection, @StringRes text: Int) {
-    SectionScaffold(section) { modifier ->
+private fun ServersSection(onAdd: () -> Unit, snackbar: SnackbarHostState) {
+    SectionScaffold(SimpleSection.SERVERS, snackbar) { modifier ->
         Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            Text(
-                stringResource(text),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text(
+                    stringResource(R.string.simple_servers_placeholder),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(20.dp))
+                Button(onClick = onAdd, contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                    Text(stringResource(R.string.simple_add_server))
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun SettingsSection(modes: ModesViewModel, openAppList: (AppList) -> Unit, onOpenClassic: () -> Unit) {
+private fun SettingsSection(
+    modes: ModesViewModel,
+    openAppList: (AppList) -> Unit,
+    onOpenClassic: () -> Unit,
+    snackbar: SnackbarHostState,
+) {
     val state by modes.state.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     LaunchedEffect(modes) {
         modes.messages.collect { snackbar.showSnackbar(context.getString(it)) }

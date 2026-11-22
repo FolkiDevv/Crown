@@ -45,12 +45,22 @@ class SimpleUiTest {
         assertFalse(
             SimpleUi.shouldRedirect(store, "android.service.quicksettings.action.QS_TILE_PREFERENCES", emptySet())
         )
-        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
-        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.SEND", emptySet()))
         assertFalse(SimpleUi.shouldRedirect(store, null, setOf(SimpleUi.EXTRA_OPEN_CLASSIC)))
-        assertFalse(SimpleUi.shouldRedirect(store, null, setOf("importTexts")))
         assertFalse(SimpleUi.shouldRedirect(store, null, setOf("wifiPermissionFlow")))
         assertTrue(SimpleUi.shouldRedirect(store, null, setOf("someOtherExtra")))
+    }
+
+    @Test
+    fun importsOpenTheSimpleInterface() {
+        // Batch 4: links, files, shares and the QR scanner's texts are imported by the simple interface.
+        val store = MapStore()
+        assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
+        assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.SEND", setOf("android.intent.extra.TEXT")))
+        assertTrue(SimpleUi.shouldRedirect(store, null, setOf("importTexts")))
+        // A backup the simple interface handed over to the classic restore stays there.
+        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet(), handedOff = true))
+        SimpleUi.select(store, simple = false)
+        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
     }
 
     @Test
