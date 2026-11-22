@@ -219,7 +219,7 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
             is SimpleImport.SubscribeResult.Failed -> show(AddDialog.SubscriptionFailed(result.detail))
             is SimpleImport.SubscribeResult.Done -> {
                 val enabled = ArrayList<Enabled>()
-                withContext(Dispatchers.IO) { SimpleImport.updateDaily(result.gid) }
+                withContext(Dispatchers.IO) { SimpleImport.updateDaily(result.gid, plan) }
                 // The ready settings come with the first subscription added here (simple-ui "Готовые настройки").
                 val first = !prefs.getBoolean(KEY_FIRST_SUBSCRIPTION, false)
                 val auto = first && (setUpAuto?.invoke() ?: false)

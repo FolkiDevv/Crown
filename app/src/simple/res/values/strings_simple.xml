@@ -149,6 +149,10 @@
     <!-- %1$s: e.g. "12.3 GB" -->
     <string name="simple_summary_traffic_left">Traffic left: %1$s</string>
     <string name="simple_summary_traffic_unlimited">Traffic: unlimited</string>
+    <!-- Traffic amounts in binary units; %1$s: a number, e.g. 97 or 1.5 -->
+    <string name="simple_size_mb">%1$s MB</string>
+    <string name="simple_size_gb">%1$s GB</string>
+    <string name="simple_size_tb">%1$s TB</string>
     <!-- %1$s: a date -->
     <string name="simple_summary_expires">Valid until %1$s</string>
     <!-- %1$s: a date -->

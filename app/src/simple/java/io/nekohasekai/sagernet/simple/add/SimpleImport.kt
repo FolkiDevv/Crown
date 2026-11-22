@@ -15,6 +15,8 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.ui.SubscribeFlows
 import io.nekohasekai.sagernet.ui.profile.ProfileTextImport
+import io.nekohasekai.sagernet.validation.vplural
+import io.nekohasekai.sagernet.validation.vtr
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -159,7 +161,7 @@ object SimpleImport {
             while (true) {
                 val report = reports.tryReceive().getOrNull() ?: break
                 if (report.gid != gid || report.reload) continue
-                if (report.text.isNotBlank()) detail = report.text.trim()
+                failureDetail(report.text, group.name)?.let { detail = it }
                 reported = true
             }
             val queued = SubscriptionClient.states.value.containsKey(gid)
@@ -172,6 +174,20 @@ object SimpleImport {
             }
             delay(400)
         }
+    }
+
+    /**
+     * What a failed first download reported, without the classic report's frame: the "Imported 0 profiles" count and
+     * the advice to update the group or change its TLS / HTTP / User Agent settings (the simple UI removes the group).
+     * What stays is the reason itself (the transport error, an empty or web-page answer, the provider's announcement).
+     */
+    private fun failureDetail(text: String, groupName: String): String? {
+        val frame = setOf(
+            vplural(R.plurals.validation_import_imported, 0).trim(),
+            vtr(R.string.validation_import_first_download_failed, groupName).trim(),
+        )
+        return text.lines().map { it.trim() }.filter { it.isNotEmpty() && it !in frame }
+            .joinToString("\n").takeIf { it.isNotEmpty() }
     }
 
     private fun drainError(reports: Channel<SubscriptionClient.Report>, gid: Long): String? {
@@ -191,13 +207,17 @@ object SimpleImport {
      * row's other columns, which `:bg` writes, stay as they are) and the global switch, without which nothing is
      * automatic.
      */
-    suspend fun updateDaily(gid: Long) {
+    suspend fun updateDaily(gid: Long, plan: Plan.Subscription) {
         val group = GroupRepo.get(gid) ?: return
         val options = group.subOptions.copy(updateInterval = DAILY_MINUTES, respectServerInterval = false)
-        SagerDatabase.instance.openHelper.writableDatabase.execSQL(
-            "UPDATE `groups` SET `sub_options_json` = ? WHERE `id` = ?",
-            arrayOf<Any>(options.toJsonString(), gid),
-        )
+        val db = SagerDatabase.instance.openHelper.writableDatabase
+        db.execSQL("UPDATE `groups` SET `sub_options_json` = ? WHERE `id` = ?", arrayOf<Any>(options.toJsonString(), gid))
+        // A link without a name of its own: the provider's Profile-Title names the group, as the summary does,
+        // rather than the host of the URL.
+        val title = group.subMetadata.title.trim()
+        if (plan.name.isBlank() && title.isNotEmpty() && title != group.name) {
+            db.execSQL("UPDATE `groups` SET `name` = ? WHERE `id` = ?", arrayOf<Any>(title, gid))
+        }
         if (DataStore.subAutoUpdate < SubscriptionScheduler.MIN_INTERVAL_MINUTES) DataStore.subAutoUpdate = DAILY_MINUTES
         GroupRepo.postUpdate(gid)
         SubscriptionScheduler.schedule()

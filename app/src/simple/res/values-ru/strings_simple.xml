@@ -139,6 +139,9 @@
     <string name="simple_summary_servers_countries">%1$s · %2$s</string>
     <string name="simple_summary_traffic_left">Осталось трафика: %1$s</string>
     <string name="simple_summary_traffic_unlimited">Трафик: без ограничений</string>
+    <string name="simple_size_mb">%1$s МБ</string>
+    <string name="simple_size_gb">%1$s ГБ</string>
+    <string name="simple_size_tb">%1$s ТБ</string>
     <string name="simple_summary_expires">Действует до %1$s</string>
     <string name="simple_summary_expired">Срок истёк %1$s</string>
     <string name="simple_summary_enabled">Мы включили:</string>
