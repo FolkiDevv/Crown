@@ -13,8 +13,9 @@ import io.nekohasekai.sagernet.ktx.Logs
  * - «Respect the server's update interval» (`sub_respect_server_interval`): a subscription updates as often as its
  *   provider asks (`profile-update-interval`), the daily interval of the simple UI is the fallback.
  *
- * Each is turned on for a fresh install and for an upgrade that never stored it; a value stored before (on or off)
- * is the user's and stays.
+ * Each is turned on when it was never stored (a fresh install has nothing stored; the install kind of SimpleUi cannot
+ * decide it, since builds with the simple UI record "fresh" on their own first run and keep it across upgrades);
+ * a value stored before (on or off) is the user's and stays.
  */
 object SimpleDefaults {
 
@@ -22,10 +23,10 @@ object SimpleDefaults {
     const val KEY_APPLIED = "defaults_applied"
 
     /**
-     * The value a setting that the simple UI wants on gets, or null to leave it: [fresh] — a new install; [stored] —
+     * The value a setting that the simple UI wants on gets, or null to leave it: [stored] —
      * the stored value, null when the setting was never written.
      */
-    fun onByDefault(fresh: Boolean, stored: Boolean?): Boolean? = if (fresh || stored == null) true else null
+    fun onByDefault(stored: Boolean?): Boolean? = if (stored == null) true else null
 
     /** Applies the defaults once; blocking (DataStore is Room), call it off the main thread. */
     @Synchronized
@@ -33,13 +34,12 @@ object SimpleDefaults {
         val store = SimpleUi.store(context)
         if (store.getBoolean(KEY_APPLIED, false)) return
         try {
-            val fresh = !SimpleUi.isUpgrade(context)
             val settings = DataStore.configurationStore
             for (key in listOf(SettingsRegistry.SUB_SEND_HWID.key, SettingsRegistry.SUB_RESPECT_SERVER_INTERVAL.key)) {
                 val stored = settings.getBoolean(key)
-                onByDefault(fresh, stored)?.let {
+                onByDefault(stored)?.let {
                     settings.putBoolean(key, it)
-                    Logs.i("simple defaults: $key = $it (fresh = $fresh, stored = $stored)")
+                    Logs.i("simple defaults: $key = $it (never stored)")
                 }
             }
             store.putBoolean(KEY_APPLIED, true)
