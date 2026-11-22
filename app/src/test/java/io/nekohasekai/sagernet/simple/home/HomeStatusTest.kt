@@ -121,6 +121,18 @@ class HomeStatusTest {
     }
 
     @Test
+    fun controlsStayWhileTheServiceRunsWithoutServers() {
+        assertEquals(HomeContent.LOADING, HomeStatus.content(null, ConnectionPhase.OFF))
+        assertEquals(HomeContent.NO_SERVERS, HomeStatus.content(false, ConnectionPhase.OFF))
+        assertEquals(HomeContent.CONTROLS, HomeStatus.content(true, ConnectionPhase.OFF))
+        // the running profile was deleted: it must still be possible to stop it here
+        for (phase in ConnectionPhase.entries.filter { it != ConnectionPhase.OFF }) {
+            assertEquals(phase.name, HomeContent.CONTROLS, HomeStatus.content(false, phase))
+            assertEquals(phase.name, HomeContent.CONTROLS, HomeStatus.content(null, phase))
+        }
+    }
+
+    @Test
     fun durationFormat() {
         assertEquals("0:00", HomeStatus.formatDuration(0))
         assertEquals("0:00", HomeStatus.formatDuration(-5))

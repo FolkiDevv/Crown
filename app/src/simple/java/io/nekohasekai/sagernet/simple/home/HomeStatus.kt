@@ -21,6 +21,18 @@ enum class ConnectionPhase {
     DISCONNECTING,
 }
 
+/** What the body of the home screen shows. */
+enum class HomeContent {
+    /** The profiles are not read yet. */
+    LOADING,
+
+    /** «Серверов пока нет» with the way to add one. */
+    NO_SERVERS,
+
+    /** The connect button, the status and the cards. */
+    CONTROLS,
+}
+
 /** The problem banner of the home screen (simple-ui spec "Баннер проблемы на главной"). */
 sealed interface HomeProblem {
     /** The service stopped by itself (a failed start, a crash of `:bg`); [detail] is the service's message, if any. */
@@ -68,6 +80,16 @@ object HomeStatus {
 
         BaseService.State.Stopped -> if (restartPending && !userStopping) ConnectionPhase.RECONNECTING else ConnectionPhase.OFF
         BaseService.State.Idle -> ConnectionPhase.OFF
+    }
+
+    /**
+     * The body for [hasServers] (null until read) and [phase]: the connection controls stay while the service runs
+     * even without servers (the running profile may have been deleted), so it can still be stopped from here.
+     */
+    fun content(hasServers: Boolean?, phase: ConnectionPhase): HomeContent = when {
+        hasServers == true || phase != ConnectionPhase.OFF -> HomeContent.CONTROLS
+        hasServers == false -> HomeContent.NO_SERVERS
+        else -> HomeContent.LOADING
     }
 
     /** The button stops in these phases; in the others it connects (or, while disconnecting, waits). */

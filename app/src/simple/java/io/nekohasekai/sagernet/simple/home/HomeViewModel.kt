@@ -107,7 +107,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 autoStatus = status
                 if (reselected) {
                     liveLatency = null
-                    if (serviceState == BaseService.State.Connected) restartChecks(SOON_MS)
+                    if (foreground && serviceState == BaseService.State.Connected) restartChecks(SOON_MS)
                 }
                 publish()
             }

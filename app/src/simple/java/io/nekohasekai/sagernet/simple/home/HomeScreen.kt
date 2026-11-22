@@ -89,10 +89,11 @@ fun HomeScreen(
             Spacer(Modifier.height(16.dp))
         }
     }
+    val content = HomeStatus.content(state.hasServers, state.phase)
     BoxWithConstraints(modifier.fillMaxSize()) {
         // A wide but low window (a phone in landscape): the button and its status beside the banner and the cards,
         // so whether the VPN is on is visible without scrolling.
-        val sideBySide = state.hasServers == true && maxWidth > maxHeight && maxWidth >= 560.dp
+        val sideBySide = content == HomeContent.CONTROLS && maxWidth > maxHeight && maxWidth >= 560.dp
         if (sideBySide) {
             Row(
                 Modifier
@@ -116,11 +117,11 @@ fun HomeScreen(
                         .weight(1f)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    val content = Modifier.fillMaxWidth()
-                    banner(content)
-                    ServerCardView(state, actions.openServers, content)
+                    val cardWidth = Modifier.fillMaxWidth()
+                    banner(cardWidth)
+                    ServerCardView(state, actions.openServers, cardWidth)
                     Spacer(Modifier.height(12.dp))
-                    ModeCard(onModeStub, content)
+                    ModeCard(onModeStub, cardWidth)
                 }
             }
         } else {
@@ -131,20 +132,20 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                val content = Modifier.widthIn(max = 560.dp).fillMaxWidth()
-                banner(content)
-                when (state.hasServers) {
-                    null -> Unit
-                    false -> NoServers(onAdd = { addDialog = true }, modifier = content)
-                    true -> {
+                val cardWidth = Modifier.widthIn(max = 560.dp).fillMaxWidth()
+                banner(cardWidth)
+                when (content) {
+                    HomeContent.LOADING -> Unit
+                    HomeContent.NO_SERVERS -> NoServers(onAdd = { addDialog = true }, modifier = cardWidth)
+                    HomeContent.CONTROLS -> {
                         Spacer(Modifier.height(16.dp))
                         ConnectButton(state.phase, onToggle)
                         Spacer(Modifier.height(20.dp))
                         Status(state)
                         Spacer(Modifier.height(28.dp))
-                        ServerCardView(state, actions.openServers, content)
+                        ServerCardView(state, actions.openServers, cardWidth)
                         Spacer(Modifier.height(12.dp))
-                        ModeCard(onModeStub, content)
+                        ModeCard(onModeStub, cardWidth)
                         Spacer(Modifier.height(16.dp))
                     }
                 }
