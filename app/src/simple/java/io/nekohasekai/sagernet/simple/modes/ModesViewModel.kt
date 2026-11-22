@@ -230,7 +230,7 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
         applying {
             withContext(Dispatchers.IO) {
                 val app = getApplication<android.app.Application>()
-                val auto = TrafficModes.ensureManaged(app).auto
+                val auto = TrafficModeApplier.ensure(app).ids.auto
                 if (auto <= 0L) return@withContext null
                 val before = DataStore.selectedProxy
                 DataStore.selectedProxy = auto
