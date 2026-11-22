@@ -22,6 +22,7 @@ import io.nekohasekai.sagernet.route.RouteShare
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.Callable
 
 /**
  * The state of the traffic modes and the "managed" entities behind them (design.md D5). Everything lives in DataStore
@@ -220,9 +221,16 @@ object TrafficModes {
         // Without a server of its own a selector would only stand in for one: the home screen keeps offering to add
         // a server, and the selectors appear with the first one.
         if (stored <= 0L && !hasServers()) return 0L
-        AutoSelectorProfiles.writes.withLock {
-            val existing = if (stored > 0L) AutoSelectorProfiles.load(stored) else null
-            if (existing != null) {
+        // The `:bg` runtime saves the same selector JSON (pool, pin, last build, history) under its own in-process
+        // AutoSelectorProfiles.writes. The read and the write here run in one database write transaction, which
+        // excludes every other writer of the database, the other process included, so this save starts from the
+        // latest stored JSON and keeps whatever `:bg` wrote before it. Only the fields the runtime never writes
+        // (groups, tiers, strategy) are changed, and only when they differ; should a stale `:bg` save put older
+        // values back, the next ensure (every application, app start and group change) sets them again.
+        val kept = AutoSelectorProfiles.writes.withLock {
+            if (stored <= 0L) return@withLock false
+            SagerDatabase.instance.runInTransaction(Callable {
+                val existing = AutoSelectorProfiles.load(stored) ?: return@Callable false
                 val tiers = listOf(AutoSelector.Tier(-1, firstTier))
                 if (existing.gids != groups || existing.tiers != tiers || !existing.prioritized) {
                     existing.gids = ArrayList(groups)
@@ -230,9 +238,10 @@ object TrafficModes {
                     existing.strategy = AutoSelector.STRATEGY_PRIORITY
                     AutoSelectorProfiles.save(stored, existing)
                 }
-                return stored
-            }
+                true
+            })
         }
+        if (kept) return stored
         val selector = AutoSelector().apply {
             this.name = context.getString(name)
             gids = ArrayList(groups)
