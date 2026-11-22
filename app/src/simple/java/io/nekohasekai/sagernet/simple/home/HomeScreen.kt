@@ -56,6 +56,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
 import kotlinx.coroutines.delay
@@ -83,10 +84,10 @@ fun HomeScreen(
     var repairDialog by rememberSaveable { mutableStateOf(false) }
     var addDialog by rememberSaveable { mutableStateOf(false) }
 
-    val banner: @Composable (Modifier) -> Unit = { bannerModifier ->
+    val banner: @Composable (Modifier, Dp) -> Unit = { bannerModifier, gap ->
         state.problem?.let { problem ->
             ProblemBanner(problem, onRepair = { repairDialog = true }, onDismiss = onDismissProblem, modifier = bannerModifier)
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(gap))
         }
     }
     val content = HomeStatus.content(state.hasServers, state.phase)
@@ -94,11 +95,13 @@ fun HomeScreen(
         // A wide but low window (a phone in landscape): the button and its status beside the banner and the cards,
         // so whether the VPN is on is visible without scrolling.
         val sideBySide = content == HomeContent.CONTROLS && maxWidth > maxHeight && maxWidth >= 560.dp
+        // A low window (a phone in landscape) tightens the gaps so the cards and the add button fit without scrolling.
+        val low = maxHeight < 480.dp
         if (sideBySide) {
             Row(
                 Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = if (low) 0.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(
@@ -118,9 +121,9 @@ fun HomeScreen(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     val cardWidth = Modifier.fillMaxWidth()
-                    banner(cardWidth)
+                    banner(cardWidth, if (low) 8.dp else 16.dp)
                     ServerCardView(state, actions.openServers, cardWidth)
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(if (low) 8.dp else 12.dp))
                     ModeCard(onModeStub, cardWidth)
                 }
             }
@@ -133,10 +136,10 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 val cardWidth = Modifier.widthIn(max = 560.dp).fillMaxWidth()
-                banner(cardWidth)
+                banner(cardWidth, 16.dp)
                 when (content) {
                     HomeContent.LOADING -> Unit
-                    HomeContent.NO_SERVERS -> NoServers(onAdd = { addDialog = true }, modifier = cardWidth)
+                    HomeContent.NO_SERVERS -> NoServers(onAdd = { addDialog = true }, low = low, modifier = cardWidth)
                     HomeContent.CONTROLS -> {
                         Spacer(Modifier.height(16.dp))
                         ConnectButton(state.phase, onToggle)
@@ -441,9 +444,9 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
 }
 
 @Composable
-private fun NoServers(onAdd: () -> Unit, modifier: Modifier) {
+private fun NoServers(onAdd: () -> Unit, low: Boolean, modifier: Modifier) {
     Column(
-        modifier.padding(top = 48.dp),
+        modifier.padding(top = if (low) 8.dp else 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest) {
@@ -452,11 +455,11 @@ private fun NoServers(onAdd: () -> Unit, modifier: Modifier) {
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
-                    .padding(28.dp)
-                    .size(48.dp),
+                    .padding(if (low) 16.dp else 28.dp)
+                    .size(if (low) 32.dp else 48.dp),
             )
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(if (low) 12.dp else 24.dp))
         Text(
             stringResource(R.string.simple_no_servers_title),
             style = MaterialTheme.typography.headlineSmall,
@@ -469,7 +472,7 @@ private fun NoServers(onAdd: () -> Unit, modifier: Modifier) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(if (low) 16.dp else 24.dp))
         Button(onClick = onAdd) { Text(stringResource(R.string.simple_add_server)) }
     }
 }
