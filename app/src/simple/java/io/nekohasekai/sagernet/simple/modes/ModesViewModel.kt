@@ -77,22 +77,43 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
 
     init {
         GroupRepo.addListener(this)
+        // An app list edit in flight (this is a new process after Android stopped the old one meanwhile) brings its
+        // list back through appListClosed; applying before that would overwrite what was edited.
+        val resuming = editing != null
         viewModelScope.launch {
             applying {
                 // The first start, or an include list without apps left behind: apply now. Otherwise only bring the
                 // managed entities up to date (groups added meanwhile, a newer configuration).
-                if (!TrafficModes.isModeStored() || TrafficModeApplier.hasEmptyIncludeList()) {
+                val applyNow = !resuming && withContext(Dispatchers.IO) {
+                    !TrafficModes.isModeStored() || TrafficModeApplier.hasEmptyIncludeList()
+                }
+                if (applyNow) {
                     TrafficModeApplier.apply(getApplication())
                 } else {
-                    TrafficModes.ensureManaged(getApplication())
+                    withContext(Dispatchers.IO) { TrafficModes.ensureManaged(getApplication()) }
                 }
             }
         }
     }
 
-    /** Reads the state again (the screen came back, the service state changed). */
+    /**
+     * Reads the state again (the screen came back, the service state changed); creates the managed entities that
+     * could not be created before (the auto-selectors wait for the first server).
+     */
     fun refresh() {
-        viewModelScope.launch { publish() }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val ids = TrafficModes.managedIds()
+                    if (TrafficModes.isModeStored() && listOf(ids.smartRoute, ids.whitelistRoute, ids.auto, ids.autoWhitelist).any { it <= 0L }) {
+                        work.withLock { TrafficModes.ensureManaged(getApplication()) }
+                    }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                }
+            }
+            publish()
+        }
     }
 
     /**

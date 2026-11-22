@@ -9,6 +9,8 @@ import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.RouteRepo
+import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.group.RemoteRouteUpdater
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.outbound.types.AutoSelector
@@ -210,6 +212,9 @@ object TrafficModes {
 
     private suspend fun ensureSelector(context: Context, key: String, name: Int, groups: List<Long>, firstTier: String): Long {
         val stored = store.getLong(key) ?: 0L
+        // Without a server of its own a selector would only stand in for one: the home screen keeps offering to add
+        // a server, and the selectors appear with the first one.
+        if (stored <= 0L && !hasServers()) return 0L
         AutoSelectorProfiles.writes.withLock {
             val existing = if (stored > 0L) AutoSelectorProfiles.load(stored) else null
             if (existing != null) {
@@ -250,6 +255,15 @@ object TrafficModes {
     }
 
     private const val SELECTOR_GROUP_NAME = "Auto"
+
+    /** Whether a profile other than an auto-selector exists. */
+    fun hasServers(): Boolean = SagerDatabase.instance.query(
+        "SELECT 1 FROM `${ProxyEntity.TABLE}` WHERE `type` != ? LIMIT 1", arrayOf(AutoSelectorProfiles.TYPE),
+    ).use { it.moveToFirst() }
+
+    /** Whether [id] is one of the managed auto-selectors, which stand in for no server of their own. */
+    fun isManagedSelector(id: Long): Boolean =
+        id > 0L && (id == store.getLong(KEY_MANAGED_AUTO) || id == store.getLong(KEY_MANAGED_AUTO_WHITELIST))
 
     private inline fun <T> guarded(fallback: T, block: () -> T): T = try {
         block()

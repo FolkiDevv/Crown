@@ -22,6 +22,7 @@ import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
+import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -345,7 +346,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 try {
                     val selected = ProfileManager.getProfile(DataStore.selectedProxy)
                     val first = if (selected == null) firstProfile() else null
-                    Triple(selected ?: first, first?.id ?: 0L, selected != null || first != null)
+                    // The managed auto-selectors of the traffic modes are no server of their own.
+                    val hasServers = TrafficModes.hasServers() ||
+                        selected != null && !TrafficModes.isManagedSelector(selected.id)
+                    Triple(selected ?: first, first?.id ?: 0L, hasServers)
                 } catch (e: Exception) {
                     Logs.w(e)
                     Triple(null, 0L, mutableState.value.hasServers ?: false)
@@ -360,7 +364,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
 
     /** The first profile in list order, what a start uses when nothing valid is selected. */
     private fun firstProfile(): ProxyEntity? = SagerDatabase.groupDao.allGroups().firstNotNullOfOrNull { group ->
-        ProfileManager.members(group.id).firstOrNull()
+        ProfileManager.members(group.id).firstOrNull { !TrafficModes.isManagedSelector(it.id) }
     }
 
     /** Selects [fallbackProfile] when the selected profile is gone; false when there is nothing to start. */
