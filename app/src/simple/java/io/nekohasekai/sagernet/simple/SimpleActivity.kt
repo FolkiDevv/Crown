@@ -70,7 +70,6 @@ import androidx.window.core.layout.WindowWidthSizeClass
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.backup.BackupEntry
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.add.AddActions
 import io.nekohasekai.sagernet.simple.add.AddBusyDialog
@@ -162,6 +161,7 @@ class SimpleActivity : AppCompatActivity() {
                         }
 
                         is AddEvent.OpenClassic -> openClassicImport(event.text)
+                        is AddEvent.OpenBackup -> openBackup(event.uri)
                     }
                 }
             }
@@ -238,25 +238,25 @@ class SimpleActivity : AppCompatActivity() {
         }
     }
 
+    /** A file opened here or from another app: AddViewModel tells a backup from a configuration (design.md D4). */
+    private fun openFile(uri: Uri) = add.openFile(uri)
+
     /**
-     * A file opened here or from another app: first BackupEntry.open, which recognises a backup and opens the stock
-     * restore in the classic interface (the hand-off keeps MainActivity from sending it back), then the import.
+     * A backup: MainActivity takes it as a VIEW of the file, like one opened from a file manager, and BackupEntry.open
+     * there brings up the stock restore (Tools › Backup). The classic flag on this very intent keeps the redirect from
+     * sending it back here.
      */
-    private fun openFile(uri: Uri) {
-        lifecycleScope.launch {
-            // Sniffing the backup magic may read a cloud file over the network.
-            val backup = withContext(Dispatchers.IO) {
-                SimpleUi.handOffToClassic(uri)
-                val opened = try {
-                    BackupEntry.open(this@SimpleActivity, uri)
-                } catch (e: Exception) {
-                    Logs.w(e)
-                    false
-                }
-                if (!opened) SimpleUi.cancelHandOff(uri)
-                opened
-            }
-            if (!backup) add.importFile(uri)
+    private fun openBackup(uri: Uri) {
+        try {
+            startActivity(
+                Intent(this, MainActivity::class.java)
+                    .setAction(Intent.ACTION_VIEW)
+                    .setData(uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    .putExtra(SimpleUi.EXTRA_OPEN_CLASSIC, true)
+            )
+        } catch (e: ActivityNotFoundException) {
+            Logs.w(e)
         }
     }
 

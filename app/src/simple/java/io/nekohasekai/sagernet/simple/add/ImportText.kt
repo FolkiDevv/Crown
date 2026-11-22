@@ -42,6 +42,29 @@ object ImportText {
         return Kind.CONTENT
     }
 
+    /**
+     * Several payloads at once (the QR scanner's codes) as the texts to import one by one: share links on one line
+     * each go together (a list of links is one document), while subscriptions, routing links and documents of their
+     * own (a WireGuard INI, a JSON config) stay apart — joined, a document would swallow what follows it.
+     */
+    fun importUnits(payloads: List<String>): List<String> {
+        val units = ArrayList<String>()
+        val links = ArrayList<String>()
+        var linksAt = -1
+        for (payload in payloads.map { it.trim() }.filter { it.isNotEmpty() }) {
+            val shareLink = kind(payload) == Kind.CONTENT && payload.none { it == '\n' || it == '\r' } &&
+                "://" in payload && payload.none { it.isWhitespace() }
+            if (shareLink) {
+                if (linksAt < 0) linksAt = units.size
+                links.add(payload)
+            } else {
+                units.add(payload)
+            }
+        }
+        if (links.isNotEmpty()) units.add(linksAt, links.joinToString("\n"))
+        return units
+    }
+
     /** An http(s) URL with a host and no whitespace. */
     fun isHttpUrl(text: String): Boolean {
         val scheme = when {

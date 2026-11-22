@@ -12,6 +12,7 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleDefaults
 import io.nekohasekai.sagernet.simple.SimpleUi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,6 +60,9 @@ sealed interface AddEvent {
 
     /** A routing profile link: the classic interface imports it. */
     data class OpenClassic(val text: String) : AddEvent
+
+    /** A Throne backup: the classic interface restores it (Tools › Backup through BackupEntry). */
+    data class OpenBackup(val uri: Uri) : AddEvent
 }
 
 /**
@@ -105,24 +109,33 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** The QR scanner's texts (one per code): subscriptions one by one, the servers of the rest together. */
+    /** The QR scanner's texts (one per code): share links together, subscriptions and documents one by one. */
     fun importTexts(texts: List<String>) {
         val payloads = texts.map { it.trim() }.filter { it.isNotEmpty() }
         if (payloads.size <= 1) return importText(payloads.firstOrNull())
         viewModelScope.launch {
             imports.withLock {
-                val (single, rest) = payloads.partition { ImportText.kind(it) != ImportText.Kind.CONTENT }
-                for (payload in single) perform(reading { SimpleImport.plan(payload) }, fromClipboard = false)
-                if (rest.isNotEmpty()) perform(reading { SimpleImport.plan(rest.joinToString("\n")) }, fromClipboard = false)
+                for (unit in ImportText.importUnits(payloads)) {
+                    perform(reading { SimpleImport.plan(unit) }, fromClipboard = false)
+                }
             }
         }
     }
 
-    /** A file that is no backup (the activity asked BackupEntry first, design.md D4). */
-    fun importFile(uri: Uri) {
+    /**
+     * A file chosen here or opened from another app (design.md D4): a Throne backup goes to the stock restore
+     * ([AddEvent.OpenBackup]); anything else is read as text and imported. The check runs here, not in the activity,
+     * so a slow cloud file survives the activity being recreated meanwhile.
+     */
+    fun openFile(uri: Uri) {
         viewModelScope.launch {
             imports.withLock {
                 val app = getApplication<Application>()
+                if (reading { SimpleImport.isBackup(app, uri) }) {
+                    mutableState.update { it.copy(busy = null) }
+                    eventChannel.send(AddEvent.OpenBackup(uri))
+                    return@withLock
+                }
                 val text = try {
                     reading { SimpleImport.readFile(app, uri) }
                 } catch (e: SimpleImport.FileError) {
@@ -216,16 +229,23 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         mutableState.update { it.copy(busy = AddBusy.SUBSCRIPTION) }
-        val result = withContext(Dispatchers.IO) {
+        // The download and its finishing touches (the update interval, or removing a group that never loaded) run in
+        // the import scope, not in this ViewModel's: leaving the screen must not strand a half-added subscription.
+        val (result, updateHours) = SimpleImport.scope.async {
             // «Send HWID» and the provider's interval are on before the first download (SimpleDefaults).
             SimpleDefaults.apply(getApplication())
-            SimpleImport.subscribe(plan)
-        }
+            val subscribed = SimpleImport.subscribe(plan)
+            val hours = if (subscribed is SimpleImport.SubscribeResult.Done) {
+                SimpleImport.updateAutomatically(subscribed.gid, plan)
+            } else {
+                0
+            }
+            subscribed to hours
+        }.await()
         when (result) {
             is SimpleImport.SubscribeResult.Failed -> show(AddDialog.SubscriptionFailed(result.detail))
             is SimpleImport.SubscribeResult.Done -> {
                 val enabled = ArrayList<Enabled>()
-                val updateHours = withContext(Dispatchers.IO) { SimpleImport.updateAutomatically(result.gid, plan) }
                 // The ready settings come with the first subscription added here (simple-ui "Готовые настройки").
                 val first = !prefs.getBoolean(KEY_FIRST_SUBSCRIPTION, false)
                 val auto = first && (setUpAuto?.invoke() ?: false)

@@ -98,6 +98,22 @@ class ImportTextTest {
     }
 
     @Test
+    fun scannedPayloadsKeepDocumentsApart() {
+        val wireGuard = "[Interface]\nPrivateKey = x\n[Peer]\nEndpoint = 1.2.3.4:51820"
+        val vless = "vless://id@h:443?type=tcp#A"
+        val trojan = "trojan://pw@h2:443#B"
+        val sub = "https://sub.example.com/s"
+        assertEquals(
+            listOf(wireGuard, "$vless\n$trojan", sub),
+            ImportText.importUnits(listOf(wireGuard, vless, " ", sub, trojan)),
+        )
+        // Links only: one document, as a multi-link QR import always was.
+        assertEquals(listOf("$vless\n$trojan"), ImportText.importUnits(listOf(vless, trojan)))
+        val json = """{"outbounds":[{"type":"socks","server":"1.2.3.4","server_port":1080}]}"""
+        assertEquals(listOf(vless, json), ImportText.importUnits(listOf(vless, json)))
+    }
+
+    @Test
     fun countryFlags() {
         assertEquals("DE", CountryFlags.countryOf("🇩🇪 Germany 3"))
         assertEquals("NL", CountryFlags.countryOf("Amsterdam 🇳🇱"))

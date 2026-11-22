@@ -6,21 +6,29 @@ import android.provider.OpenableColumns
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
+import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SubUserInfo
+import io.nekohasekai.sagernet.database.backup.ThrBackup
 import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
+import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.ui.SubscribeFlows
 import io.nekohasekai.sagernet.ui.profile.ProfileTextImport
 import io.nekohasekai.sagernet.validation.vplural
 import io.nekohasekai.sagernet.validation.vtr
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
@@ -32,6 +40,9 @@ import java.nio.charset.Charset
  * the rest is not recognised. Blocking calls; run them off the main thread.
  */
 object SimpleImport {
+
+    /** Imports that must finish whatever happens to the screen that started them. */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** What a text turned out to be, before anything is added. */
     sealed interface Plan {
@@ -74,7 +85,7 @@ object SimpleImport {
             if (outbounds.isEmpty()) {
                 Plan.NotRecognized
             } else {
-                val links = outbounds.mapNotNull { o -> runCatching { o.exportToLink() }.getOrNull()?.takeIf { "://" in it } }
+                val links = outbounds.mapNotNull(::identityLink)
                 Plan.Servers(text, outbounds.size, links)
             }
         }
@@ -83,14 +94,25 @@ object SimpleImport {
     /** Whether everything [plan] would add is in the app already (simple-ui "Ссылка уже добавлена"). */
     fun isAdded(plan: Plan): Boolean = when (plan) {
         is Plan.Subscription -> ImportText.alreadyAdded(listOf(plan.url), GroupRepo.all().filter { it.isSubscription }.map { it.url })
-        // Both sides come from the same exporter, so the same server has the same link.
+        // Both sides go through the same exporter with the name blanked, so the same server has the same link
+        // whatever it is called (VMess keeps its name inside the encoded document, not in a #fragment).
         is Plan.Servers -> plan.links.size == plan.count &&
             ImportText.alreadyAdded(plan.links, SagerDatabase.proxyDao.getAll().mapNotNull { p ->
-                runCatching { p.exportLink() }.getOrNull()?.takeIf { it.isNotEmpty() }
+                runCatching { identityLink(ProxyEntity.parseOutbound(p.type, p.outboundJson)) }.getOrNull()
             })
 
         else -> false
     }
+
+
+    /**
+     * The share link of [outbound] without its display name: an identity of the server for the "already added" check.
+     * [outbound] must be a fresh object (it is changed); null for the types without a share link.
+     */
+    private fun identityLink(outbound: Outbound): String? = runCatching {
+        outbound.name = ""
+        outbound.exportToLink()
+    }.getOrNull()?.takeIf { "://" in it }
 
     // ------------------------------------------------------------------------------------------------ servers
 
@@ -139,7 +161,7 @@ object SimpleImport {
                 ?: SubscribeResult.Failed(null)
             if (result is SubscribeResult.Failed) {
                 Logs.w("simple add: the first download of subscription $gid failed: ${result.detail}")
-                if (GroupRepo.delete(gid)) SubscriptionScheduler.schedule()
+                withContext(NonCancellable) { if (GroupRepo.delete(gid)) SubscriptionScheduler.schedule() }
             }
             result
         } finally {
@@ -249,6 +271,14 @@ object SimpleImport {
     }
 
     // ------------------------------------------------------------------------------------------------ files
+
+    /** Whether [uri] is a Throne backup: the "THRN" magic BackupEntry checks (it may read a cloud file). */
+    fun isBackup(context: Context, uri: Uri): Boolean = try {
+        context.contentResolver.openInputStream(uri)?.use { ThrBackup.hasMagic(it) } == true
+    } catch (e: Exception) {
+        Logs.w("simple add: reading $uri", e)
+        false
+    }
 
     private const val MAX_FILE_SIZE = 50L * 1024 * 1024
 

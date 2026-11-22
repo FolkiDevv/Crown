@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.service.quicksettings.TileService
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.utils.PlatformNotifications
@@ -33,7 +32,7 @@ object SimpleUi {
     /**
      * Intents only the classic interface handles: the tile's long press and the Wi-Fi permission flow. Links, files,
      * shares and the QR scanner's texts ([MainActivity.EXTRA_IMPORT_TEXTS]) go to the simple UI's add flow since
-     * batch 4; a backup it recognises comes back here through [handOffToClassic].
+     * batch 4; a backup it recognises comes back here as a VIEW carrying [EXTRA_OPEN_CLASSIC].
      */
     private val CLASSIC_ACTIONS = setOf(
         TileService.ACTION_QS_TILE_PREFERENCES,
@@ -42,30 +41,6 @@ object SimpleUi {
         EXTRA_OPEN_CLASSIC,
         PlatformNotifications.EXTRA_WIFI_PERMISSION,
     )
-
-    /**
-     * A file the simple UI recognised as a backup: BackupEntry.open opens it in MainActivity (Tools › Backup, the
-     * stock restore) with a plain VIEW intent, which must not come back here. UI process memory only.
-     */
-    @Volatile
-    private var classicHandOff: Uri? = null
-
-    /** The next VIEW intent of [uri] stays in the classic interface (see [classicHandOff]). */
-    fun handOffToClassic(uri: Uri) {
-        classicHandOff = uri
-    }
-
-    /** [uri] turned out not to be a backup: nothing goes to the classic interface. */
-    fun cancelHandOff(uri: Uri) {
-        if (classicHandOff == uri) classicHandOff = null
-    }
-
-    private fun takeHandOff(intent: Intent?): Boolean {
-        val uri = classicHandOff ?: return false
-        if (intent?.action != Intent.ACTION_VIEW || intent.data != uri) return false
-        classicHandOff = null
-        return true
-    }
 
     /** The key-value storage of the choice; [SharedPreferences] on the device, a map in tests. */
     interface Store {
@@ -106,9 +81,8 @@ object SimpleUi {
     fun opensClassic(action: String?, extraKeys: Set<String>): Boolean =
         action in CLASSIC_ACTIONS || extraKeys.any { it in CLASSIC_EXTRAS }
 
-    /** [handedOff]: the intent opens a backup the simple UI handed over to the classic restore. */
-    fun shouldRedirect(store: Store, action: String?, extraKeys: Set<String>, handedOff: Boolean = false): Boolean =
-        isSimpleSelected(store) && !handedOff && !opensClassic(action, extraKeys)
+    fun shouldRedirect(store: Store, action: String?, extraKeys: Set<String>): Boolean =
+        isSimpleSelected(store) && !opensClassic(action, extraKeys)
 
     /**
      * Called by [MainActivity.onCreate] before its content is set, and by [MainActivity.onNewIntent] for a reused
@@ -119,7 +93,7 @@ object SimpleUi {
         val store = store(activity)
         recordInstallKind(activity, store)
         val extras = intent?.extras?.keySet().orEmpty()
-        if (!shouldRedirect(store, intent?.action, extras, takeHandOff(intent))) return false
+        if (!shouldRedirect(store, intent?.action, extras)) return false
         activity.startActivity(simpleIntent(activity, intent))
         activity.finish()
         noTransition(activity)

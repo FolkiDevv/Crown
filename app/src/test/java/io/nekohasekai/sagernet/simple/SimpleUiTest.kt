@@ -57,8 +57,8 @@ class SimpleUiTest {
         assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
         assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.SEND", setOf("android.intent.extra.TEXT")))
         assertTrue(SimpleUi.shouldRedirect(store, null, setOf("importTexts")))
-        // A backup the simple interface handed over to the classic restore stays there.
-        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet(), handedOff = true))
+        // A backup the simple interface hands to the classic restore carries the classic flag on its VIEW.
+        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", setOf(SimpleUi.EXTRA_OPEN_CLASSIC)))
         SimpleUi.select(store, simple = false)
         assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
     }
