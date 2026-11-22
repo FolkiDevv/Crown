@@ -12,6 +12,7 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleDefaults
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.modes.TrafficModeApplier
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -210,6 +211,9 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
                 is SimpleImport.Plan.Subscription -> subscribe(plan)
                 is SimpleImport.Plan.Servers -> addServers(plan)
             }
+        } catch (e: CancellationException) {
+            // The screen went away; the import scope finishes the import itself (SimpleImport.scope).
+            throw e
         } catch (e: Exception) {
             Logs.w("simple add", e)
             show(AddDialog.Failed)
