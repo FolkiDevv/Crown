@@ -1,0 +1,402 @@
+package io.nekohasekai.sagernet.simple.home
+
+import android.app.Application
+import android.os.RemoteException
+import android.os.SystemClock
+import androidx.annotation.StringRes
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.aidl.ISagerNetService
+import io.nekohasekai.sagernet.aidl.SpeedDisplayData
+import io.nekohasekai.sagernet.aidl.TrafficData
+import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.bg.SagerConnection
+import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorClient
+import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
+import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorStatus
+import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.ProfileManager
+import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.ConnectionClock
+import io.nekohasekai.sagernet.simple.SimpleHooks
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** The server card: what runs (or would run) when the button is pressed. */
+data class ServerCard(
+    /** The profile's name; for an auto-selector its own name. */
+    val name: String,
+    val auto: Boolean,
+    /** The server the running auto-selector picked, "" while none is picked or for a plain profile. */
+    val autoSelected: String = "",
+    /** The latest measured delay in ms, null when unknown. */
+    val latencyMs: Int? = null,
+)
+
+data class HomeUiState(
+    val phase: ConnectionPhase = ConnectionPhase.OFF,
+    /** `SystemClock.elapsedRealtime()` of the connection start, 0 when not connected. */
+    val connectedSince: Long = 0L,
+    /** Bytes per second through the proxy. */
+    val txRate: Long = 0L,
+    val rxRate: Long = 0L,
+    /** null until the profiles are read. */
+    val hasServers: Boolean? = null,
+    val server: ServerCard? = null,
+    val problem: HomeProblem? = null,
+)
+
+/**
+ * The home screen over the same service connection the classic UI uses ([SagerConnection], design.md D4): the
+ * service state, the speed, the connection time (kept by [SimpleHooks] in `:bg`), the current server and the problem
+ * banner. While the screen is visible ([setForeground]) the running connection is URL-tested now and then, which is
+ * how a server that stopped answering is noticed.
+ */
+class HomeViewModel(application: Application) : AndroidViewModel(application), SagerConnection.Callback,
+    ProfileManager.Listener {
+
+    private val connection = SagerConnection(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_BACKGROUND, true)
+
+    private val mutableState = MutableStateFlow(HomeUiState())
+    val state: StateFlow<HomeUiState> = mutableState.asStateFlow()
+
+    private val mutableMessages = MutableSharedFlow<Int>(extraBufferCapacity = 4)
+
+    /** One-off snackbar texts (string resources) for the screen. */
+    val messages: SharedFlow<Int> = mutableMessages.asSharedFlow()
+
+    private var serviceState = BaseService.State.Idle
+    private var userStopping = false
+    private var lost: HomeProblem.ConnectionLost? = null
+    private var urlTestFailures = 0
+    private var autoStatus = AutoSelectorStatus.IDLE
+    private var foreground = false
+    private var checkJob: Job? = null
+    private var profilesJob: Job? = null
+
+    /** The profile [connect] selects when the selected one is gone; 0 = keep the selection. */
+    private var fallbackProfile = 0L
+
+    /** The delay the last check of the running connection measured (through the auto-selector's pick, if any). */
+    private var liveLatency: Int? = null
+
+    init {
+        lost = DataStore.serviceError.takeIf { it.isNotBlank() }?.let { HomeProblem.ConnectionLost(it) }
+        connection.connect(application, this)
+        ProfileManager.addListener(this)
+        viewModelScope.launch {
+            AutoSelectorClient.status.collect { status ->
+                val reselected = status.selectedId != autoStatus.selectedId
+                autoStatus = status
+                if (reselected) {
+                    liveLatency = null
+                    if (serviceState == BaseService.State.Connected) restartChecks(SOON_MS)
+                }
+                publish()
+            }
+        }
+        refreshProfiles()
+    }
+
+    // ------------------------------------------------------------------------------------------------ screen events
+
+    /** The screen became visible or hidden: the speed is sent only to a foreground connection. */
+    fun setForeground(visible: Boolean) {
+        foreground = visible
+        connection.updateConnectionId(
+            if (visible) SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND
+            else SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_BACKGROUND
+        )
+        if (visible) {
+            refreshProfiles()
+            if (serviceState == BaseService.State.Connected) restartChecks(SOON_MS)
+        } else {
+            checkJob?.cancel()
+            mutableState.update { it.copy(txRate = 0L, rxRate = 0L) }
+        }
+    }
+
+    /**
+     * The main button: stops in the connecting, protected and reconnecting phases, otherwise starts. [requestStart]
+     * asks for the VPN consent and starts the service (the activity owns that request).
+     */
+    fun toggle(requestStart: () -> Unit) {
+        val phase = mutableState.value.phase
+        when {
+            HomeStatus.buttonStops(phase) -> {
+                userStopping = true
+                publish()
+                SagerNet.stopService()
+            }
+
+            phase == ConnectionPhase.DISCONNECTING -> Unit
+            else -> viewModelScope.launch {
+                if (!prepareSelection()) {
+                    refreshProfiles()
+                    return@launch
+                }
+                requestStart()
+            }
+        }
+    }
+
+    fun message(@StringRes text: Int) {
+        mutableMessages.tryEmit(text)
+    }
+
+    /** Hides the banner; a loss is forgotten like a swiped error of the classic UI. */
+    fun dismissProblem() {
+        if (lost != null) {
+            lost = null
+            viewModelScope.launch(Dispatchers.IO) { clearServiceError() }
+        }
+        if (mutableState.value.problem == HomeProblem.ServerNotResponding) urlTestFailures = 0
+        publish()
+    }
+
+    override fun onCleared() {
+        ProfileManager.removeListener(this)
+        connection.disconnect(getApplication())
+        super.onCleared()
+    }
+
+    // ------------------------------------------------------------------------------------------------ service
+
+    override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
+        onState(state, msg)
+    }
+
+    override fun onServiceConnected(service: ISagerNetService) {
+        val state = try {
+            BaseService.State.entries[service.state]
+        } catch (_: RemoteException) {
+            BaseService.State.Idle
+        }
+        // A start left over from a service process that died without stopping (force stop, crash, reboot).
+        if (!state.started && state != BaseService.State.Stopping) {
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { DataStore.configurationStore.remove(SimpleHooks.KEY_CONNECTED_SINCE) }
+            }
+        }
+        onState(state, null, restartPending = false)
+    }
+
+    override fun onServiceDisconnected() = onState(BaseService.State.Idle, null)
+
+    override fun onBinderDied() {
+        val wasActive = serviceState.started && !userStopping
+        if (wasActive) lost = HomeProblem.ConnectionLost(null)
+        onState(BaseService.State.Idle, null)
+        connection.disconnect(getApplication())
+        connection.connect(getApplication(), this)
+    }
+
+    override fun cbSpeedUpdate(stats: SpeedDisplayData) {
+        mutableState.update { it.copy(txRate = stats.txRateProxy, rxRate = stats.rxRateProxy) }
+    }
+
+    override fun cbSelectorUpdate(id: Long) = refreshProfiles()
+
+    private fun onState(state: BaseService.State, msg: String?, restartPending: Boolean? = null) {
+        val previous = mutableState.value.phase
+        val since = readSince()
+        val pending = restartPending ?: (since > 0L)
+        val phase = HomeStatus.phase(state, userStopping, pending, previous)
+        when (state) {
+            BaseService.State.Connecting -> lost = null
+            BaseService.State.Stopped -> {
+                if (HomeStatus.isLoss(msg, userStopping)) lost = HomeProblem.ConnectionLost(msg)
+            }
+
+            else -> Unit
+        }
+        if (state == BaseService.State.Connected || !state.started && state != BaseService.State.Stopping) {
+            userStopping = false
+        }
+        val wasConnected = serviceState == BaseService.State.Connected
+        serviceState = state
+        val connected = state == BaseService.State.Connected
+        if (connected && !wasConnected) {
+            urlTestFailures = 0
+            if (foreground) restartChecks(FIRST_CHECK_MS)
+        } else if (!connected && wasConnected) {
+            checkJob?.cancel()
+            urlTestFailures = 0
+            liveLatency = null
+        }
+        mutableState.update {
+            it.copy(
+                phase = phase,
+                connectedSince = when {
+                    connected -> since.takeIf { s -> s > 0L } ?: it.connectedSince.takeIf { s -> s > 0L }
+                    ?: SystemClock.elapsedRealtime()
+
+                    phase == ConnectionPhase.RECONNECTING -> it.connectedSince
+                    else -> 0L
+                },
+                txRate = if (connected) it.txRate else 0L,
+                rxRate = if (connected) it.rxRate else 0L,
+            )
+        }
+        publish()
+        if (state == BaseService.State.Stopped) refreshProfiles()
+    }
+
+    /** The connection start the service keeps, 0 when none (or not plausible). */
+    private fun readSince(): Long {
+        val since = try {
+            DataStore.configurationStore.getLong(SimpleHooks.KEY_CONNECTED_SINCE) ?: 0L
+        } catch (e: Exception) {
+            Logs.w(e)
+            0L
+        }
+        return if (ConnectionClock.isValid(since, SystemClock.elapsedRealtime())) since else 0L
+    }
+
+    // ------------------------------------------------------------------------------------------------ server checks
+
+    private fun restartChecks(firstDelay: Long) {
+        checkJob?.cancel()
+        checkJob = viewModelScope.launch {
+            delay(firstDelay)
+            while (isActive && serviceState == BaseService.State.Connected) {
+                val service = connection.service
+                val result = if (service == null) null else withContext(Dispatchers.IO) {
+                    try {
+                        service.urlTest()
+                    } catch (e: Exception) {
+                        Logs.d("simple home: url test failed: ${e.message}")
+                        FAILED
+                    }
+                }
+                if (!isActive || serviceState != BaseService.State.Connected) break
+                when {
+                    result == null -> Unit
+                    result > 0 -> {
+                        urlTestFailures = 0
+                        liveLatency = result
+                    }
+
+                    // -2: failed through an OpenVPN/OpenConnect exit whose tunnel is up; says nothing either way
+                    result == VPN_EXIT_UNKNOWN -> Unit
+                    else -> {
+                        urlTestFailures++
+                        liveLatency = null
+                    }
+                }
+                publish()
+                delay(if (urlTestFailures > 0) RETRY_MS else INTERVAL_MS)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ profiles
+
+    // ProfileManager calls these on any thread: the refresh itself runs on the main one.
+    override suspend fun onAdd(profile: ProxyEntity) = refreshProfilesLater()
+    override suspend fun onUpdated(data: List<TrafficData>) = Unit
+    override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
+        if (profile.id == DataStore.selectedProxy || profile.id == fallbackProfile) refreshProfilesLater()
+    }
+
+    override suspend fun onRemoved(groupId: Long, profileId: Long) = refreshProfilesLater()
+
+    private fun refreshProfilesLater() {
+        viewModelScope.launch { refreshProfiles() }
+    }
+
+    private var selectedProfile: ProxyEntity? = null
+
+    private fun refreshProfiles() {
+        profilesJob?.cancel()
+        profilesJob = viewModelScope.launch {
+            val (profile, fallback, hasServers) = withContext(Dispatchers.IO) {
+                try {
+                    val selected = ProfileManager.getProfile(DataStore.selectedProxy)
+                    val first = if (selected == null) firstProfile() else null
+                    Triple(selected ?: first, first?.id ?: 0L, selected != null || first != null)
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    Triple(null, 0L, mutableState.value.hasServers ?: false)
+                }
+            }
+            selectedProfile = profile
+            fallbackProfile = fallback
+            mutableState.update { it.copy(hasServers = hasServers) }
+            publish()
+        }
+    }
+
+    /** The first profile in list order, what a start uses when nothing valid is selected. */
+    private fun firstProfile(): ProxyEntity? = SagerDatabase.groupDao.allGroups().firstNotNullOfOrNull { group ->
+        ProfileManager.members(group.id).firstOrNull()
+    }
+
+    /** Selects [fallbackProfile] when the selected profile is gone; false when there is nothing to start. */
+    private suspend fun prepareSelection(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (ProfileManager.getProfile(DataStore.selectedProxy) != null) return@withContext true
+            val first = firstProfile() ?: return@withContext false
+            DataStore.selectedProxy = first.id
+            true
+        } catch (e: Exception) {
+            Logs.w(e)
+            false
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ output
+
+    private fun publish() {
+        val connected = serviceState == BaseService.State.Connected
+        val profile = selectedProfile
+        val auto = profile?.type == AutoSelectorProfiles.TYPE
+        val running = autoStatus.takeIf { auto && it.active && it.selectorId == profile?.id }
+        val server = profile?.let {
+            ServerCard(
+                name = it.displayName(),
+                auto = auto,
+                autoSelected = running?.selectedName.orEmpty(),
+                latencyMs = if (connected) liveLatency else it.latency.takeIf { ms -> ms > 0 && !auto },
+            )
+        }
+        val exhausted = running != null && running.exhaustedSinceMs > 0L
+        mutableState.update {
+            it.copy(server = server, problem = HomeStatus.problem(lost, connected, urlTestFailures, exhausted))
+        }
+    }
+
+    private fun clearServiceError() {
+        try {
+            DataStore.serviceError = ""
+            DataStore.serviceErrorDns = false
+            DataStore.serviceErrorGeo = false
+            DataStore.serviceErrorRuleSets = false
+        } catch (e: Exception) {
+            Logs.w(e)
+        }
+    }
+
+    private companion object {
+        const val FIRST_CHECK_MS = 2_000L
+        const val SOON_MS = 1_000L
+        const val INTERVAL_MS = 30_000L
+        const val RETRY_MS = 10_000L
+        const val FAILED = -1
+        const val VPN_EXIT_UNKNOWN = -2
+    }
+}

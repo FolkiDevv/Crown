@@ -5,10 +5,61 @@
     <string name="simple_nav_home">Home</string>
     <string name="simple_nav_servers">Servers</string>
     <string name="simple_nav_settings">Settings</string>
-    <string name="simple_home_placeholder">The connect button will appear here soon.</string>
     <string name="simple_servers_placeholder">Your servers will appear here soon.</string>
     <string name="simple_settings_classic">Classic interface</string>
     <string name="simple_settings_classic_summary">All features and settings of the full app. You can come back from its menu.</string>
     <!-- Item of the classic drawer menu (main_drawer_menu.xml) -->
     <string name="simple_switch_to_new">New interface</string>
+
+    <string name="simple_ok">OK</string>
+    <string name="simple_cancel">Cancel</string>
+
+    <!-- Home: the connect button and its status -->
+    <string name="simple_status_off">Off</string>
+    <string name="simple_status_connecting">Connecting…</string>
+    <string name="simple_status_protected">Protected</string>
+    <string name="simple_status_reconnecting">Reconnecting…</string>
+    <string name="simple_status_disconnecting">Disconnecting…</string>
+    <string name="simple_hint_connect">Tap the button to connect</string>
+    <string name="simple_hint_cancel">Tap the button to cancel</string>
+    <string name="simple_hint_reconnecting">Restoring the connection</string>
+    <!-- %1$s: time since the connection started, e.g. 1:05 or 2:03:04 -->
+    <string name="simple_connected_for">Connected for %1$s</string>
+    <!-- %1$s: download speed, %2$s: upload speed, e.g. "1.2 MB" (per second) -->
+    <string name="simple_speed">↓ %1$s/s · ↑ %2$s/s</string>
+    <string name="simple_action_connect">Connect</string>
+    <string name="simple_action_disconnect">Disconnect</string>
+    <string name="simple_action_cancel">Cancel connecting</string>
+    <string name="simple_vpn_permission_denied">Android did not allow the VPN connection.</string>
+
+    <!-- Home: no servers yet -->
+    <string name="simple_no_servers_title">No servers yet</string>
+    <string name="simple_no_servers_text">Add a server or a subscription link from your VPN provider to connect.</string>
+    <string name="simple_add_server">Add server</string>
+    <string name="simple_add_server_interim_title">Add a server</string>
+    <string name="simple_add_server_interim_text">Adding servers right here is coming in an upcoming update. For now, add it in the classic interface and come back.</string>
+    <string name="simple_open_classic">Open classic interface</string>
+
+    <!-- Home: server and traffic mode cards -->
+    <string name="simple_card_server">Server</string>
+    <string name="simple_server_none">Not selected</string>
+    <string name="simple_server_auto">Auto</string>
+    <string name="simple_server_auto_choosing">Auto: choosing the best server</string>
+    <!-- %1$d: delay in milliseconds -->
+    <string name="simple_latency_ms">%1$d ms</string>
+    <string name="simple_card_mode">Traffic mode</string>
+    <string name="simple_mode_smart">Smart</string>
+    <string name="simple_mode_coming">Choosing a traffic mode is coming in an upcoming update.</string>
+
+    <!-- Home: problem banner -->
+    <string name="simple_problem_lost_title">Connection lost</string>
+    <string name="simple_problem_lost_text">The VPN turned off unexpectedly. Repair can help find out why.</string>
+    <string name="simple_problem_server_title">Server not responding</string>
+    <string name="simple_problem_server_text">The VPN is on, but sites may not open through this server.</string>
+    <string name="simple_problem_repair">Repair</string>
+    <string name="simple_problem_dismiss">Hide</string>
+    <string name="simple_repair_title">Repair</string>
+    <string name="simple_repair_coming">Automatic checks and fixes are coming in an upcoming update.</string>
+    <!-- %1$s: the error message of the service -->
+    <string name="simple_repair_details">Details: %1$s</string>
 </resources>

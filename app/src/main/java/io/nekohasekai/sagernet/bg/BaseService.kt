@@ -503,6 +503,7 @@ class BaseService {
                     )
                 }
 
+                io.nekohasekai.sagernet.simple.SimpleHooks.onServiceStopped(finishRestart)
                 try {
                     data.changeState(State.Stopped, originalMessage)
                 } catch (error: Throwable) {
@@ -681,6 +682,7 @@ class BaseService {
                     DataStore.runningRouteId = proxy.routeId
 
                     withContext(coreDispatcher) { startProcesses() }
+                    io.nekohasekai.sagernet.simple.SimpleHooks.onServiceStarted()
                     data.changeState(State.Connected)
                     runCatching { watchWifiRules(proxy) }.onFailure { Logs.w(it) }
 

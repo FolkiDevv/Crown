@@ -3,9 +3,52 @@
     <string name="simple_nav_home">Главная</string>
     <string name="simple_nav_servers">Серверы</string>
     <string name="simple_nav_settings">Настройки</string>
-    <string name="simple_home_placeholder">Скоро здесь появится кнопка подключения.</string>
     <string name="simple_servers_placeholder">Скоро здесь появится список ваших серверов.</string>
     <string name="simple_settings_classic">Классический интерфейс</string>
     <string name="simple_settings_classic_summary">Все функции и настройки полного приложения. Вернуться можно из его меню.</string>
     <string name="simple_switch_to_new">Новый интерфейс</string>
+
+    <string name="simple_ok">ОК</string>
+    <string name="simple_cancel">Отмена</string>
+
+    <string name="simple_status_off">Выключен</string>
+    <string name="simple_status_connecting">Подключение…</string>
+    <string name="simple_status_protected">Защищено</string>
+    <string name="simple_status_reconnecting">Переподключение…</string>
+    <string name="simple_status_disconnecting">Отключение…</string>
+    <string name="simple_hint_connect">Нажмите кнопку, чтобы подключиться</string>
+    <string name="simple_hint_cancel">Нажмите кнопку, чтобы отменить</string>
+    <string name="simple_hint_reconnecting">Восстанавливаем подключение</string>
+    <string name="simple_connected_for">Подключено %1$s</string>
+    <string name="simple_speed">↓ %1$s/с · ↑ %2$s/с</string>
+    <string name="simple_action_connect">Подключить</string>
+    <string name="simple_action_disconnect">Отключить</string>
+    <string name="simple_action_cancel">Отменить подключение</string>
+    <string name="simple_vpn_permission_denied">Android не разрешил VPN-подключение.</string>
+
+    <string name="simple_no_servers_title">Серверов пока нет</string>
+    <string name="simple_no_servers_text">Добавьте сервер или ссылку на подписку от вашего VPN-сервиса, чтобы подключиться.</string>
+    <string name="simple_add_server">Добавить сервер</string>
+    <string name="simple_add_server_interim_title">Добавление сервера</string>
+    <string name="simple_add_server_interim_text">Добавление серверов прямо здесь появится в одном из ближайших обновлений. Пока добавьте сервер в классическом интерфейсе и вернитесь.</string>
+    <string name="simple_open_classic">Открыть классический интерфейс</string>
+
+    <string name="simple_card_server">Сервер</string>
+    <string name="simple_server_none">Не выбран</string>
+    <string name="simple_server_auto">Авто</string>
+    <string name="simple_server_auto_choosing">Авто: выбираем лучший сервер</string>
+    <string name="simple_latency_ms">%1$d мс</string>
+    <string name="simple_card_mode">Режим трафика</string>
+    <string name="simple_mode_smart">Умный</string>
+    <string name="simple_mode_coming">Выбор режима трафика появится в одном из ближайших обновлений.</string>
+
+    <string name="simple_problem_lost_title">Соединение потеряно</string>
+    <string name="simple_problem_lost_text">VPN неожиданно отключился. «Починка» поможет найти причину.</string>
+    <string name="simple_problem_server_title">Сервер не отвечает</string>
+    <string name="simple_problem_server_text">VPN включён, но сайты через этот сервер могут не открываться.</string>
+    <string name="simple_problem_repair">Починить</string>
+    <string name="simple_problem_dismiss">Скрыть</string>
+    <string name="simple_repair_title">Починка</string>
+    <string name="simple_repair_coming">Автоматическая проверка и исправление появятся в одном из ближайших обновлений.</string>
+    <string name="simple_repair_details">Подробности: %1$s</string>
 </resources>
