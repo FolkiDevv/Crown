@@ -6,7 +6,7 @@ import java.util.Locale
 sealed interface ServerCountry {
 
     /** [code]: ISO 3166-1 alpha-2, upper case. [fromName]: found in the name, else the exit IP check's result. */
-    data class Known(val code: String, val fromName: Boolean) : ServerCountry
+    data class Known(override val code: String, val fromName: Boolean) : ServerCountry
 
     /** Not in the name, and the exit IP check of this server is running. */
     data object Detecting : ServerCountry
@@ -14,7 +14,8 @@ sealed interface ServerCountry {
     /** Neither the name nor an exit IP check names a country. */
     data object Unknown : ServerCountry
 
-    val code: String? get() = (this as? Known)?.code
+    /** The ISO code of a known country, null otherwise. */
+    val code: String? get() = null
 }
 
 /**
