@@ -117,8 +117,14 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     /** The servers the URL tests since [lastUrlTest] covered. */
     private val testedIds = HashSet<Long>()
 
-    /** The servers whose exit IP this section checked (successfully or not) since it was created. */
-    private val ipChecked = HashSet<Long>()
+    /**
+     * The servers whose country this section has tried to find once since it was created (a URL test, then an exit
+     * IP check if they answered), whatever the outcome; later rounds check them again without «Страна определяется…».
+     */
+    private val countryChecked = HashSet<Long>()
+
+    /** Servers of the current round shown as «Страна определяется…» until the round is through. */
+    private val roundPending = HashSet<Long>()
     private var detecting: Set<Long> = emptySet()
 
     /** Live results of the running URL test, until the database has them. */
@@ -361,9 +367,10 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         // A server whose country neither the name nor an earlier exit IP check gave is «being detected» until its
         // checks are through, rather than «unknown» at first.
         val pending = mutableState.value.sections?.allServers
-            ?.filter { it.id in ids && it.country == ServerCountry.Unknown && it.id !in ipChecked }
+            ?.filter { it.id in ids && it.country == ServerCountry.Unknown && it.id !in countryChecked }
             ?.map { it.id }.orEmpty()
         if (pending.isNotEmpty()) {
+            roundPending += pending
             detecting = detecting + pending
             reload()
         }
@@ -378,18 +385,26 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             .orEmpty()
         val before = TestSessionClient.state.value
         if (ids.isEmpty() || !TestSessionClient.startProfiles(TestSpec.KIND_IP, ids)) {
-            // Nothing answered (or another session runs): what was being detected is unknown for now.
-            if (detecting.isNotEmpty()) {
-                detecting = emptySet()
-                reload()
-            }
+            // Nothing answered (or another session runs): this round is through, what was detected is unknown.
+            finishRound()
             return
         }
         stateBeforeTest = before
         ownTest = TestSpec.KIND_IP
-        ipChecked += ids
-        detecting = ids.toSet()
+        // The servers that did not answer are through; only those checked for the first time are «being detected».
+        countryChecked += roundPending - ids.toSet()
+        detecting = ids.filterTo(HashSet()) { it !in countryChecked }
         reload()
+    }
+
+    /** The country round is over: its servers count as checked and nothing is «being detected» any more. */
+    private fun finishRound() {
+        countryChecked += roundPending
+        roundPending.clear()
+        if (detecting.isNotEmpty()) {
+            detecting = emptySet()
+            reload()
+        }
     }
 
     private fun onTestState(test: TestUiState) {
@@ -398,6 +413,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             // The session ended and another one (not this section's) runs now.
             if (test.running) {
                 ownTest = NONE
+                roundPending.clear()
                 if (detecting.isNotEmpty()) {
                     detecting = emptySet()
                     reload()
@@ -426,7 +442,12 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         TestSessionClient.dismiss()
         viewModelScope.launch {
             // :bg has stored the results; read them, then check the exit IPs the names leave open.
-            if (finished == TestSpec.KIND_IP) detecting = emptySet()
+            if (finished == TestSpec.KIND_IP) {
+                countryChecked += detecting
+                countryChecked += roundPending
+                roundPending.clear()
+                detecting = emptySet()
+            }
             loadJob?.join()
             reload()
             loadJob?.join()

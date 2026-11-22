@@ -333,7 +333,7 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
         }
 
         else -> {
-            headline = server.name
+            headline = CountryFromName.spacedFlag(server.name)
             // A name that starts with its flag: the country line without a second one.
             supporting = server.country?.let {
                 if (CountryFromName.startsWithFlag(server.name)) CountryLabels.name(it, locale) else country

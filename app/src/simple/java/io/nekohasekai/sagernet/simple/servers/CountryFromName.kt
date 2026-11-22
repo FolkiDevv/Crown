@@ -189,6 +189,14 @@ object CountryFromName {
         return rest.ifEmpty { tidy }
     }
 
+    /** [name] tidied, with a space between a leading flag and the text glued to it («🇵🇱R5->Pl» → «🇵🇱 R5->Pl»). */
+    fun spacedFlag(name: String): String {
+        val tidy = tidy(name)
+        val rest = withoutLeadingFlag(tidy)
+        if (rest == tidy) return tidy
+        return tidy.removeSuffix(rest).trim() + " " + rest
+    }
+
     /** Whether [name] starts with a flag emoji. */
     fun startsWithFlag(name: String): Boolean {
         val tidy = name.trimStart()

@@ -105,6 +105,10 @@ class CountryFromNameTest {
         // Nothing but a flag stays as it is.
         assertEquals("🇩🇪", CountryFromName.withoutLeadingFlag("🇩🇪"))
         assertEquals("", CountryFromName.withoutLeadingFlag("  "))
+        assertEquals("🇵🇱 R5->Pl", CountryFromName.spacedFlag("🇵🇱R5->Pl"))
+        assertEquals("🇩🇪 Германия #2", CountryFromName.spacedFlag("  🇩🇪  Германия #2"))
+        assertEquals("MyConfig", CountryFromName.spacedFlag("MyConfig"))
+        assertEquals("🇩🇪", CountryFromName.spacedFlag("🇩🇪"))
         assertTrue(CountryFromName.startsWithFlag(" 🇩🇪 Germany"))
         assertFalse(CountryFromName.startsWithFlag("Germany 🇩🇪"))
         assertFalse(CountryFromName.startsWithFlag(""))
