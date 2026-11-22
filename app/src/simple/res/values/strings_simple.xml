@@ -227,4 +227,48 @@
     <string name="simple_server_country_best">The best server of the country</string>
     <!-- %1$s: the server Auto picked -->
     <string name="simple_server_auto_with">Auto · %1$s</string>
+
+    <!-- Settings (batch 10) -->
+    <string name="simple_settings_connection">Connection</string>
+    <string name="simple_settings_autostart">Connect when the phone starts</string>
+    <string name="simple_settings_autostart_summary">The VPN turns on by itself after the phone restarts</string>
+    <string name="simple_settings_auto_update">Update subscriptions automatically</string>
+    <string name="simple_settings_auto_update_summary">As often as the provider asks, otherwise once a day</string>
+    <string name="simple_settings_general">General</string>
+    <string name="simple_settings_theme">Theme</string>
+    <string name="simple_theme_system">Same as the system</string>
+    <string name="simple_theme_light">Light</string>
+    <string name="simple_theme_dark">Dark</string>
+    <string name="simple_theme_battery">Dark while saving battery</string>
+    <string name="simple_settings_transfer">Move to another device</string>
+    <string name="simple_settings_transfer_summary">Save servers and settings to a backup file, or restore one</string>
+    <string name="simple_settings_advanced">Advanced mode</string>
+    <string name="simple_settings_advanced_summary">Show the technical screens of the classic interface here</string>
+    <!-- Advanced mode: links to the screens of the classic interface -->
+    <string name="simple_advanced_header">Classic interface screens</string>
+    <string name="simple_advanced_routes">Routes and rules</string>
+    <string name="simple_advanced_routes_summary">Routing profiles and their rules</string>
+    <string name="simple_advanced_dns">DNS</string>
+    <string name="simple_advanced_dns_summary">DNS servers, FakeIP, predefined answers, cache</string>
+    <string name="simple_advanced_network">Network and TUN</string>
+    <string name="simple_advanced_network_summary">Stack, MTU, IPv6, private ranges</string>
+    <string name="simple_advanced_presets">Protocol presets</string>
+    <string name="simple_advanced_presets_summary">Multiplex, TLS fragment, uTLS, HTTP/2 and QUIC defaults</string>
+    <string name="simple_advanced_core">Core</string>
+    <string name="simple_advanced_core_summary">Logging, statistics, Clash API, security, NTP</string>
+    <string name="simple_advanced_testing">Testing</string>
+    <string name="simple_advanced_testing_summary">Latency and speed tests</string>
+    <string name="simple_advanced_log">Log</string>
+    <string name="simple_advanced_log_summary">What the app and the core write</string>
+    <string name="simple_advanced_graphs">Live graphs</string>
+    <string name="simple_advanced_graphs_summary">Traffic and connections in real time</string>
+    <string name="simple_advanced_tools">Diagnostic tools</string>
+    <string name="simple_advanced_tools_summary">Performance profile of the core</string>
+    <string name="simple_advanced_all">All classic settings</string>
+    <string name="simple_advanced_all_summary">Inbound, routing, subscriptions and everything else</string>
+    <!-- The once-only hint after an upgrade -->
+    <string name="simple_hint_classic_title">This is the new Throne interface</string>
+    <string name="simple_hint_classic_text">The classic one is still here: Settings › Classic interface.</string>
+    <string name="simple_hint_classic_open">Open settings</string>
+    <string name="simple_hint_classic_close">Got it</string>
 </resources>

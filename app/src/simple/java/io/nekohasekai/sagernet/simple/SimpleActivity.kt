@@ -82,7 +82,11 @@ import io.nekohasekai.sagernet.simple.servers.ServersEvent
 import io.nekohasekai.sagernet.simple.servers.ServersScreen
 import io.nekohasekai.sagernet.simple.servers.ServersViewModel
 import io.nekohasekai.sagernet.simple.settings.SettingsActions
+import io.nekohasekai.sagernet.simple.settings.ClassicHintCard
+import io.nekohasekai.sagernet.simple.settings.ClassicScreen
+import io.nekohasekai.sagernet.simple.settings.ClassicVisit
 import io.nekohasekai.sagernet.simple.settings.SettingsScreen
+import io.nekohasekai.sagernet.simple.settings.SettingsViewModel
 import io.nekohasekai.sagernet.ui.AppManagerActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.ScannerActivity
@@ -98,6 +102,8 @@ import kotlinx.coroutines.withContext
  * Batch 2: the home section (connect button with its status, server and mode cards, problem banner).
  * Batch 4: adding servers (clipboard, QR, link, file; links, files and shares opened from other apps) and the
  * clipboard offer when the interface opens.
+ * Batch 10: the whole settings section with the advanced mode (classic screens through [ClassicVisit]) and the
+ * once-only hint after an upgrade on the way back to the classic interface.
  */
 class SimpleActivity : AppCompatActivity() {
 
@@ -105,6 +111,7 @@ class SimpleActivity : AppCompatActivity() {
     private val modes: ModesViewModel by viewModels()
     private val add: AddViewModel by viewModels()
     private val servers: ServersViewModel by viewModels()
+    private val settings: SettingsViewModel by viewModels()
 
     /** The classic app list (AppManagerActivity) editing one of the simple UI's two app lists. */
     private val appList = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -138,10 +145,12 @@ class SimpleActivity : AppCompatActivity() {
                     modes = modes,
                     add = add,
                     servers = servers,
-                    launchers =AddLaunchers(::pasteClipboard, ::openScanner, ::chooseFile),
+                    settings = settings,
+                    launchers = AddLaunchers(::pasteClipboard, ::openScanner, ::chooseFile),
                     openAppList = ::openAppList,
                     requestStart = ::requestStart,
                     onOpenClassic = { SimpleUi.switchTo(this, simple = false) },
+                    openClassicScreen = ::openClassicScreen,
                 )
             }
         }
@@ -198,6 +207,8 @@ class SimpleActivity : AppCompatActivity() {
         // Groups added meanwhile in :bg (a subscription added in the classic interface) join the «Авто» selectors.
         modes.syncGroups()
         servers.reload()
+        // Auto connect, updates and the theme may have been changed in the classic interface meanwhile.
+        settings.refresh()
         clipboardCheck = true
     }
 
@@ -331,6 +342,15 @@ class SimpleActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------------------------------------ other
 
+    /** A classic screen for this visit (the choice of interface stays); back from it comes here again. */
+    private fun openClassicScreen(screen: ClassicScreen) {
+        try {
+            startActivity(ClassicVisit.intent(this, screen))
+        } catch (e: ActivityNotFoundException) {
+            Logs.w(e)
+        }
+    }
+
     private fun requestStart() {
         try {
             connect.launch(null)
@@ -409,10 +429,12 @@ fun SimpleApp(
     modes: ModesViewModel,
     add: AddViewModel,
     servers: ServersViewModel,
+    settings: SettingsViewModel,
     launchers: AddLaunchers,
     openAppList: (AppList) -> Unit,
     requestStart: () -> Unit,
     onOpenClassic: () -> Unit,
+    openClassicScreen: (ClassicScreen) -> Unit,
 ) {
     var section by rememberSaveable { mutableStateOf(SimpleSection.HOME) }
     var addSheet by rememberSaveable { mutableStateOf(false) }
@@ -475,6 +497,8 @@ fun SimpleApp(
                 SimpleSection.HOME -> HomeSection(
                     home,
                     modes,
+                    settings,
+                    openSettings = { section = SimpleSection.SETTINGS },
                     HomeActions(
                         requestStart = requestStart,
                         openServers = { section = SimpleSection.SERVERS },
@@ -485,7 +509,14 @@ fun SimpleApp(
                 )
 
                 SimpleSection.SERVERS -> ServersSection(servers, onAdd = { addSheet = true }, snackbar = snackbar)
-                SimpleSection.SETTINGS -> SettingsSection(modes, openAppList, onOpenClassic, snackbar)
+                SimpleSection.SETTINGS -> SettingsSection(
+                    modes,
+                    settings,
+                    openAppList,
+                    onOpenClassic,
+                    openClassicScreen,
+                    snackbar,
+                )
             }
         }
     }
@@ -524,9 +555,17 @@ private fun Notice.resolve(context: Context): String =
     if (plural != 0) context.resources.getQuantityString(plural, count, count) else context.getString(text)
 
 @Composable
-private fun HomeSection(home: HomeViewModel, modes: ModesViewModel, actions: HomeActions, snackbar: SnackbarHostState) {
+private fun HomeSection(
+    home: HomeViewModel,
+    modes: ModesViewModel,
+    settings: SettingsViewModel,
+    openSettings: () -> Unit,
+    actions: HomeActions,
+    snackbar: SnackbarHostState,
+) {
     val state by home.state.collectAsStateWithLifecycle()
     val modesState by modes.state.collectAsStateWithLifecycle()
+    val settingsState by settings.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(home) {
         home.messages.collect { snackbar.showSnackbar(context.getString(it)) }
@@ -536,14 +575,26 @@ private fun HomeSection(home: HomeViewModel, modes: ModesViewModel, actions: Hom
     // A mode applied (also from Settings while the VPN is off) may have switched the managed auto-selector.
     LaunchedEffect(modesState.applied) { if (modesState.applied > 0) home.refreshServer() }
     SectionScaffold(SimpleSection.HOME, snackbar) { modifier ->
-        HomeScreen(
-            state = state,
-            modeCard = modesState.card,
-            actions = actions,
-            onToggle = { home.toggle(actions.requestStart) },
-            onDismissProblem = home::dismissProblem,
-            modifier = modifier,
-        )
+        Column(modifier) {
+            // After an upgrade, once: the classic interface is in the settings (simple-ui "Подсказка после обновления").
+            if (settingsState.classicHint) {
+                ClassicHintCard(
+                    onOpenSettings = {
+                        settings.closeClassicHint()
+                        openSettings()
+                    },
+                    onClose = settings::closeClassicHint,
+                )
+            }
+            HomeScreen(
+                state = state,
+                modeCard = modesState.card,
+                actions = actions,
+                onToggle = { home.toggle(actions.requestStart) },
+                onDismissProblem = home::dismissProblem,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
@@ -605,11 +656,14 @@ private fun ServersSection(servers: ServersViewModel, onAdd: () -> Unit, snackba
 @Composable
 private fun SettingsSection(
     modes: ModesViewModel,
+    settings: SettingsViewModel,
     openAppList: (AppList) -> Unit,
     onOpenClassic: () -> Unit,
+    openClassicScreen: (ClassicScreen) -> Unit,
     snackbar: SnackbarHostState,
 ) {
     val state by modes.state.collectAsStateWithLifecycle()
+    val settingsState by settings.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(modes) {
         modes.messages.collect { snackbar.showSnackbar(context.getString(it)) }
@@ -617,10 +671,16 @@ private fun SettingsSection(
     SectionScaffold(SimpleSection.SETTINGS, snackbar) { modifier ->
         SettingsScreen(
             state = state,
+            settings = settingsState,
             actions = SettingsActions(
                 selectMode = { modes.select(it, openAppList) },
                 editApps = { modes.edit(it, openAppList) },
                 dismissFallback = modes::dismissFallback,
+                setAutostart = settings::setAutostart,
+                setAutoUpdate = settings::setAutoUpdate,
+                setNightMode = settings::setNightMode,
+                setAdvanced = settings::setAdvanced,
+                openClassicScreen = openClassicScreen,
                 openClassic = onOpenClassic,
             ),
             modifier = modifier,

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.service.quicksettings.TileService
+import io.nekohasekai.sagernet.simple.settings.ClassicVisit
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.utils.PlatformNotifications
 
@@ -25,6 +26,12 @@ object SimpleUi {
     const val KEY_INSTALL_KIND = "install_kind"
     const val INSTALL_FRESH = "fresh"
     const val INSTALL_UPGRADE = "upgrade"
+
+    /** The one hint after an upgrade, on the way back to the classic interface, was closed (simple-ui spec). */
+    const val KEY_CLASSIC_HINT_CLOSED = "classic_hint_closed"
+
+    /** «Расширенный режим» of the simple settings: links to the classic screens. */
+    const val KEY_ADVANCED = "advanced_mode"
 
     /** An intent extra that keeps [MainActivity] open whatever is chosen (screens of the advanced mode). */
     const val EXTRA_OPEN_CLASSIC = "io.nekohasekai.sagernet.simple.OPEN_CLASSIC"
@@ -77,6 +84,19 @@ object SimpleUi {
         return upgrade
     }
 
+    /**
+     * The hint on the way back to the classic interface shows after an upgrade from a version without the simple UI
+     * ([isUpgrade]), never on a fresh install, until it is closed once.
+     */
+    fun showsClassicHint(store: Store, upgrade: Boolean): Boolean =
+        upgrade && !store.getBoolean(KEY_CLASSIC_HINT_CLOSED, false)
+
+    fun closeClassicHint(store: Store) = store.putBoolean(KEY_CLASSIC_HINT_CLOSED, true)
+
+    fun isAdvanced(store: Store): Boolean = store.getBoolean(KEY_ADVANCED, false)
+
+    fun setAdvanced(store: Store, on: Boolean) = store.putBoolean(KEY_ADVANCED, on)
+
     /** Whether an intent must stay in the classic interface (see [CLASSIC_ACTIONS], [CLASSIC_EXTRAS]). */
     fun opensClassic(action: String?, extraKeys: Set<String>): Boolean =
         action in CLASSIC_ACTIONS || extraKeys.any { it in CLASSIC_EXTRAS }
@@ -93,7 +113,11 @@ object SimpleUi {
         val store = store(activity)
         recordInstallKind(activity, store)
         val extras = intent?.extras?.keySet().orEmpty()
-        if (!shouldRedirect(store, intent?.action, extras)) return false
+        if (!shouldRedirect(store, intent?.action, extras)) {
+            // A classic screen opened from the simple settings: show it, and back returns to the simple interface.
+            ClassicVisit.attach(activity, intent)
+            return false
+        }
         activity.startActivity(simpleIntent(activity, intent))
         activity.finish()
         noTransition(activity)
