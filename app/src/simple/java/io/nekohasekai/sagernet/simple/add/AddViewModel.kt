@@ -237,11 +237,15 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
             if (subscribed !is SimpleImport.SubscribeResult.Done) return@async Triple(subscribed, 0, false)
             val hours = SimpleImport.updateAutomatically(subscribed.gid, plan)
             // The ready settings come with the first subscription added here (simple-ui "Готовые настройки"); the
-            // flag is written only once they are in effect, so a failed setup is tried again with the next one.
-            val auto = !prefs.getBoolean(KEY_FIRST_SUBSCRIPTION, false) &&
-                runCatching { TrafficModeApplier.setUpAuto(getApplication()) }
-                    .onFailure { Logs.w("simple add: the ready settings", it) }.getOrDefault(false)
-            if (auto) prefs.edit().putBoolean(KEY_FIRST_SUBSCRIPTION, true).commit()
+            // flag is written only once they are in effect, so a failed setup is tried again with the next one. The
+            // check, the setup and the flag go under one process-wide lock: an import of an earlier screen may still
+            // be running in the import scope while a new screen starts another one.
+            val auto = SimpleImport.firstSetup.withLock {
+                !prefs.getBoolean(KEY_FIRST_SUBSCRIPTION, false) &&
+                    runCatching { TrafficModeApplier.setUpAuto(getApplication()) }
+                        .onFailure { Logs.w("simple add: the ready settings", it) }.getOrDefault(false) &&
+                    prefs.edit().putBoolean(KEY_FIRST_SUBSCRIPTION, true).commit()
+            }
             Triple(subscribed, hours, auto)
         }.await()
         val (result, updateHours, auto) = outcome

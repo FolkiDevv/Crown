@@ -30,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
 
@@ -43,6 +44,12 @@ object SimpleImport {
 
     /** Imports that must finish whatever happens to the screen that started them. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Serialises the ready settings of the first subscription (its check, the setup and the flag) across every add
+     * flow of the process; all imports run in the UI process.
+     */
+    val firstSetup = Mutex()
 
     /** What a text turned out to be, before anything is added. */
     sealed interface Plan {
