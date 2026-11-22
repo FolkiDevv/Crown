@@ -26,6 +26,7 @@ import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.modes.Managed
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.simple.servers.CountryFromName
+import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -359,21 +360,28 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     private var selectedCountry: String? = null
     private var choiceCountry: String? = null
 
-    /** The country of the auto-selector's pick: (profile id, ISO code or null). */
-    private var pickCountry: Pair<Long, String?>? = null
+    /** The auto-selector's pick as the list shows it: its id, country (ISO code or null) and name. */
+    private class Pick(val id: Long, val country: String?, val name: String)
+
+    private var pick: Pick? = null
+
+    /** The selected plain server's name as the list shows it (never its address). */
+    private var selectedName: String = ""
 
     private fun lookUpPickCountry(id: Long) {
-        if (id <= 0L || pickCountry?.first == id) return
+        if (id <= 0L || pick?.id == id) return
         viewModelScope.launch {
-            val code = withContext(Dispatchers.IO) {
+            val found = withContext(Dispatchers.IO) {
                 try {
-                    ProfileManager.getProfile(id)?.let { CountryFromName.resolve(it.outbound.name, it.testCountry).code }
+                    ProfileManager.getProfile(id)?.let {
+                        Pick(id, CountryFromName.resolve(it.outbound.name, it.testCountry).code, ServerCatalog.nameOf(it, unnamed()))
+                    }
                 } catch (e: Exception) {
                     Logs.w(e)
                     null
                 }
             }
-            pickCountry = id to code
+            pick = found ?: Pick(id, null, "")
             publish()
         }
     }
@@ -389,6 +397,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     managed = TrafficModes.managedIds()
                     val selected = ProfileManager.getProfile(DataStore.selectedProxy)
                     selectedCountry = selected?.let { CountryFromName.resolve(it.outbound.name, it.testCountry).code }
+                    selectedName = selected?.let { ServerCatalog.nameOf(it, unnamed()) }.orEmpty()
                     choiceCountry = TrafficModes.countryChoice()?.code
                         ?.takeIf { selected != null && selected.id == managed?.country }
                     val first = if (selected == null) firstProfile() else null
@@ -433,11 +442,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         val profile = selectedProfile
         val auto = profile?.type == AutoSelectorProfiles.TYPE
         val running = autoStatus.takeIf { auto && it.active && it.selectorId == profile?.id }
+        val currentPick = pick?.takeIf { running != null && it.id == running.selectedId }
         val server = profile?.let {
             ServerCard(
-                name = CountryFromName.tidy(it.displayName()),
+                name = selectedName.ifEmpty { CountryFromName.tidy(it.displayName()) },
                 auto = auto,
-                autoSelected = CountryFromName.tidy(running?.selectedName.orEmpty()),
+                // The core reports an unnamed member by its address: the name as the list shows it, once looked up.
+                autoSelected = running?.let { r ->
+                    currentPick?.name?.takeIf { n -> n.isNotEmpty() } ?: CountryFromName.tidy(r.selectedName)
+                }.orEmpty(),
                 latencyMs = if (connected) liveLatency else it.latency.takeIf { ms -> ms > 0 && !auto },
                 localizedName = when (it.id) {
                     managed?.auto -> R.string.simple_selector_auto_name
@@ -445,7 +458,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     else -> null
                 },
                 country = if (auto) {
-                    pickCountry?.takeIf { pick -> running != null && pick.first == running.selectedId }?.second
+                    currentPick?.country
                 } else {
                     selectedCountry
                 },
@@ -471,6 +484,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             Logs.w(e)
         }
     }
+
+    private fun unnamed(): String = getApplication<Application>().getString(R.string.simple_server_unnamed)
 
     private companion object {
         const val FIRST_CHECK_MS = 2_000L

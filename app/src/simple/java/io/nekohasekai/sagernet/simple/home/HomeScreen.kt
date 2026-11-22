@@ -65,6 +65,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.simple.add.AddActions
 import io.nekohasekai.sagernet.simple.add.Welcome
 import io.nekohasekai.sagernet.simple.modes.ModeCard
+import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.simple.servers.CountryLabels
 import kotlinx.coroutines.delay
 
@@ -297,6 +298,8 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
     }
     val locale = LocalConfiguration.current.locales[0]
     val country = server?.country?.let { CountryLabels.label(it, locale) }
+    // The pick shown under a country headline without its own flag (the headline has the country's).
+    val picked = server?.autoSelected?.let { CountryFromName.withoutLeadingFlag(it) }.orEmpty()
     val headline: String
     val supporting: String?
     when {
@@ -308,14 +311,14 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
         // A country chosen in «Серверы»: the country, and the server its selector runs.
         server.countryChoice != null -> {
             headline = CountryLabels.label(server.countryChoice, locale)
-            supporting = server.autoSelected.ifEmpty { stringResource(R.string.simple_server_country_best) }
+            supporting = picked.ifEmpty { stringResource(R.string.simple_server_country_best) }
         }
 
         // «Авто» picked a server: the country it is in (simple-ui "Карточки сервера и режима на главной").
         server.auto && server.autoSelected.isNotEmpty() -> {
             headline = country ?: server.autoSelected
             supporting = if (country != null) {
-                stringResource(R.string.simple_server_auto_with, server.autoSelected)
+                stringResource(R.string.simple_server_auto_with, picked)
             } else {
                 stringResource(R.string.simple_server_auto)
             }
@@ -331,7 +334,10 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
 
         else -> {
             headline = server.name
-            supporting = country
+            // A name that starts with its flag: the country line without a second one.
+            supporting = server.country?.let {
+                if (CountryFromName.startsWithFlag(server.name)) CountryLabels.name(it, locale) else country
+            }
         }
     }
     val latency = server?.latencyMs?.let { stringResource(R.string.simple_latency_ms, it) }

@@ -64,7 +64,8 @@ class ServerListTest {
                 server(2L, "home"),
             )
         )
-        assertEquals(listOf("my LTE box", "БС-2 Moscow", "🇷🇺 RU LTE обход БС"), sections.whitelist.map { it.name })
+        // By the shown name (without the leading flag).
+        assertEquals(listOf("my LTE box", "🇷🇺 RU LTE обход БС", "БС-2 Moscow"), sections.whitelist.map { it.name })
         val listed = sections.subscriptions.flatMap { s -> s.countries.flatMap { it.servers } } + sections.mine
         assertTrue(listed.none { it.whitelist })
         assertEquals(listOf("DE"), sections.subscriptions.single().countries.map { it.code })

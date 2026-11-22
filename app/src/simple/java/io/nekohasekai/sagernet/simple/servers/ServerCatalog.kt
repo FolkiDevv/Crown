@@ -26,7 +26,7 @@ object ServerCatalog {
         val entries = groups.map { GroupEntry(it.id, it.displayName(), it.isSubscription) }
         val servers = groups.flatMap { group ->
             SagerDatabase.proxyDao.getByGroup(group.id).filter { it.type != AutoSelectorProfiles.TYPE }.map { profile ->
-                val name = CountryFromName.tidy(nameOf(profile)).ifEmpty { unnamed }
+                val name = nameOf(profile, unnamed)
                 ServerEntry(
                     id = profile.id,
                     groupId = group.id,
@@ -55,6 +55,9 @@ object ServerCatalog {
 
     /** The name the user gave the server, "" when none. */
     private fun nameOf(profile: ProxyEntity): String = profile.outbound.name.trim()
+
+    /** The name as the simple interface shows it: tidied, [unnamed] for none (never the address). */
+    fun nameOf(profile: ProxyEntity, unnamed: String): String = CountryFromName.tidy(profile.outbound.name).ifEmpty { unnamed }
 
     private fun whitelistPattern(keywords: List<String>): Pattern =
         Pattern.compile(WhitelistKeywords.regex(keywords), WhitelistKeywords.FLAGS)

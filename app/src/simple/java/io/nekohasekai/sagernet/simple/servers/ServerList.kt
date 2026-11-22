@@ -84,7 +84,9 @@ object ServerList {
         return ServerSections(subscriptions, mine.sortedWith(byName), whitelist)
     }
 
-    private val byName: Comparator<ServerEntry> = compareBy<ServerEntry, String>(NaturalOrder) { it.name }.thenBy { it.id }
+    /** By the name as the row shows it: without its leading flag (the flag column shows that) and blanks. */
+    private val byName: Comparator<ServerEntry> =
+        compareBy<ServerEntry, String>(NaturalOrder) { CountryFromName.withoutLeadingFlag(it.name) }.thenBy { it.id }
 
     /** Case-insensitive, with runs of digits compared by value. */
     object NaturalOrder : Comparator<String> {

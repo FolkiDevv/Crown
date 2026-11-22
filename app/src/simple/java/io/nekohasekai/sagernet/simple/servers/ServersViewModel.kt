@@ -116,13 +116,17 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     /** The servers the URL tests since [lastUrlTest] covered. */
     private val testedIds = HashSet<Long>()
+
+    /** The servers whose exit IP this section checked (successfully or not) since it was created. */
+    private val ipChecked = HashSet<Long>()
     private var detecting: Set<Long> = emptySet()
 
     /** Live results of the running URL test, until the database has them. */
     private val liveLatency = HashMap<Long, Int>()
 
     private var autoStatus = AutoSelectorStatus.IDLE
-    private var pickCountry: Pair<Long, String?>? = null
+    /** The running pick as the list shows it: (profile id, (country, name)). */
+    private var pickInfo: Pair<Long, Pair<String?, String>>? = null
 
     init {
         ProfileManager.addListener(this)
@@ -354,6 +358,15 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         stateBeforeTest = before
         ownTest = TestSpec.KIND_URL
         liveLatency.clear()
+        // A server whose country neither the name nor an earlier exit IP check gave is «being detected» until its
+        // checks are through, rather than «unknown» at first.
+        val pending = mutableState.value.sections?.allServers
+            ?.filter { it.id in ids && it.country == ServerCountry.Unknown && it.id !in ipChecked }
+            ?.map { it.id }.orEmpty()
+        if (pending.isNotEmpty()) {
+            detecting = detecting + pending
+            reload()
+        }
     }
 
     /** The exit IP check of the servers whose country the name does not give, which answered the URL test. */
@@ -363,11 +376,18 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             ?.map { it.id }
             ?.take(IP_TEST_LIMIT)
             .orEmpty()
-        if (ids.isEmpty()) return
         val before = TestSessionClient.state.value
-        if (!TestSessionClient.startProfiles(TestSpec.KIND_IP, ids)) return
+        if (ids.isEmpty() || !TestSessionClient.startProfiles(TestSpec.KIND_IP, ids)) {
+            // Nothing answered (or another session runs): what was being detected is unknown for now.
+            if (detecting.isNotEmpty()) {
+                detecting = emptySet()
+                reload()
+            }
+            return
+        }
         stateBeforeTest = before
         ownTest = TestSpec.KIND_IP
+        ipChecked += ids
         detecting = ids.toSet()
         reload()
     }
@@ -376,7 +396,13 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         if (ownTest == NONE || test === stateBeforeTest) return
         if (test.kind != ownTest) {
             // The session ended and another one (not this section's) runs now.
-            if (test.running) ownTest = NONE
+            if (test.running) {
+                ownTest = NONE
+                if (detecting.isNotEmpty()) {
+                    detecting = emptySet()
+                    reload()
+                }
+            }
             return
         }
         if (ownTest == TestSpec.KIND_URL) {
@@ -434,24 +460,26 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             mutableState.update { it.copy(pick = null) }
             return
         }
-        val known = pickCountry?.takeIf { it.first == status.selectedId }
+        val known = pickInfo?.takeIf { it.first == status.selectedId }?.second
         if (known != null) {
-            val name = CountryFromName.tidy(status.selectedName)
-            mutableState.update { it.copy(pick = RunningPick(status.selectorId, name, known.second)) }
+            // The core names an unnamed member by its address: the list's name for it instead.
+            val name = known.second.ifEmpty { CountryFromName.tidy(status.selectedName) }
+            mutableState.update { it.copy(pick = RunningPick(status.selectorId, name, known.first)) }
             return
         }
         viewModelScope.launch {
-            val country = withContext(Dispatchers.IO) {
+            val info = withContext(Dispatchers.IO) {
                 try {
                     ProfileManager.getProfile(status.selectedId)?.let {
-                        CountryFromName.resolve(it.outbound.name, it.testCountry).code
+                        CountryFromName.resolve(it.outbound.name, it.testCountry).code to
+                            ServerCatalog.nameOf(it, getApplication<Application>().getString(R.string.simple_server_unnamed))
                     }
                 } catch (e: Exception) {
                     Logs.w(e)
                     null
                 }
             }
-            pickCountry = status.selectedId to country
+            pickInfo = status.selectedId to (info ?: (null to ""))
             publishPick()
         }
     }

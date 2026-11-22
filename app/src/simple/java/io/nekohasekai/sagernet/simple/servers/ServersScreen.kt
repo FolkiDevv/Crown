@@ -198,8 +198,12 @@ private fun CountryRowView(
     ChoiceRow(
         leading = { CountryFlag(code) },
         headline = if (code != null) CountryLabels.name(code, locale) else countryText(row.country, locale),
-        supporting = pick?.let { stringResource(R.string.simple_servers_now, it.name) } ?: count,
-        trailing = row.bestLatency?.let { stringResource(R.string.simple_latency_ms, it) },
+        // The row shows the country's flag already.
+        supporting = pick?.let { stringResource(R.string.simple_servers_now, CountryFromName.withoutLeadingFlag(it.name)) } ?: count,
+        // Every server of the country failed its check: say so rather than show no delay.
+        trailing = row.bestLatency?.let { stringResource(R.string.simple_latency_ms, it) }
+            ?: stringResource(R.string.simple_server_no_answer).takeIf { row.servers.all { it.latency == -1 } },
+        trailingError = row.bestLatency == null && row.servers.all { it.latency == -1 },
         selected = chosen,
         // A country is chosen as a whole only when it is known; the others open to their servers.
         selectable = code != null,
@@ -257,7 +261,10 @@ private fun ChoiceRow(
                     )
                 }
                 extra?.invoke()
-                if (selectable) RadioButton(selected = selected, onClick = null, enabled = enabled)
+                if (selectable) {
+                    if (trailing != null && extra == null) Spacer(Modifier.width(8.dp))
+                    RadioButton(selected = selected, onClick = null, enabled = enabled)
+                }
             }
         },
     )
@@ -386,10 +393,15 @@ private fun latencyText(latency: Int): String? = when {
     else -> null
 }
 
-/** The pick's name, after its flag unless the name starts with one already. */
-private fun pickLabel(pick: RunningPick): String = pick.country
-    ?.takeIf { !CountryFromName.startsWithFlag(pick.name) }
-    ?.let { CountryFromName.flagOf(it) + " " + pick.name } ?: pick.name
+/** The pick's name after one flag and a space: its own leading flag, else its country's flag. */
+private fun pickLabel(pick: RunningPick): String {
+    val tidy = CountryFromName.tidy(pick.name)
+    val name = CountryFromName.withoutLeadingFlag(tidy)
+    // Nothing but a flag.
+    if (name == tidy && CountryFromName.startsWithFlag(tidy)) return tidy
+    val flag = if (name != tidy) tidy.removeSuffix(name).trim() else pick.country?.let { CountryFromName.flagOf(it) }
+    return if (flag.isNullOrEmpty()) name else "$flag $name"
+}
 
 @Composable
 private fun updatedText(lastUpdate: Long, now: Long, dateFormat: DateFormat): String {
