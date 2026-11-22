@@ -129,6 +129,15 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     /** Servers added while a round ran, tested right after it ([testAgain]). */
     private val queued = HashSet<Long>()
     private var testAgain = false
+
+    /**
+     * A country round runs: from the start of its URL test until its exit IP check (if any) is through. A test asked
+     * for meanwhile waits for the round ([queued]) instead of starting one the ending round would then overwrite.
+     */
+    private var roundBusy = false
+
+    /** A [reload] asked to test afterwards. */
+    private var testAfterLoad = false
     private var detecting: Set<Long> = emptySet()
 
     /** Live results of the running URL test, until the database has them. */
@@ -172,6 +181,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     /** Reads the list again (another section or the classic interface may have changed it). */
     fun reload(thenTest: Boolean = false) {
+        // A newer read replaces an older one, but not its request to test afterwards.
+        if (thenTest) testAfterLoad = true
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
@@ -185,7 +196,10 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             mutableState.update { loaded.copy(pick = it.pick, refreshing = it.refreshing, busy = it.busy) }
             publishCards()
             publishPick()
-            if (thenTest) startUrlTest()
+            if (testAfterLoad) {
+                testAfterLoad = false
+                startUrlTest()
+            }
         }
     }
 
@@ -357,7 +371,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val throttled = lastUrlTest > 0L && now - lastUrlTest < TEST_INTERVAL_MS
         val ids = if (throttled) all.filter { it !in testedIds } else all
         if (ids.isEmpty()) return
-        if (ownTest != NONE) {
+        if (ownTest != NONE || roundBusy) {
             // A round runs: the servers it does not cover (one just added) are tested right after it, and those whose
             // country is still open are «being detected» meanwhile.
             val waiting = mutableState.value.sections?.allServers
@@ -381,6 +395,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         testedIds += ids
         stateBeforeTest = before
         ownTest = TestSpec.KIND_URL
+        roundBusy = true
         liveLatency.clear()
         // A server whose country neither the name nor an earlier exit IP check gave is «being detected» until its
         // checks are through, rather than «unknown» at first.
@@ -417,6 +432,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     /** The country round is over: its servers count as checked and nothing is «being detected» any more. */
     private fun finishRound() {
+        roundBusy = false
         countryChecked += roundPending
         roundPending.clear()
         // Servers queued for the next round stay «being detected».
@@ -450,6 +466,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             // The session ended and another one (not this section's) runs now.
             if (test.running) {
                 ownTest = NONE
+                roundBusy = false
                 roundPending.clear()
                 queued.clear()
                 if (detecting.isNotEmpty()) {
@@ -485,6 +502,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
                 countryChecked += roundPending
                 roundPending.clear()
                 detecting = queued.toSet()
+                roundBusy = false
             }
             loadJob?.join()
             reload()
