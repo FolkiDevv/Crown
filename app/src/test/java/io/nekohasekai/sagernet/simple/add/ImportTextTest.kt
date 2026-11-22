@@ -111,5 +111,4 @@ class ImportTextTest {
         val json = """{"outbounds":[{"type":"socks","server":"1.2.3.4","server_port":1080}]}"""
         assertEquals(listOf(vless, json), ImportText.importUnits(listOf(vless, json)))
     }
-
 }
