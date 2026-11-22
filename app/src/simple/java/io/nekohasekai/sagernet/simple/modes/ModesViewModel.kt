@@ -1,0 +1,240 @@
+package io.nekohasekai.sagernet.simple.modes
+
+import android.app.Application
+import androidx.annotation.StringRes
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
+import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.GroupRepo
+import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.ktx.Logs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+/** The two app lists the simple UI keeps, both edited in the classic AppManagerActivity. */
+enum class AppList {
+    /** The apps of «Только выбранные приложения». */
+    SELECTED,
+
+    /** «Приложения без VPN». */
+    BYPASS,
+}
+
+data class ModesUiState(
+    val mode: TrafficMode = TrafficMode.AUTO,
+    /** null until read. */
+    val card: ModeCard? = null,
+    val selectedApps: Int = 0,
+    val bypassApps: Int = 0,
+    /** «Только выбранные приложения» lost its last app and «Авто» took over. */
+    val fallback: Boolean = false,
+    /** A mode is being applied. */
+    val busy: Boolean = false,
+)
+
+/**
+ * The traffic modes for the settings section and the home screen's mode card. On its first start the simple UI puts
+ * the stored (or default) mode into effect; afterwards a mode is applied when the user picks it or edits one of its
+ * app lists, so routing chosen in the classic interface stays until then (the card then shows it as custom routing).
+ */
+class ModesViewModel(application: Application, private val saved: SavedStateHandle) : AndroidViewModel(application),
+    GroupRepo.Listener {
+
+    private val mutableState = MutableStateFlow(ModesUiState())
+    val state: StateFlow<ModesUiState> = mutableState.asStateFlow()
+
+    private val mutableMessages = MutableSharedFlow<Int>(extraBufferCapacity = 4)
+
+    /** One-off snackbar texts (string resources) for the settings section. */
+    val messages: SharedFlow<Int> = mutableMessages.asSharedFlow()
+
+    /** The app list being edited in AppManagerActivity; kept across a process death while it is open. */
+    private var editing: AppList?
+        get() = saved.get<String>(KEY_EDITING)?.let { name -> AppList.entries.firstOrNull { it.name == name } }
+        set(value) = saved.set(KEY_EDITING, value?.name)
+
+    /** The edit was opened by picking «Только выбранные приложения» with no app chosen yet. */
+    private var choosingAppsMode: Boolean
+        get() = saved.get<Boolean>(KEY_CHOOSING) ?: false
+        set(value) = saved.set(KEY_CHOOSING, value)
+
+    private val work = Mutex()
+
+    /** An application is running; the screen disables the choices meanwhile. */
+    @Volatile
+    private var busy = false
+
+    init {
+        GroupRepo.addListener(this)
+        viewModelScope.launch {
+            applying {
+                // The first start, or an include list without apps left behind: apply now. Otherwise only bring the
+                // managed entities up to date (groups added meanwhile, a newer configuration).
+                if (!TrafficModes.isModeStored() || TrafficModeApplier.hasEmptyIncludeList()) {
+                    TrafficModeApplier.apply(getApplication())
+                } else {
+                    TrafficModes.ensureManaged(getApplication())
+                }
+            }
+        }
+    }
+
+    /** Reads the state again (the screen came back, the service state changed). */
+    fun refresh() {
+        viewModelScope.launch { publish() }
+    }
+
+    /**
+     * The user picked [mode]. «Только выбранные приложения» without a chosen app opens the app list first
+     * ([openAppList]); the mode is switched on only once an app is chosen there.
+     */
+    fun select(mode: TrafficMode, openAppList: (AppList) -> Unit) {
+        if (mutableState.value.busy) return
+        viewModelScope.launch {
+            if (mode == TrafficMode.APPS && withContext(Dispatchers.IO) { TrafficModes.selectedApps().isEmpty() }) {
+                choosingAppsMode = true
+                edit(AppList.SELECTED, openAppList)
+                return@launch
+            }
+            applying {
+                TrafficModeApplier.select(getApplication(), mode)
+            }
+        }
+    }
+
+    /** Opens [list] in AppManagerActivity: the per-app keys are set to it first, as that screen edits them. */
+    fun edit(list: AppList, openAppList: (AppList) -> Unit) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val apps = if (list == AppList.SELECTED) TrafficModes.selectedApps() else TrafficModes.bypassApps()
+                DataStore.proxyApps = true
+                DataStore.bypass = list == AppList.BYPASS
+                DataStore.individual = apps.joinToString("\n")
+            }
+            editing = list
+            openAppList(list)
+        }
+    }
+
+    /** AppManagerActivity closed: its list becomes the simple list, and the mode is applied again. */
+    fun appListClosed() {
+        val list = editing ?: return
+        editing = null
+        val choosing = choosingAppsMode
+        choosingAppsMode = false
+        viewModelScope.launch {
+            val own = getApplication<Application>().packageName
+            val apps = withContext(Dispatchers.IO) {
+                TrafficModePlan.parseList(DataStore.individual) - own
+            }
+            applying {
+                withContext(Dispatchers.IO) {
+                    if (list == AppList.SELECTED) TrafficModes.setSelectedApps(apps) else TrafficModes.setBypassApps(apps)
+                }
+                when {
+                    choosing && apps.isNotEmpty() -> TrafficModeApplier.select(getApplication(), TrafficMode.APPS)
+                    choosing -> {
+                        // Nothing chosen: the mode stays as it was, and the per-app keys go back to it.
+                        mutableMessages.tryEmit(R.string.simple_mode_apps_none_chosen)
+                        TrafficModeApplier.apply(getApplication())
+                    }
+
+                    else -> TrafficModeApplier.apply(getApplication())
+                }
+            }
+        }
+    }
+
+    fun dismissFallback() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { TrafficModes.setFallbackNotice(false) }
+            publish()
+        }
+    }
+
+    override fun onCleared() {
+        GroupRepo.removeListener(this)
+        super.onCleared()
+    }
+
+    // The managed auto-selectors follow the groups (design.md D5).
+    override suspend fun groupAdd(group: ProxyGroup) = syncGroups()
+    override suspend fun groupRemoved(groupId: Long) = syncGroups()
+    override suspend fun groupUpdated(group: ProxyGroup) = Unit
+    override suspend fun groupUpdated(groupId: Long) = Unit
+
+    private fun syncGroups() {
+        viewModelScope.launch {
+            work.withLock {
+                withContext(Dispatchers.IO) {
+                    try {
+                        TrafficModes.ensureManaged(getApplication())
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Runs [block] (an application) with the busy flag, reports a fallback to «Авто», and publishes the result. */
+    private suspend fun applying(block: suspend () -> Any?) {
+        work.withLock {
+            busy = true
+            mutableState.value = mutableState.value.copy(busy = true)
+            try {
+                val result = block()
+                if ((result as? TrafficModeApplier.Result)?.fellBack == true) {
+                    mutableMessages.tryEmit(R.string.simple_mode_fallback_auto)
+                }
+            } catch (e: Exception) {
+                Logs.w("simple modes: applying failed", e)
+                message(R.string.simple_mode_apply_failed)
+            } finally {
+                busy = false
+                publish()
+            }
+        }
+    }
+
+    private fun message(@StringRes text: Int) {
+        mutableMessages.tryEmit(text)
+    }
+
+    private suspend fun publish() {
+        val next = withContext(Dispatchers.IO) {
+            try {
+                val mode = TrafficModes.mode()
+                val scope = PerAppScope(DataStore.proxyApps, DataStore.bypass, TrafficModePlan.parseList(DataStore.individual))
+                ModesUiState(
+                    mode = mode,
+                    card = TrafficModePlan.card(mode, DataStore.currentRouteId, TrafficModes.managedIds(), scope),
+                    selectedApps = TrafficModes.selectedApps().size,
+                    bypassApps = TrafficModes.bypassApps().size,
+                    fallback = TrafficModes.fallbackNotice(),
+                    busy = false,
+                )
+            } catch (e: Exception) {
+                Logs.w(e)
+                null
+            }
+        } ?: return
+        mutableState.value = next.copy(busy = busy)
+    }
+
+    private companion object {
+        const val KEY_EDITING = "modes_editing"
+        const val KEY_CHOOSING = "modes_choosing_apps"
+    }
+}

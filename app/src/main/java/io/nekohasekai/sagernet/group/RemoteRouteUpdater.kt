@@ -74,6 +74,7 @@ object RemoteRouteUpdater {
             if (now - ruleSetListCheckedAt < RULE_SET_LIST_MAX_AGE_MS) return
             ruleSetListCheckedAt = now
             RouteRepo.refresh()?.let { Logs.w("routeprofiles refresh before a remote route update: $it") }
+            io.nekohasekai.sagernet.simple.config.SimpleConfigRepo.refresh()?.let { Logs.w(it) }
         }
     }
 

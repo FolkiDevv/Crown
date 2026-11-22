@@ -40,7 +40,6 @@
     <string name="simple_latency_ms">%1$d мс</string>
     <string name="simple_card_mode">Режим трафика</string>
     <string name="simple_mode_smart">Умный</string>
-    <string name="simple_mode_coming">Выбор режима трафика появится в одном из ближайших обновлений.</string>
 
     <string name="simple_problem_lost_title">Соединение потеряно</string>
     <string name="simple_problem_lost_text">VPN неожиданно отключился. «Починка» поможет найти причину.</string>
@@ -51,4 +50,39 @@
     <string name="simple_repair_title">Починка</string>
     <string name="simple_repair_coming">Автоматическая проверка и исправление появятся в одном из ближайших обновлений.</string>
     <string name="simple_repair_details">Подробности: %1$s</string>
+
+    <!-- Режимы трафика: настройки -->
+    <string name="simple_settings_mode">Режим трафика</string>
+    <string name="simple_mode_auto">Авто</string>
+    <string name="simple_mode_auto_summary">Сам выбирает режим под сеть. Пока работает как «Умный».</string>
+    <string name="simple_mode_smart_summary">Российские сайты — напрямую, остальные — через VPN.</string>
+    <string name="simple_mode_whitelist">Белые списки</string>
+    <string name="simple_mode_whitelist_summary">Всё через VPN, кроме локальной сети. Для сетей, где открываются только разрешённые сайты.</string>
+    <string name="simple_mode_apps">Только выбранные приложения</string>
+    <string name="simple_mode_apps_summary">Через VPN идут только выбранные вами приложения.</string>
+    <string name="simple_settings_apps_selected">Выбрать приложения</string>
+    <plurals name="simple_apps_count">
+        <item quantity="one">Выбрано %d приложение</item>
+        <item quantity="few">Выбрано %d приложения</item>
+        <item quantity="many">Выбрано %d приложений</item>
+        <item quantity="other">Выбрано %d приложения</item>
+    </plurals>
+    <string name="simple_settings_apps_bypass">Приложения без VPN</string>
+    <string name="simple_settings_apps_bypass_none">Все приложения идут через VPN</string>
+    <string name="simple_mode_fallback_notice">В режиме «Только выбранные приложения» не осталось приложений, поэтому включён режим «Авто».</string>
+    <string name="simple_mode_fallback_auto">Включён режим «Авто»: не выбрано ни одного приложения</string>
+    <string name="simple_mode_apps_none_chosen">Выберите хотя бы одно приложение, чтобы включить этот режим.</string>
+    <string name="simple_mode_apply_failed">Не удалось применить режим трафика.</string>
+
+    <!-- Режимы трафика: карточка режима на главной -->
+    <string name="simple_mode_card_auto_smart">Авто · умный режим</string>
+    <string name="simple_mode_card_auto_whitelist">Авто · белые списки</string>
+    <string name="simple_mode_card_whitelist_hint">Весь трафик идёт через VPN</string>
+    <string name="simple_mode_card_custom">Свои правила</string>
+    <string name="simple_mode_card_custom_hint">Заданы в классическом интерфейсе</string>
+
+    <!-- Названия сущностей, которые создают режимы трафика; они видны и в классическом интерфейсе -->
+    <string name="simple_route_whitelist_name">Белые списки (простой интерфейс)</string>
+    <string name="simple_selector_auto_name">Авто</string>
+    <string name="simple_selector_auto_whitelist_name">Авто · белые списки</string>
 </resources>

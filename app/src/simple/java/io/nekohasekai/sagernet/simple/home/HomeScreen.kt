@@ -46,6 +46,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -59,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.simple.modes.ModeCard
 import kotlinx.coroutines.delay
 
 /** What the home screen opens; the screens behind the stubs arrive in later batches. */
@@ -69,16 +72,19 @@ class HomeActions(
     val openServers: () -> Unit,
     /** The classic interface for one visit, without changing the choice (adding servers until batch 4). */
     val openClassicOnce: () -> Unit,
+    /** The traffic mode settings. */
+    val openMode: () -> Unit,
 )
 
 /** The home section: the connect button with its status, the problem banner and the server and mode cards. */
 @Composable
 fun HomeScreen(
     state: HomeUiState,
+    /** null until the mode in effect is read. */
+    modeCard: ModeCard?,
     actions: HomeActions,
     onToggle: () -> Unit,
     onDismissProblem: () -> Unit,
-    onModeStub: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var repairDialog by rememberSaveable { mutableStateOf(false) }
@@ -124,7 +130,7 @@ fun HomeScreen(
                     banner(cardWidth, if (low) 8.dp else 16.dp)
                     ServerCardView(state, actions.openServers, cardWidth)
                     Spacer(Modifier.height(if (low) 8.dp else 12.dp))
-                    ModeCard(onModeStub, cardWidth)
+                    ModeCardView(modeCard, actions.openMode, cardWidth)
                 }
             }
         } else {
@@ -148,7 +154,7 @@ fun HomeScreen(
                         Spacer(Modifier.height(28.dp))
                         ServerCardView(state, actions.openServers, cardWidth)
                         Spacer(Modifier.height(12.dp))
-                        ModeCard(onModeStub, cardWidth)
+                        ModeCardView(modeCard, actions.openMode, cardWidth)
                         Spacer(Modifier.height(16.dp))
                     }
                 }
@@ -338,15 +344,29 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
 }
 
 @Composable
-private fun ModeCard(onClick: () -> Unit, modifier: Modifier) {
-    // Batch 3 brings the traffic modes; until then the card shows the default the simple UI is built around.
+private fun ModeCardView(card: ModeCard?, onClick: () -> Unit, modifier: Modifier) {
+    val headline = when (card) {
+        null -> ""
+        ModeCard.AUTO_SMART -> stringResource(R.string.simple_mode_card_auto_smart)
+        ModeCard.AUTO_WHITELIST -> stringResource(R.string.simple_mode_card_auto_whitelist)
+        ModeCard.SMART -> stringResource(R.string.simple_mode_smart)
+        ModeCard.WHITELIST -> stringResource(R.string.simple_mode_whitelist)
+        ModeCard.APPS -> stringResource(R.string.simple_mode_apps)
+        ModeCard.CUSTOM -> stringResource(R.string.simple_mode_card_custom)
+    }
+    val supporting = when (card) {
+        ModeCard.AUTO_WHITELIST, ModeCard.WHITELIST -> stringResource(R.string.simple_mode_card_whitelist_hint)
+        ModeCard.CUSTOM -> stringResource(R.string.simple_mode_card_custom_hint)
+        else -> null
+    }
     HomeCard(
         overline = stringResource(R.string.simple_card_mode),
-        headline = stringResource(R.string.simple_mode_smart),
-        supporting = null,
+        headline = headline,
+        supporting = supporting,
         trailing = null,
         onClick = onClick,
         modifier = modifier,
+        warning = card?.whitelists == true,
     )
 }
 
@@ -358,17 +378,42 @@ private fun HomeCard(
     trailing: String?,
     onClick: () -> Unit,
     modifier: Modifier,
+    /** Whitelists are in effect: the card stands out in a warning colour (simple-ui spec, mode card). */
+    warning: Boolean = false,
 ) {
-    OutlinedCard(onClick = onClick, modifier = modifier) {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val container = when {
+        !warning -> MaterialTheme.colorScheme.surface
+        dark -> Color(0xFF4A3800)
+        else -> Color(0xFFFFE6A6)
+    }
+    val content = when {
+        !warning -> MaterialTheme.colorScheme.onSurface
+        dark -> Color(0xFFFFE08F)
+        else -> Color(0xFF3A2A00)
+    }
+    val secondary = if (warning) content else MaterialTheme.colorScheme.onSurfaceVariant
+    OutlinedCard(
+        onClick = onClick,
+        modifier = modifier,
+        colors = CardDefaults.outlinedCardColors(containerColor = container, contentColor = content),
+    ) {
         Row(
             Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (warning) {
+                Icon(
+                    Icons.Filled.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     overline,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = secondary,
                 )
                 Text(
                     headline,
@@ -380,7 +425,7 @@ private fun HomeCard(
                     Text(
                         it,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = secondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -397,7 +442,7 @@ private fun HomeCard(
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = secondary,
                 modifier = Modifier.padding(start = 4.dp),
             )
         }

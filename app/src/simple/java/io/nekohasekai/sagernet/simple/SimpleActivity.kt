@@ -14,7 +14,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -23,14 +22,12 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -65,6 +62,11 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.home.HomeActions
 import io.nekohasekai.sagernet.simple.home.HomeScreen
 import io.nekohasekai.sagernet.simple.home.HomeViewModel
+import io.nekohasekai.sagernet.simple.modes.AppList
+import io.nekohasekai.sagernet.simple.modes.ModesViewModel
+import io.nekohasekai.sagernet.simple.settings.SettingsActions
+import io.nekohasekai.sagernet.simple.settings.SettingsScreen
+import io.nekohasekai.sagernet.ui.AppManagerActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
 
@@ -77,6 +79,12 @@ import io.nekohasekai.sagernet.ui.VpnRequestActivity
 class SimpleActivity : AppCompatActivity() {
 
     private val home: HomeViewModel by viewModels()
+    private val modes: ModesViewModel by viewModels()
+
+    /** The classic app list (AppManagerActivity) editing one of the simple UI's two app lists. */
+    private val appList = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        modes.appListClosed()
+    }
 
     /** The VPN consent, then the start of the service; true in the result when the consent was refused. */
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) { refused ->
@@ -92,6 +100,8 @@ class SimpleActivity : AppCompatActivity() {
             SimpleTheme {
                 SimpleApp(
                     home = home,
+                    modes = modes,
+                    openAppList = ::openAppList,
                     requestStart = ::requestStart,
                     openClassicOnce = ::openClassicOnce,
                     onOpenClassic = { SimpleUi.switchTo(this, simple = false) },
@@ -104,6 +114,7 @@ class SimpleActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         home.setForeground(true)
+        modes.refresh()
     }
 
     override fun onStop() {
@@ -124,6 +135,16 @@ class SimpleActivity : AppCompatActivity() {
             VpnRequestActivity.showConsentUnavailable(this)
         } catch (_: SecurityException) {
             VpnRequestActivity.showConsentUnavailable(this)
+        }
+    }
+
+    /** The classic app list over the per-app keys ModesViewModel.edit has just set to [list]. */
+    private fun openAppList(@Suppress("UNUSED_PARAMETER") list: AppList) {
+        try {
+            appList.launch(Intent(this, AppManagerActivity::class.java))
+        } catch (e: ActivityNotFoundException) {
+            Logs.w(e)
+            modes.appListClosed()
         }
     }
 
@@ -180,6 +201,8 @@ enum class SimpleSection(@StringRes val label: Int, val icon: ImageVector) {
 @Composable
 fun SimpleApp(
     home: HomeViewModel,
+    modes: ModesViewModel,
+    openAppList: (AppList) -> Unit,
     requestStart: () -> Unit,
     openClassicOnce: () -> Unit,
     onOpenClassic: () -> Unit,
@@ -212,7 +235,7 @@ fun SimpleApp(
             Modifier
         }
         Box(contentInsets) {
-            SectionContent(section, home, requestStart, openClassicOnce, onOpenClassic) { section = it }
+            SectionContent(section, home, modes, openAppList, requestStart, openClassicOnce, onOpenClassic) { section = it }
         }
     }
 }
@@ -221,6 +244,8 @@ fun SimpleApp(
 private fun SectionContent(
     section: SimpleSection,
     home: HomeViewModel,
+    modes: ModesViewModel,
+    openAppList: (AppList) -> Unit,
     requestStart: () -> Unit,
     openClassicOnce: () -> Unit,
     onOpenClassic: () -> Unit,
@@ -229,33 +254,38 @@ private fun SectionContent(
     when (section) {
         SimpleSection.HOME -> HomeSection(
             home,
+            modes,
             HomeActions(
                 requestStart = requestStart,
                 openServers = { select(SimpleSection.SERVERS) },
                 openClassicOnce = openClassicOnce,
+                openMode = { select(SimpleSection.SETTINGS) },
             ),
         )
 
         SimpleSection.SERVERS -> PlaceholderSection(section, R.string.simple_servers_placeholder)
-        SimpleSection.SETTINGS -> SettingsSection(onOpenClassic)
+        SimpleSection.SETTINGS -> SettingsSection(modes, openAppList, onOpenClassic)
     }
 }
 
 @Composable
-private fun HomeSection(home: HomeViewModel, actions: HomeActions) {
+private fun HomeSection(home: HomeViewModel, modes: ModesViewModel, actions: HomeActions) {
     val state by home.state.collectAsStateWithLifecycle()
+    val modesState by modes.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     LaunchedEffect(home) {
         home.messages.collect { snackbar.showSnackbar(context.getString(it)) }
     }
+    // A mode applied while the service starts or reloads: read what is in effect once the state settles.
+    LaunchedEffect(state.phase) { modes.refresh() }
     SectionScaffold(SimpleSection.HOME, snackbar) { modifier ->
         HomeScreen(
             state = state,
+            modeCard = modesState.card,
             actions = actions,
             onToggle = { home.toggle(actions.requestStart) },
             onDismissProblem = home::dismissProblem,
-            onModeStub = { home.message(R.string.simple_mode_coming) },
             modifier = modifier,
         )
     }
@@ -293,16 +323,23 @@ private fun PlaceholderSection(section: SimpleSection, @StringRes text: Int) {
 }
 
 @Composable
-private fun SettingsSection(onOpenClassic: () -> Unit) {
-    SectionScaffold(SimpleSection.SETTINGS) { modifier ->
-        LazyColumn(modifier.fillMaxSize()) {
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.simple_settings_classic)) },
-                    supportingContent = { Text(stringResource(R.string.simple_settings_classic_summary)) },
-                    modifier = Modifier.clickable(onClick = onOpenClassic),
-                )
-            }
-        }
+private fun SettingsSection(modes: ModesViewModel, openAppList: (AppList) -> Unit, onOpenClassic: () -> Unit) {
+    val state by modes.state.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    LaunchedEffect(modes) {
+        modes.messages.collect { snackbar.showSnackbar(context.getString(it)) }
+    }
+    SectionScaffold(SimpleSection.SETTINGS, snackbar) { modifier ->
+        SettingsScreen(
+            state = state,
+            actions = SettingsActions(
+                selectMode = { modes.select(it, openAppList) },
+                editApps = { modes.edit(it, openAppList) },
+                dismissFallback = modes::dismissFallback,
+                openClassic = onOpenClassic,
+            ),
+            modifier = modifier,
+        )
     }
 }
