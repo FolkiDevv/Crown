@@ -1,7 +1,9 @@
 package io.nekohasekai.sagernet.simple.servers
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CountryFromNameTest {
@@ -91,6 +93,21 @@ class CountryFromNameTest {
         assertEquals(ServerCountry.Detecting, CountryFromName.resolve("MyConfig", null, detecting = true))
         // A stored result stands while the check runs again.
         assertEquals(ServerCountry.Known("FI", fromName = false), CountryFromName.resolve("MyConfig", "FI", detecting = true))
+    }
+
+    @Test
+    fun namesAsShown() {
+        assertEquals("🇩🇪 Германия #2 · Nova", CountryFromName.tidy("  🇩🇪 Германия #2  ·  Nova "))
+        assertEquals("Германия #2", CountryFromName.withoutLeadingFlag(" 🇩🇪 Германия #2 "))
+        assertEquals("R5->Fl", CountryFromName.withoutLeadingFlag("🇫🇮R5->Fl"))
+        assertEquals("💫 Белые списки", CountryFromName.withoutLeadingFlag("💫 Белые списки"))
+        assertEquals("Amsterdam 🇳🇱", CountryFromName.withoutLeadingFlag("Amsterdam 🇳🇱"))
+        // Nothing but a flag stays as it is.
+        assertEquals("🇩🇪", CountryFromName.withoutLeadingFlag("🇩🇪"))
+        assertEquals("", CountryFromName.withoutLeadingFlag("  "))
+        assertTrue(CountryFromName.startsWithFlag(" 🇩🇪 Germany"))
+        assertFalse(CountryFromName.startsWithFlag("Germany 🇩🇪"))
+        assertFalse(CountryFromName.startsWithFlag(""))
     }
 
     @Test

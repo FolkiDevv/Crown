@@ -154,7 +154,8 @@ class SimpleActivity : AppCompatActivity() {
                             modes.syncGroups()
                             home.refreshServer()
                             modes.refresh()
-                            servers.reload()
+                            // The new servers get their delay (and country by exit IP) without waiting for the next round.
+                            servers.reload(thenTest = true)
                         }
 
                         is AddEvent.OpenClassic -> openClassicImport(event.text)

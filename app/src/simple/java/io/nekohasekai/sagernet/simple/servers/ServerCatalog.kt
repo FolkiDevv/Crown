@@ -26,7 +26,7 @@ object ServerCatalog {
         val entries = groups.map { GroupEntry(it.id, it.displayName(), it.isSubscription) }
         val servers = groups.flatMap { group ->
             SagerDatabase.proxyDao.getByGroup(group.id).filter { it.type != AutoSelectorProfiles.TYPE }.map { profile ->
-                val name = nameOf(profile).ifEmpty { unnamed }
+                val name = CountryFromName.tidy(nameOf(profile)).ifEmpty { unnamed }
                 ServerEntry(
                     id = profile.id,
                     groupId = group.id,

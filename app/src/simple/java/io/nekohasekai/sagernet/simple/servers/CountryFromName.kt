@@ -172,6 +172,31 @@ object CountryFromName {
         return if (detecting) ServerCountry.Detecting else ServerCountry.Unknown
     }
 
+    /** A name as the list shows it: no leading or trailing blanks, runs of blanks as one space. */
+    fun tidy(name: String): String = name.trim().replace(BLANKS, " ")
+
+    /**
+     * [name] without the flag emoji it starts with (and the blanks after it), for a row that shows the flag on its own;
+     * the name itself when it does not start with a flag or is nothing but one.
+     */
+    fun withoutLeadingFlag(name: String): String {
+        val tidy = tidy(name)
+        if (tidy.length < 4) return tidy
+        val first = tidy.codePointAt(0)
+        val second = tidy.codePointAt(Character.charCount(first))
+        if (first !in REGIONAL_A..REGIONAL_Z || second !in REGIONAL_A..REGIONAL_Z) return tidy
+        val rest = tidy.substring(Character.charCount(first) + Character.charCount(second)).trim()
+        return rest.ifEmpty { tidy }
+    }
+
+    /** Whether [name] starts with a flag emoji. */
+    fun startsWithFlag(name: String): Boolean {
+        val tidy = name.trimStart()
+        return tidy.isNotEmpty() && tidy.codePointAt(0) in REGIONAL_A..REGIONAL_Z
+    }
+
+    private val BLANKS = Regex("\\s+")
+
     /** The flag emoji of [code] (each letter shifted to its regional indicator), "" for anything but two letters. */
     fun flagOf(code: String): String {
         if (code.length != 2 || !code.all { it in 'A'..'Z' || it in 'a'..'z' }) return ""

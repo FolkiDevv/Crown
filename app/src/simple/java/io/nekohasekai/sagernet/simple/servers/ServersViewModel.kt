@@ -104,12 +104,18 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     /** The subscriptions this section asked to update, with the time of the request (elapsed realtime). */
     private val requested = HashMap<Long, Long>()
+
+    /** Those of [requested] that pull to refresh asked for. */
+    private val pulled = HashSet<Long>()
     private var pullUntil = 0L
 
     /** The background test session this section started, and the state before it (to tell its states apart). */
     private var ownTest: Int = NONE
     private var stateBeforeTest: TestUiState? = null
     private var lastUrlTest = 0L
+
+    /** The servers the URL tests since [lastUrlTest] covered. */
+    private val testedIds = HashSet<Long>()
     private var detecting: Set<Long> = emptySet()
 
     /** Live results of the running URL test, until the database has them. */
@@ -197,8 +203,14 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     fun chooseServer(server: ServerEntry) = choose { TrafficModeApplier.selectServer(server.id) }
 
     /** Updates one subscription now (the card's button). */
-    fun update(groupId: Long) {
+    fun update(groupId: Long) = update(groupId, pulled = false)
+
+    /** [pulled]: asked for by pull to refresh, whose indicator then follows this update. */
+    private fun update(groupId: Long, pulled: Boolean) {
+        // An update that is queued or running already is not asked for again (repeated pulls).
+        if (groupId in updating || groupId in requested) return
         requested[groupId] = SystemClock.elapsedRealtime()
+        if (pulled) this.pulled += groupId
         SubscriptionClient.refreshGroup(groupId, false)
         publishCards()
         // Until the queue reports it, the card shows the update for a moment; then it follows the queue.
@@ -218,7 +230,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         // The indicator shows at once and stays until the queue reports the updates (or briefly, if it never does).
         pullUntil = SystemClock.elapsedRealtime() + PULL_GRACE_MS
         mutableState.update { it.copy(refreshing = true) }
-        ids.forEach(::update)
+        ids.forEach { update(it, pulled = true) }
+        publishCards()
     }
 
     override fun onCleared() {
@@ -294,8 +307,9 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     private fun onSubscriptionStates(ids: Set<Long>) {
         val finished = updating - ids
         updating = ids
-        if (ids.any { it in requested }) pullUntil = 0L
+        if (ids.any { it in pulled }) pullUntil = 0L
         requested.keys.removeAll(finished)
+        pulled.removeAll(finished)
         publishCards()
         if (finished.isEmpty()) return
         // The update ran in :bg: the selectors follow the new servers, the list and the delays are read again.
@@ -308,10 +322,14 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val now = SystemClock.elapsedRealtime()
         val pulling = now < pullUntil
         fun justRequested(id: Long) = requested[id]?.let { now - it < PULL_GRACE_MS } == true
+        // A request that never reached the queue (it failed at once) is forgotten after the grace period.
+        requested.entries.removeAll { (id, at) -> id !in updating && now - at >= PULL_GRACE_MS }
+        pulled.retainAll(requested.keys)
         mutableState.update { state ->
             state.copy(
                 cards = state.cards.mapValues { (id, card) -> card.copy(refreshing = id in updating || justRequested(id)) },
-                refreshing = pulling || state.cards.keys.any { it in updating && it in requested },
+                // Only pull to refresh shows the indicator at the top; a card's own button shows its spinner.
+                refreshing = pulling || state.cards.keys.any { it in updating && it in pulled },
             )
         }
     }
@@ -320,13 +338,19 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     private fun startUrlTest() {
         val now = SystemClock.elapsedRealtime()
-        if (lastUrlTest > 0L && now - lastUrlTest < TEST_INTERVAL_MS) return
-        val ids = mutableState.value.sections?.allServers?.map { it.id }.orEmpty()
+        val all = mutableState.value.sections?.allServers?.map { it.id }.orEmpty()
+        // Within the interval only servers added since the last round are tested (a server just added by hand).
+        val throttled = lastUrlTest > 0L && now - lastUrlTest < TEST_INTERVAL_MS
+        val ids = if (throttled) all.filter { it !in testedIds } else all
         if (ids.isEmpty() || ownTest != NONE) return
         val before = TestSessionClient.state.value
         // Another session (one the user started in the classic interface) runs: this round is skipped.
         if (!TestSessionClient.startProfiles(TestSpec.KIND_URL, ids)) return
-        lastUrlTest = now
+        if (!throttled) {
+            lastUrlTest = now
+            testedIds.clear()
+        }
+        testedIds += ids
         stateBeforeTest = before
         ownTest = TestSpec.KIND_URL
         liveLatency.clear()
@@ -412,7 +436,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         }
         val known = pickCountry?.takeIf { it.first == status.selectedId }
         if (known != null) {
-            mutableState.update { it.copy(pick = RunningPick(status.selectorId, status.selectedName, known.second)) }
+            val name = CountryFromName.tidy(status.selectedName)
+            mutableState.update { it.copy(pick = RunningPick(status.selectorId, name, known.second)) }
             return
         }
         viewModelScope.launch {

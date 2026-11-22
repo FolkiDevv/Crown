@@ -435,9 +435,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         val running = autoStatus.takeIf { auto && it.active && it.selectorId == profile?.id }
         val server = profile?.let {
             ServerCard(
-                name = it.displayName(),
+                name = CountryFromName.tidy(it.displayName()),
                 auto = auto,
-                autoSelected = running?.selectedName.orEmpty(),
+                autoSelected = CountryFromName.tidy(running?.selectedName.orEmpty()),
                 latencyMs = if (connected) liveLatency else it.latency.takeIf { ms -> ms > 0 && !auto },
                 localizedName = when (it.id) {
                     managed?.auto -> R.string.simple_selector_auto_name

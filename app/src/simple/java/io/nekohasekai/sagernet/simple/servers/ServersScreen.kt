@@ -170,7 +170,7 @@ private fun LazyListScope.servers(
     items(list, key = { "$prefix-${it.id}" }) { server ->
         ChoiceRow(
             leading = { CountryFlag(server.country.code) },
-            headline = server.name,
+            headline = CountryFromName.withoutLeadingFlag(server.name),
             supporting = countryText(server.country, locale),
             trailing = latencyText(server.latency),
             trailingError = server.latency == -1,
@@ -382,8 +382,10 @@ private fun latencyText(latency: Int): String? = when {
     else -> null
 }
 
-private fun pickLabel(pick: RunningPick): String =
-    pick.country?.let { CountryFromName.flagOf(it) + " " + pick.name } ?: pick.name
+/** The pick's name, after its flag unless the name starts with one already. */
+private fun pickLabel(pick: RunningPick): String = pick.country
+    ?.takeIf { !CountryFromName.startsWithFlag(pick.name) }
+    ?.let { CountryFromName.flagOf(it) + " " + pick.name } ?: pick.name
 
 @Composable
 private fun updatedText(lastUpdate: Long, now: Long, dateFormat: DateFormat): String {
