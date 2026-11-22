@@ -123,29 +123,3 @@ object ImportText {
         return digest.joinToString("") { "%02x".format(it) }
     }
 }
-
-/** The country of a server by the flag in its name; the full CountryFromName (ISO codes, names) is batch 5. */
-object CountryFlags {
-
-    private const val REGIONAL_A = 0x1F1E6
-    private const val REGIONAL_Z = 0x1F1FF
-
-    /** The ISO 3166 code of the first flag emoji in [name], null when there is none. */
-    fun countryOf(name: String): String? {
-        var i = 0
-        var previous = -1
-        while (i < name.length) {
-            val cp = name.codePointAt(i)
-            if (cp in REGIONAL_A..REGIONAL_Z) {
-                if (previous >= 0) {
-                    return String(charArrayOf('A' + (previous - REGIONAL_A), 'A' + (cp - REGIONAL_A)))
-                }
-                previous = cp
-            } else {
-                previous = -1
-            }
-            i += Character.charCount(cp)
-        }
-        return null
-    }
-}

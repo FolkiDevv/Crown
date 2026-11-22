@@ -174,5 +174,14 @@ object TrafficModePlan {
     fun parseList(text: String?): List<String> = clean(text.orEmpty().lines())
 }
 
-/** The ids of the managed entities (design.md D5); 0 = missing (could not be created). */
-data class Managed(val smartRoute: Long, val whitelistRoute: Long, val auto: Long, val autoWhitelist: Long)
+/**
+ * The ids of the managed entities (design.md D5); 0 = missing (could not be created). [country] is the auto-selector
+ * behind a country chosen in «Серверы» (batch 5), 0 until one was chosen.
+ */
+data class Managed(
+    val smartRoute: Long,
+    val whitelistRoute: Long,
+    val auto: Long,
+    val autoWhitelist: Long,
+    val country: Long = 0L,
+)

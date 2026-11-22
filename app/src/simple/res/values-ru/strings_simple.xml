@@ -3,7 +3,7 @@
     <string name="simple_nav_home">Главная</string>
     <string name="simple_nav_servers">Серверы</string>
     <string name="simple_nav_settings">Настройки</string>
-    <string name="simple_servers_placeholder">Скоро здесь появится список ваших серверов.</string>
+    <string name="simple_servers_empty">Серверов пока нет.</string>
     <string name="simple_settings_classic">Классический интерфейс</string>
     <string name="simple_settings_classic_summary">Все функции и настройки полного приложения. Вернуться можно из его меню.</string>
     <string name="simple_switch_to_new">Новый интерфейс</string>
@@ -165,4 +165,54 @@
         <item quantity="other">В буфере обмена %d сервера.</item>
     </plurals>
     <string name="simple_offer_later">Не сейчас</string>
+
+    <!-- Раздел «Серверы» (батч 5) -->
+    <string name="simple_servers_auto_summary">Лучший рабочий сервер выбирается сам</string>
+    <string name="simple_servers_now">Сейчас: %1$s</string>
+    <string name="simple_servers_whitelist">Для белых списков</string>
+    <string name="simple_servers_whitelist_hint">Работают, когда мобильная сеть пропускает только сайты из белых списков</string>
+    <string name="simple_country_detecting">Страна определяется…</string>
+    <string name="simple_country_unknown">Страна не определена</string>
+    <plurals name="simple_servers_count">
+        <item quantity="one">%d сервер</item>
+        <item quantity="few">%d сервера</item>
+        <item quantity="many">%d серверов</item>
+        <item quantity="other">%d сервера</item>
+    </plurals>
+    <string name="simple_server_no_answer">Нет ответа</string>
+    <string name="simple_server_answers">Отвечает</string>
+    <string name="simple_server_unnamed">Сервер без названия</string>
+    <string name="simple_servers_expand">Показать серверы</string>
+    <string name="simple_servers_collapse">Скрыть серверы</string>
+    <string name="simple_sub_update">Обновить подписку</string>
+    <string name="simple_sub_empty">В подписке пока нет серверов.</string>
+    <string name="simple_sub_traffic_left">Осталось %1$s из %2$s</string>
+    <string name="simple_sub_traffic_unlimited">Трафик без ограничений</string>
+    <string name="simple_sub_traffic_exhausted">Трафик закончился</string>
+    <plurals name="simple_sub_expires_soon">
+        <item quantity="one">Закончится через %1$d день, %2$s</item>
+        <item quantity="few">Закончится через %1$d дня, %2$s</item>
+        <item quantity="many">Закончится через %1$d дней, %2$s</item>
+        <item quantity="other">Закончится через %1$d дня, %2$s</item>
+    </plurals>
+    <string name="simple_sub_updated_now">Обновлено только что</string>
+    <plurals name="simple_sub_updated_minutes">
+        <item quantity="one">Обновлено %d минуту назад</item>
+        <item quantity="few">Обновлено %d минуты назад</item>
+        <item quantity="many">Обновлено %d минут назад</item>
+        <item quantity="other">Обновлено %d минуты назад</item>
+    </plurals>
+    <plurals name="simple_sub_updated_hours">
+        <item quantity="one">Обновлено %d час назад</item>
+        <item quantity="few">Обновлено %d часа назад</item>
+        <item quantity="many">Обновлено %d часов назад</item>
+        <item quantity="other">Обновлено %d часа назад</item>
+    </plurals>
+    <string name="simple_sub_updated_date">Обновлено %1$s</string>
+    <string name="simple_sub_never_updated">Ещё не обновлялась</string>
+    <string name="simple_servers_update_failed">Не удалось обновить подписку: %1$s</string>
+    <string name="simple_servers_choose_failed">Не удалось переключить сервер</string>
+    <string name="simple_selector_country_name">Страна (простой интерфейс)</string>
+    <string name="simple_server_country_best">Лучший сервер страны</string>
+    <string name="simple_server_auto_with">Авто · %1$s</string>
 </resources>

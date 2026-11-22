@@ -25,6 +25,7 @@ import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.modes.Managed
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
+import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -53,6 +54,10 @@ data class ServerCard(
      * language it was created in); null otherwise.
      */
     @StringRes val localizedName: Int? = null,
+    /** The country (ISO code) of the plain server, or of the server the auto-selector picked; null when unknown. */
+    val country: String? = null,
+    /** The country chosen in «Серверы» when the managed country selector runs; null otherwise. */
+    val countryChoice: String? = null,
 )
 
 data class HomeUiState(
@@ -116,6 +121,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 if (reselected) {
                     liveLatency = null
                     if (foreground && serviceState == BaseService.State.Connected) restartChecks(SOON_MS)
+                    lookUpPickCountry(status.selectedId)
                 }
                 publish()
             }
@@ -349,6 +355,29 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     /** The managed auto-selectors of the traffic modes, read with the profiles. */
     private var managed: Managed? = null
 
+    /** The country of the selected plain server, and the country chosen in «Серверы» (read with the profiles). */
+    private var selectedCountry: String? = null
+    private var choiceCountry: String? = null
+
+    /** The country of the auto-selector's pick: (profile id, ISO code or null). */
+    private var pickCountry: Pair<Long, String?>? = null
+
+    private fun lookUpPickCountry(id: Long) {
+        if (id <= 0L || pickCountry?.first == id) return
+        viewModelScope.launch {
+            val code = withContext(Dispatchers.IO) {
+                try {
+                    ProfileManager.getProfile(id)?.let { CountryFromName.resolve(it.outbound.name, it.testCountry).code }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    null
+                }
+            }
+            pickCountry = id to code
+            publish()
+        }
+    }
+
     /** Reads the selected server again (a traffic mode may have switched the managed auto-selector). */
     fun refreshServer() = refreshProfiles()
 
@@ -359,6 +388,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 try {
                     managed = TrafficModes.managedIds()
                     val selected = ProfileManager.getProfile(DataStore.selectedProxy)
+                    selectedCountry = selected?.let { CountryFromName.resolve(it.outbound.name, it.testCountry).code }
+                    choiceCountry = TrafficModes.countryChoice()?.code
+                        ?.takeIf { selected != null && selected.id == managed?.country }
                     val first = if (selected == null) firstProfile() else null
                     // The managed auto-selectors of the traffic modes are no server of their own.
                     val hasServers = TrafficModes.hasServers() ||
@@ -412,6 +444,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     managed?.autoWhitelist -> R.string.simple_selector_auto_whitelist_name
                     else -> null
                 },
+                country = if (auto) {
+                    pickCountry?.takeIf { pick -> running != null && pick.first == running.selectedId }?.second
+                } else {
+                    selectedCountry
+                },
+                countryChoice = choiceCountry,
             )
         }
         val exhausted = running != null && running.exhaustedSinceMs > 0L

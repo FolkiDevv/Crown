@@ -16,14 +16,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -33,11 +29,9 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -54,13 +48,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -86,6 +77,10 @@ import io.nekohasekai.sagernet.simple.home.HomeScreen
 import io.nekohasekai.sagernet.simple.home.HomeViewModel
 import io.nekohasekai.sagernet.simple.modes.AppList
 import io.nekohasekai.sagernet.simple.modes.ModesViewModel
+import io.nekohasekai.sagernet.simple.servers.ServersActions
+import io.nekohasekai.sagernet.simple.servers.ServersEvent
+import io.nekohasekai.sagernet.simple.servers.ServersScreen
+import io.nekohasekai.sagernet.simple.servers.ServersViewModel
 import io.nekohasekai.sagernet.simple.settings.SettingsActions
 import io.nekohasekai.sagernet.simple.settings.SettingsScreen
 import io.nekohasekai.sagernet.ui.AppManagerActivity
@@ -109,6 +104,7 @@ class SimpleActivity : AppCompatActivity() {
     private val home: HomeViewModel by viewModels()
     private val modes: ModesViewModel by viewModels()
     private val add: AddViewModel by viewModels()
+    private val servers: ServersViewModel by viewModels()
 
     /** The classic app list (AppManagerActivity) editing one of the simple UI's two app lists. */
     private val appList = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -141,7 +137,8 @@ class SimpleActivity : AppCompatActivity() {
                     home = home,
                     modes = modes,
                     add = add,
-                    launchers = AddLaunchers(::pasteClipboard, ::openScanner, ::chooseFile),
+                    servers = servers,
+                    launchers =AddLaunchers(::pasteClipboard, ::openScanner, ::chooseFile),
                     openAppList = ::openAppList,
                     requestStart = ::requestStart,
                     onOpenClassic = { SimpleUi.switchTo(this, simple = false) },
@@ -157,10 +154,25 @@ class SimpleActivity : AppCompatActivity() {
                             modes.syncGroups()
                             home.refreshServer()
                             modes.refresh()
+                            servers.reload()
                         }
 
                         is AddEvent.OpenClassic -> openClassicImport(event.text)
                         is AddEvent.OpenBackup -> openBackup(event.uri)
+                    }
+                }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                servers.events.collect { event ->
+                    when (event) {
+                        ServersEvent.Chosen -> home.refreshServer()
+                        // An update in :bg may have renamed or replaced the servers of the chosen country.
+                        ServersEvent.Updated -> {
+                            modes.syncGroups()
+                            home.refreshServer()
+                        }
                     }
                 }
             }
@@ -184,6 +196,7 @@ class SimpleActivity : AppCompatActivity() {
         modes.refresh()
         // Groups added meanwhile in :bg (a subscription added in the classic interface) join the «Авто» selectors.
         modes.syncGroups()
+        servers.reload()
         clipboardCheck = true
     }
 
@@ -394,6 +407,7 @@ fun SimpleApp(
     home: HomeViewModel,
     modes: ModesViewModel,
     add: AddViewModel,
+    servers: ServersViewModel,
     launchers: AddLaunchers,
     openAppList: (AppList) -> Unit,
     requestStart: () -> Unit,
@@ -469,7 +483,7 @@ fun SimpleApp(
                     snackbar,
                 )
 
-                SimpleSection.SERVERS -> ServersSection(onAdd = { addSheet = true }, snackbar = snackbar)
+                SimpleSection.SERVERS -> ServersSection(servers, onAdd = { addSheet = true }, snackbar = snackbar)
                 SimpleSection.SETTINGS -> SettingsSection(modes, openAppList, onOpenClassic, snackbar)
             }
         }
@@ -537,11 +551,12 @@ private fun HomeSection(home: HomeViewModel, modes: ModesViewModel, actions: Hom
 private fun SectionScaffold(
     section: SimpleSection,
     snackbar: SnackbarHostState? = null,
+    actions: @Composable RowScope.() -> Unit = {},
     content: @Composable (Modifier) -> Unit,
 ) {
     // The navigation suite already keeps clear of the bottom/side system bars; the top bar takes the status bar.
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(section.label)) }) },
+        topBar = { TopAppBar(title = { Text(stringResource(section.label)) }, actions = actions) },
         snackbarHost = { snackbar?.let { SnackbarHost(it) } },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
@@ -549,25 +564,40 @@ private fun SectionScaffold(
     }
 }
 
-/** The server list arrives in batch 5; until then the section only leads to adding one. */
 @Composable
-private fun ServersSection(onAdd: () -> Unit, snackbar: SnackbarHostState) {
-    SectionScaffold(SimpleSection.SERVERS, snackbar) { modifier ->
-        Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Text(
-                    stringResource(R.string.simple_servers_placeholder),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(20.dp))
-                Button(onClick = onAdd, contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
-                    Text(stringResource(R.string.simple_add_server))
-                }
-            }
+private fun ServersSection(servers: ServersViewModel, onAdd: () -> Unit, snackbar: SnackbarHostState) {
+    val state by servers.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    LaunchedEffect(servers) {
+        servers.messages.collect { message ->
+            snackbar.showSnackbar(
+                message.arg?.let { context.getString(message.text, it) } ?: context.getString(message.text)
+            )
         }
+    }
+    // Opening the section reads the list again and starts the background delay check (simple-ui 5.3).
+    LaunchedEffect(servers) { servers.opened() }
+    SectionScaffold(
+        SimpleSection.SERVERS,
+        snackbar,
+        actions = {
+            IconButton(onClick = onAdd) {
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.simple_add_server))
+            }
+        },
+    ) { modifier ->
+        ServersScreen(
+            state = state,
+            actions = ServersActions(
+                chooseAuto = servers::chooseAuto,
+                chooseCountry = servers::chooseCountry,
+                chooseServer = servers::chooseServer,
+                update = servers::update,
+                updateAll = servers::updateAll,
+                add = onAdd,
+            ),
+            modifier = modifier,
+        )
     }
 }
 

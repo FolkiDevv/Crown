@@ -4,7 +4,6 @@ import io.nekohasekai.sagernet.simple.add.ImportText.Kind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -113,12 +112,4 @@ class ImportTextTest {
         assertEquals(listOf(vless, json), ImportText.importUnits(listOf(vless, json)))
     }
 
-    @Test
-    fun countryFlags() {
-        assertEquals("DE", CountryFlags.countryOf("🇩🇪 Germany 3"))
-        assertEquals("NL", CountryFlags.countryOf("Amsterdam 🇳🇱"))
-        assertEquals("FI", CountryFlags.countryOf("🇫🇮🇸🇪 Helsinki"))
-        assertNull(CountryFlags.countryOf("MyConfig"))
-        assertNull(CountryFlags.countryOf(""))
-    }
 }

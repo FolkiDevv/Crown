@@ -1,6 +1,5 @@
 package io.nekohasekai.sagernet.simple.add
 
-import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,6 +52,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.simple.trafficSize
 import java.text.DateFormat
 import java.util.Date
 
@@ -395,23 +395,4 @@ fun ClipboardOfferDialog(offer: ClipboardOffer, onAccept: () -> Unit, onDecline:
         confirmButton = { TextButton(onClick = onAccept) { Text(stringResource(R.string.simple_add_action)) } },
         dismissButton = { TextButton(onClick = onDecline) { Text(stringResource(R.string.simple_offer_later)) } },
     )
-}
-
-/**
- * Traffic in binary units (1 GB = 1024³ bytes), the way subscription panels and the classic interface count it;
- * Android's Formatter uses decimal units since 8.0, which shows a larger number than the provider does.
- */
-private fun trafficSize(context: Context, bytes: Long): String {
-    val units = listOf(
-        1L shl 40 to R.string.simple_size_tb,
-        1L shl 30 to R.string.simple_size_gb,
-        1L shl 20 to R.string.simple_size_mb,
-    )
-    val (unit, label) = units.firstOrNull { bytes >= it.first } ?: units.last()
-    val value = bytes.toDouble() / unit
-    val format = java.text.NumberFormat.getNumberInstance().apply {
-        maximumFractionDigits = if (value < 100) 1 else 0
-        minimumFractionDigits = 0
-    }
-    return context.getString(label, format.format(value))
 }

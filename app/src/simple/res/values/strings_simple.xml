@@ -5,7 +5,7 @@
     <string name="simple_nav_home">Home</string>
     <string name="simple_nav_servers">Servers</string>
     <string name="simple_nav_settings">Settings</string>
-    <string name="simple_servers_placeholder">Your servers will appear here soon.</string>
+    <string name="simple_servers_empty">No servers yet.</string>
     <string name="simple_settings_classic">Classic interface</string>
     <string name="simple_settings_classic_summary">All features and settings of the full app. You can come back from its menu.</string>
     <!-- Item of the classic drawer menu (main_drawer_menu.xml) -->
@@ -177,4 +177,53 @@
         <item quantity="other">The clipboard holds %d servers.</item>
     </plurals>
     <string name="simple_offer_later">Not now</string>
+
+    <!-- Servers section (batch 5) -->
+    <string name="simple_servers_auto_summary">The best working server is picked for you</string>
+    <!-- %1$s: the server in use now, e.g. "🇩🇪 Germany 3" -->
+    <string name="simple_servers_now">Now: %1$s</string>
+    <string name="simple_servers_whitelist">For whitelists</string>
+    <string name="simple_servers_whitelist_hint">Used when the mobile network lets only whitelisted sites through</string>
+    <string name="simple_country_detecting">Detecting the country…</string>
+    <string name="simple_country_unknown">Country unknown</string>
+    <plurals name="simple_servers_count">
+        <item quantity="one">%d server</item>
+        <item quantity="other">%d servers</item>
+    </plurals>
+    <string name="simple_server_no_answer">No answer</string>
+    <string name="simple_server_answers">Answers</string>
+    <string name="simple_server_unnamed">Unnamed server</string>
+    <string name="simple_servers_expand">Show servers</string>
+    <string name="simple_servers_collapse">Hide servers</string>
+    <string name="simple_sub_update">Update the subscription</string>
+    <string name="simple_sub_empty">No servers in this subscription yet.</string>
+    <!-- %1$s: traffic left, %2$s: the quota, e.g. "97.6 GB of 100 GB left" -->
+    <string name="simple_sub_traffic_left">%1$s of %2$s left</string>
+    <string name="simple_sub_traffic_unlimited">Unlimited traffic</string>
+    <string name="simple_sub_traffic_exhausted">The traffic is used up</string>
+    <!-- %1$d: days left, %2$s: the date -->
+    <plurals name="simple_sub_expires_soon">
+        <item quantity="one">Ends in %1$d day, on %2$s</item>
+        <item quantity="other">Ends in %1$d days, on %2$s</item>
+    </plurals>
+    <string name="simple_sub_updated_now">Updated just now</string>
+    <plurals name="simple_sub_updated_minutes">
+        <item quantity="one">Updated %d minute ago</item>
+        <item quantity="other">Updated %d minutes ago</item>
+    </plurals>
+    <plurals name="simple_sub_updated_hours">
+        <item quantity="one">Updated %d hour ago</item>
+        <item quantity="other">Updated %d hours ago</item>
+    </plurals>
+    <!-- %1$s: a date -->
+    <string name="simple_sub_updated_date">Updated %1$s</string>
+    <string name="simple_sub_never_updated">Not updated yet</string>
+    <!-- %1$s: the reason, as the subscription server or the network gave it -->
+    <string name="simple_servers_update_failed">Could not update the subscription: %1$s</string>
+    <string name="simple_servers_choose_failed">Could not switch the server</string>
+    <string name="simple_selector_country_name">Country (simple interface)</string>
+    <!-- Home server card -->
+    <string name="simple_server_country_best">The best server of the country</string>
+    <!-- %1$s: the server Auto picked -->
+    <string name="simple_server_auto_with">Auto · %1$s</string>
 </resources>

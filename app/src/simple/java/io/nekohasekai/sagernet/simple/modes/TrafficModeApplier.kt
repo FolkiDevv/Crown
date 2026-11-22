@@ -6,6 +6,7 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleHooks
+import io.nekohasekai.sagernet.simple.servers.CountryChoice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -65,6 +66,9 @@ object TrafficModeApplier {
             if (DataStore.currentRouteId in ensured.changedRoutes && DataStore.serviceState.canStop) {
                 Logs.i("simple modes: the routing profile in use was updated, reload of the running service")
                 SagerNet.reloadService()
+            } else if (countrySelectorChanged(ensured) && DataStore.serviceState.canStop) {
+                Logs.i("simple servers: the chosen country's servers changed, reload of the running service")
+                SagerNet.reloadService()
             }
             ensured
         }
@@ -87,6 +91,51 @@ object TrafficModeApplier {
         }
         true
     }
+
+    /**
+     * The user chose «Авто» or a single server in «Серверы» (simple-ui "Выбор сервера в списке"): «Авто» runs the
+     * managed auto-selector of the current routing, any other choice is kept as made; a running service follows at
+     * once. Returns the id now selected.
+     */
+    suspend fun selectServer(id: Long): Long = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val managed = TrafficModes.managedIds()
+            val target = TrafficModePlan.server(id, managed.auto, managed.autoWhitelist, routingOf(TrafficModes.mode()))
+            TrafficModes.setCountryChoice(null)
+            switchTo(target, rebuilt = false)
+        }
+    }
+
+    /**
+     * The user chose a country: the managed country selector runs the best of [members] (the names of its servers);
+     * 0 when the selector could not be made.
+     */
+    suspend fun selectCountry(context: Context, choice: CountryChoice, members: List<String>): Long =
+        withContext(Dispatchers.IO) {
+            lock.withLock {
+                val (id, changed) = TrafficModes.ensureCountrySelector(context, choice, members)
+                if (id <= 0L) return@withLock 0L
+                TrafficModes.setCountryChoice(choice)
+                switchTo(id, rebuilt = changed)
+            }
+        }
+
+    /** Selects [target]; a running service reloads when it changed or its selector was [rebuilt]. */
+    private fun switchTo(target: Long, rebuilt: Boolean): Long {
+        val before = DataStore.selectedProxy
+        if (target != before) DataStore.selectedProxy = target
+        if ((target != before || rebuilt) && DataStore.serviceState.canStop) {
+            Logs.i("simple servers: server $target chosen, reload of the running service")
+            SagerNet.reloadService()
+        }
+        return target
+    }
+
+    private fun countrySelectorChanged(ensured: TrafficModes.Ensured): Boolean =
+        ensured.countryChanged && ensured.ids.country > 0L && DataStore.selectedProxy == ensured.ids.country
+
+    /** The routing [mode] runs now; batch 6 adds the network check's result for «Авто». */
+    private fun routingOf(mode: TrafficMode): Routing = TrafficModePlan.routing(mode, whitelistsDetected = false)
 
     /** A counter of service starts (SimpleHooks), to tell whether the service started during an app list edit. */
     fun serviceStarts(): Long = DataStore.configurationStore.getLong(SimpleHooks.KEY_SERVICE_STARTS) ?: 0L
@@ -111,7 +160,7 @@ object TrafficModeApplier {
             TrafficModes.setFallbackNotice(true)
             mode = applicable
         }
-        val routing = TrafficModePlan.routing(mode, whitelistsDetected = false)
+        val routing = routingOf(mode)
         val routeId = when (routing) {
             Routing.SMART -> managed.smartRoute
             Routing.WHITELIST -> managed.whitelistRoute
@@ -137,6 +186,9 @@ object TrafficModeApplier {
         val change = TrafficModePlan.change(before, after, ensured.changedRoutes, stagedScopeMayRun)
         if (change != ServiceChange.NONE && DataStore.serviceState.canStop) {
             Logs.i("simple modes: «${mode.key}» applied, ${change.name.lowercase()} of the running service")
+            SagerNet.reloadService()
+        } else if (countrySelectorChanged(ensured) && DataStore.serviceState.canStop) {
+            Logs.i("simple servers: the chosen country's servers changed, reload of the running service")
             SagerNet.reloadService()
         }
         return Result(mode, change, fellBack)

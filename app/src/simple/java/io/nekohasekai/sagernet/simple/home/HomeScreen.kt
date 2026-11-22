@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -64,6 +65,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.simple.add.AddActions
 import io.nekohasekai.sagernet.simple.add.Welcome
 import io.nekohasekai.sagernet.simple.modes.ModeCard
+import io.nekohasekai.sagernet.simple.servers.CountryLabels
 import kotlinx.coroutines.delay
 
 /** What the home screen opens; the screens behind the stubs arrive in later batches. */
@@ -293,6 +295,8 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
     val server = state.server?.let { card ->
         card.localizedName?.let { card.copy(name = stringResource(it)) } ?: card
     }
+    val locale = LocalConfiguration.current.locales[0]
+    val country = server?.country?.let { CountryLabels.label(it, locale) }
     val headline: String
     val supporting: String?
     when {
@@ -301,9 +305,20 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
             supporting = null
         }
 
+        // A country chosen in «Серверы»: the country, and the server its selector runs.
+        server.countryChoice != null -> {
+            headline = CountryLabels.label(server.countryChoice, locale)
+            supporting = server.autoSelected.ifEmpty { stringResource(R.string.simple_server_country_best) }
+        }
+
+        // «Авто» picked a server: the country it is in (simple-ui "Карточки сервера и режима на главной").
         server.auto && server.autoSelected.isNotEmpty() -> {
-            headline = server.autoSelected
-            supporting = stringResource(R.string.simple_server_auto)
+            headline = country ?: server.autoSelected
+            supporting = if (country != null) {
+                stringResource(R.string.simple_server_auto_with, server.autoSelected)
+            } else {
+                stringResource(R.string.simple_server_auto)
+            }
         }
 
         server.auto -> {
@@ -316,7 +331,7 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
 
         else -> {
             headline = server.name
-            supporting = null
+            supporting = country
         }
     }
     val latency = server?.latencyMs?.let { stringResource(R.string.simple_latency_ms, it) }

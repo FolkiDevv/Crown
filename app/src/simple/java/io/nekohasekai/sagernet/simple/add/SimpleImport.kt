@@ -16,6 +16,7 @@ import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.outbound.Outbound
+import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.ui.SubscribeFlows
 import io.nekohasekai.sagernet.ui.profile.ProfileTextImport
 import io.nekohasekai.sagernet.validation.vplural
@@ -268,7 +269,7 @@ object SimpleImport {
     fun summary(gid: Long, enabled: List<Enabled>, updateHours: Int): ImportSummary? {
         val group = GroupRepo.get(gid) ?: return null
         val members = SagerDatabase.proxyDao.getByGroup(gid).filter { !TrafficModes.isManagedSelector(it.id) }
-        val countries = members.mapNotNull { p -> runCatching { CountryFlags.countryOf(p.displayName()) }.getOrNull() }
+        val countries = members.mapNotNull { p -> CountryFromName.resolve(p.outbound.name, p.testCountry).code }
             .toSet()
         val info: SubUserInfo = group.subMetadata
         return ImportSummary(

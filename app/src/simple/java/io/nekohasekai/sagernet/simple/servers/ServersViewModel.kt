@@ -1,0 +1,450 @@
+package io.nekohasekai.sagernet.simple.servers
+
+import android.app.Application
+import android.os.SystemClock
+import androidx.annotation.StringRes
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.aidl.TrafficData
+import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorClient
+import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorStatus
+import io.nekohasekai.sagernet.bg.test.TestSpec
+import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.ProfileManager
+import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.group.SubscriptionClient
+import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
+import io.nekohasekai.sagernet.simple.modes.Managed
+import io.nekohasekai.sagernet.simple.modes.TrafficModeApplier
+import io.nekohasekai.sagernet.simple.modes.TrafficModes
+import io.nekohasekai.sagernet.ui.test.RowPhase
+import io.nekohasekai.sagernet.ui.test.TestSessionClient
+import io.nekohasekai.sagernet.ui.test.TestUiState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+/** What the card of one subscription shows (simple-ui spec "Сведения о подписке"). */
+data class SubscriptionCard(
+    val groupId: Long,
+    val name: String,
+    /** Bytes left, null when the provider reports no quota or an unlimited one. */
+    val remaining: Long?,
+    val total: Long,
+    val traffic: SubscriptionHealth.Traffic,
+    /** Epoch seconds, 0 when not reported. */
+    val expire: Long,
+    val expiry: SubscriptionHealth.Expiry,
+    /** Epoch seconds of the last successful update, 0 = never. */
+    val lastUpdate: Long,
+    val refreshing: Boolean,
+)
+
+/** The server the running auto-selector picked, for «Авто» or the chosen country. */
+data class RunningPick(val selectorId: Long, val name: String, val country: String?)
+
+data class ServersUiState(
+    /** null until the first read. */
+    val sections: ServerSections? = null,
+    val cards: Map<Long, SubscriptionCard> = emptyMap(),
+    val selected: Long = 0L,
+    val managed: Managed = Managed(0L, 0L, 0L, 0L),
+    val choice: CountryChoice? = null,
+    val pick: RunningPick? = null,
+    /** The pull-to-refresh indicator: a manual update of the subscriptions runs. */
+    val refreshing: Boolean = false,
+    /** A choice is being applied. */
+    val busy: Boolean = false,
+) {
+    val autoSelected: Boolean get() = selected > 0L && (selected == managed.auto || selected == managed.autoWhitelist)
+    val countrySelected: Boolean get() = selected > 0L && selected == managed.country && choice != null
+}
+
+/** A snackbar text: [text] with [arg] as its only argument, if any. */
+data class ServersMessage(@StringRes val text: Int, val arg: String? = null)
+
+/**
+ * The «Серверы» section (simple-ui spec "Структура списка серверов", "Выбор сервера в списке", "Определение страны
+ * сервера", "Сведения о подписке"): the list read from the database, the choice of «Авто», a country or a server
+ * (applied to a running connection at once), the manual update of subscriptions, and the background checks run when
+ * the section opens — a URL test of every listed server, then an exit IP check of the servers whose name names no
+ * country. Both run as ordinary test sessions of `:bg` (TestSessionClient), which keeps their results in the profiles.
+ */
+class ServersViewModel(application: Application) : AndroidViewModel(application), ProfileManager.Listener {
+
+    private val mutableState = MutableStateFlow(ServersUiState())
+    val state: StateFlow<ServersUiState> = mutableState.asStateFlow()
+
+    private val mutableMessages = MutableSharedFlow<ServersMessage>(extraBufferCapacity = 4)
+    val messages: SharedFlow<ServersMessage> = mutableMessages.asSharedFlow()
+
+    private val mutableEvents = MutableSharedFlow<ServersEvent>(extraBufferCapacity = 4)
+
+    /** For the activity: the other sections follow a choice or an update. */
+    val events: SharedFlow<ServersEvent> = mutableEvents.asSharedFlow()
+
+    private var loadJob: Job? = null
+    private val choosing = Mutex()
+
+    /** Subscription ids being updated (SubscriptionClient's queue). */
+    private var updating: Set<Long> = emptySet()
+
+    /** The subscriptions this section asked to update, with the time of the request (elapsed realtime). */
+    private val requested = HashMap<Long, Long>()
+    private var pullUntil = 0L
+
+    /** The background test session this section started, and the state before it (to tell its states apart). */
+    private var ownTest: Int = NONE
+    private var stateBeforeTest: TestUiState? = null
+    private var lastUrlTest = 0L
+    private var detecting: Set<Long> = emptySet()
+
+    /** Live results of the running URL test, until the database has them. */
+    private val liveLatency = HashMap<Long, Int>()
+
+    private var autoStatus = AutoSelectorStatus.IDLE
+    private var pickCountry: Pair<Long, String?>? = null
+
+    init {
+        ProfileManager.addListener(this)
+        viewModelScope.launch {
+            SubscriptionClient.states.collect { states -> onSubscriptionStates(states.keys) }
+        }
+        viewModelScope.launch {
+            SubscriptionClient.reports.collect { report ->
+                if (report.error && requested.remove(report.gid) != null) {
+                    publishCards()
+                    mutableMessages.tryEmit(ServersMessage(R.string.simple_servers_update_failed, report.text.trim()))
+                }
+            }
+        }
+        viewModelScope.launch {
+            TestSessionClient.state.collect(::onTestState)
+        }
+        viewModelScope.launch {
+            AutoSelectorClient.status.collect { status ->
+                autoStatus = status
+                publishPick()
+            }
+        }
+        reload()
+    }
+
+    // ------------------------------------------------------------------------------------------------ screen events
+
+    /** The section became visible: the list is read again and the background checks run (at most every 2 min). */
+    fun opened() {
+        reload(thenTest = true)
+    }
+
+    /** Reads the list again (another section or the classic interface may have changed it). */
+    fun reload(thenTest: Boolean = false) {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                try {
+                    load()
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    null
+                }
+            } ?: return@launch
+            mutableState.update { loaded.copy(pick = it.pick, refreshing = it.refreshing, busy = it.busy) }
+            publishCards()
+            publishPick()
+            if (thenTest) startUrlTest()
+        }
+    }
+
+    fun chooseAuto() = choose {
+        val auto = mutableState.value.managed.auto.takeIf { it > 0L }
+            ?: withContext(Dispatchers.IO) { TrafficModeApplier.ensure(getApplication()).ids.auto }
+        if (auto <= 0L) {
+            mutableMessages.tryEmit(ServersMessage(R.string.simple_servers_choose_failed))
+            return@choose
+        }
+        TrafficModeApplier.selectServer(auto)
+    }
+
+    fun chooseCountry(row: CountryRow) {
+        val code = row.code ?: return
+        choose {
+            val choice = CountryChoice(row.groupId, code)
+            val members = withContext(Dispatchers.IO) {
+                ServerCatalog.countryMembers(choice, SimpleConfigRepo.current().wlKeywords)
+            }
+            if (members.isEmpty() ||
+                TrafficModeApplier.selectCountry(getApplication(), choice, members) <= 0L
+            ) {
+                mutableMessages.tryEmit(ServersMessage(R.string.simple_servers_choose_failed))
+            }
+        }
+    }
+
+    fun chooseServer(server: ServerEntry) = choose { TrafficModeApplier.selectServer(server.id) }
+
+    /** Updates one subscription now (the card's button). */
+    fun update(groupId: Long) {
+        requested[groupId] = SystemClock.elapsedRealtime()
+        SubscriptionClient.refreshGroup(groupId, false)
+        publishCards()
+        // Until the queue reports it, the card shows the update for a moment; then it follows the queue.
+        viewModelScope.launch {
+            delay(PULL_GRACE_MS)
+            publishCards()
+        }
+    }
+
+    /** Pull to refresh: updates every subscription of the list. */
+    fun updateAll() {
+        val ids = mutableState.value.cards.keys
+        if (ids.isEmpty()) {
+            reload(thenTest = true)
+            return
+        }
+        // The indicator shows at once and stays until the queue reports the updates (or briefly, if it never does).
+        pullUntil = SystemClock.elapsedRealtime() + PULL_GRACE_MS
+        mutableState.update { it.copy(refreshing = true) }
+        ids.forEach(::update)
+    }
+
+    override fun onCleared() {
+        ProfileManager.removeListener(this)
+        super.onCleared()
+    }
+
+    // ------------------------------------------------------------------------------------------------ choice
+
+    private fun choose(block: suspend () -> Unit) {
+        if (choosing.isLocked) return
+        viewModelScope.launch {
+            choosing.withLock {
+                mutableState.update { it.copy(busy = true) }
+                try {
+                    block()
+                } catch (e: Exception) {
+                    Logs.w("simple servers: choice failed", e)
+                    mutableMessages.tryEmit(ServersMessage(R.string.simple_servers_choose_failed))
+                } finally {
+                    mutableState.update { it.copy(busy = false) }
+                    reload()
+                    mutableEvents.tryEmit(ServersEvent.Chosen)
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ reading
+
+    private fun load(): ServersUiState {
+        val context = getApplication<Application>()
+        val keywords = SimpleConfigRepo.current().wlKeywords
+        val snapshot = ServerCatalog.load(keywords, detecting, context.getString(R.string.simple_server_unnamed))
+        val servers = snapshot.servers.map { server ->
+            liveLatency[server.id]?.let { server.copy(latency = it) } ?: server
+        }
+        val locale = context.resources.configuration.locales[0]
+        val sections = ServerList.build(snapshot.entries, servers) { CountryLabels.name(it, locale) }
+        val now = System.currentTimeMillis() / 1000
+        val cards = snapshot.groups.filter { it.isSubscription }.associate { group ->
+            val info = group.subInfo
+            val valid = info.valid
+            group.id to SubscriptionCard(
+                groupId = group.id,
+                name = group.displayName(),
+                remaining = if (valid && info.hasQuota && info.total > 0L) info.remaining else null,
+                total = info.total,
+                traffic = SubscriptionHealth.traffic(valid && info.hasQuota, info.total, info.used),
+                expire = if (valid) info.expire else 0L,
+                expiry = SubscriptionHealth.expiry(if (valid) info.expire else 0L, now),
+                lastUpdate = group.subLastUpdate,
+                refreshing = group.id in updating,
+            )
+        }
+        return ServersUiState(
+            sections = sections,
+            cards = cards,
+            selected = DataStore.selectedProxy,
+            managed = TrafficModes.managedIds(),
+            choice = TrafficModes.countryChoice(),
+        )
+    }
+
+    // ProfileManager calls these for changes made in this process (the classic editors, the add flow).
+    override suspend fun onAdd(profile: ProxyEntity) = reload()
+    override suspend fun onUpdated(data: List<TrafficData>) = Unit
+    override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) = Unit
+    override suspend fun onRemoved(groupId: Long, profileId: Long) = reload()
+
+    // ------------------------------------------------------------------------------------------------ subscriptions
+
+    private fun onSubscriptionStates(ids: Set<Long>) {
+        val finished = updating - ids
+        updating = ids
+        if (ids.any { it in requested }) pullUntil = 0L
+        requested.keys.removeAll(finished)
+        publishCards()
+        if (finished.isEmpty()) return
+        // The update ran in :bg: the selectors follow the new servers, the list and the delays are read again.
+        mutableEvents.tryEmit(ServersEvent.Updated)
+        lastUrlTest = 0L
+        reload(thenTest = true)
+    }
+
+    private fun publishCards() {
+        val now = SystemClock.elapsedRealtime()
+        val pulling = now < pullUntil
+        fun justRequested(id: Long) = requested[id]?.let { now - it < PULL_GRACE_MS } == true
+        mutableState.update { state ->
+            state.copy(
+                cards = state.cards.mapValues { (id, card) -> card.copy(refreshing = id in updating || justRequested(id)) },
+                refreshing = pulling || state.cards.keys.any { it in updating && it in requested },
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ background tests
+
+    private fun startUrlTest() {
+        val now = SystemClock.elapsedRealtime()
+        if (lastUrlTest > 0L && now - lastUrlTest < TEST_INTERVAL_MS) return
+        val ids = mutableState.value.sections?.allServers?.map { it.id }.orEmpty()
+        if (ids.isEmpty() || ownTest != NONE) return
+        val before = TestSessionClient.state.value
+        // Another session (one the user started in the classic interface) runs: this round is skipped.
+        if (!TestSessionClient.startProfiles(TestSpec.KIND_URL, ids)) return
+        lastUrlTest = now
+        stateBeforeTest = before
+        ownTest = TestSpec.KIND_URL
+        liveLatency.clear()
+    }
+
+    /** The exit IP check of the servers whose country the name does not give, which answered the URL test. */
+    private fun startIpTest() {
+        val ids = mutableState.value.sections?.allServers
+            ?.filter { it.country !is ServerCountry.Known && (it.latency > 0 || it.latency == ProxyEntity.LATENCY_CONNECT_ONLY) }
+            ?.map { it.id }
+            ?.take(IP_TEST_LIMIT)
+            .orEmpty()
+        if (ids.isEmpty()) return
+        val before = TestSessionClient.state.value
+        if (!TestSessionClient.startProfiles(TestSpec.KIND_IP, ids)) return
+        stateBeforeTest = before
+        ownTest = TestSpec.KIND_IP
+        detecting = ids.toSet()
+        reload()
+    }
+
+    private fun onTestState(test: TestUiState) {
+        if (ownTest == NONE || test === stateBeforeTest) return
+        if (test.kind != ownTest) {
+            // The session ended and another one (not this section's) runs now.
+            if (test.running) ownTest = NONE
+            return
+        }
+        if (ownTest == TestSpec.KIND_URL) {
+            var changed = false
+            for ((id, row) in test.rows) {
+                if (row.phase != RowPhase.DONE) continue
+                val latency = when {
+                    row.ok -> row.latency.takeIf { it != 0 } ?: ProxyEntity.LATENCY_CONNECT_ONLY
+                    row.failed -> -1
+                    else -> continue
+                }
+                if (liveLatency.put(id, latency) != latency) changed = true
+            }
+            if (changed) publishLatency()
+        }
+        if (test.running) return
+        val finished = ownTest
+        ownTest = NONE
+        stateBeforeTest = null
+        // The panel of the classic interface would otherwise show this section's checks.
+        TestSessionClient.dismiss()
+        viewModelScope.launch {
+            // :bg has stored the results; read them, then check the exit IPs the names leave open.
+            if (finished == TestSpec.KIND_IP) detecting = emptySet()
+            loadJob?.join()
+            reload()
+            loadJob?.join()
+            liveLatency.clear()
+            if (finished == TestSpec.KIND_URL) startIpTest()
+        }
+    }
+
+    private fun publishLatency() {
+        mutableState.update { state ->
+            val sections = state.sections ?: return@update state
+            fun ServerEntry.live() = liveLatency[id]?.let { copy(latency = it) } ?: this
+            state.copy(
+                sections = sections.copy(
+                    subscriptions = sections.subscriptions.map { s ->
+                        s.copy(countries = s.countries.map { row -> row.copy(servers = row.servers.map { it.live() }) })
+                    },
+                    mine = sections.mine.map { it.live() },
+                    whitelist = sections.whitelist.map { it.live() },
+                ),
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ running pick
+
+    private fun publishPick() {
+        val status = autoStatus
+        val selected = mutableState.value.selected
+        if (!status.active || status.selectorId != selected || status.selectedId <= 0L) {
+            mutableState.update { it.copy(pick = null) }
+            return
+        }
+        val known = pickCountry?.takeIf { it.first == status.selectedId }
+        if (known != null) {
+            mutableState.update { it.copy(pick = RunningPick(status.selectorId, status.selectedName, known.second)) }
+            return
+        }
+        viewModelScope.launch {
+            val country = withContext(Dispatchers.IO) {
+                try {
+                    ProfileManager.getProfile(status.selectedId)?.let {
+                        CountryFromName.resolve(it.outbound.name, it.testCountry).code
+                    }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    null
+                }
+            }
+            pickCountry = status.selectedId to country
+            publishPick()
+        }
+    }
+
+    private companion object {
+        const val NONE = -1
+        const val TEST_INTERVAL_MS = 2 * 60_000L
+        const val PULL_GRACE_MS = 3_000L
+
+        /** Every exit IP check asks a lookup service; a list without country names is checked in part. */
+        const val IP_TEST_LIMIT = 30
+    }
+}
+
+enum class ServersEvent {
+    /** The user chose «Авто», a country or a server. */
+    Chosen,
+
+    /** A subscription update finished in `:bg`. */
+    Updated,
+}
