@@ -17,6 +17,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -200,19 +204,40 @@ fun SimpleApp(
             }
         },
     ) {
-        when (section) {
-            SimpleSection.HOME -> HomeSection(
-                home,
-                HomeActions(
-                    requestStart = requestStart,
-                    openServers = { section = SimpleSection.SERVERS },
-                    openClassicOnce = openClassicOnce,
-                ),
-            )
-
-            SimpleSection.SERVERS -> PlaceholderSection(section, R.string.simple_servers_placeholder)
-            SimpleSection.SETTINGS -> SettingsSection(onOpenClassic)
+        // The bottom bar keeps the content clear of the navigation bar; the rail does not, so in rail mode the
+        // content stays clear of the gesture handle (bottom) and of 3-button navigation on the end side itself.
+        val contentInsets = if (layoutType == NavigationSuiteType.NavigationRail) {
+            Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom + WindowInsetsSides.End))
+        } else {
+            Modifier
         }
+        Box(contentInsets) {
+            SectionContent(section, home, requestStart, openClassicOnce, onOpenClassic) { section = it }
+        }
+    }
+}
+
+@Composable
+private fun SectionContent(
+    section: SimpleSection,
+    home: HomeViewModel,
+    requestStart: () -> Unit,
+    openClassicOnce: () -> Unit,
+    onOpenClassic: () -> Unit,
+    select: (SimpleSection) -> Unit,
+) {
+    when (section) {
+        SimpleSection.HOME -> HomeSection(
+            home,
+            HomeActions(
+                requestStart = requestStart,
+                openServers = { select(SimpleSection.SERVERS) },
+                openClassicOnce = openClassicOnce,
+            ),
+        )
+
+        SimpleSection.SERVERS -> PlaceholderSection(section, R.string.simple_servers_placeholder)
+        SimpleSection.SETTINGS -> SettingsSection(onOpenClassic)
     }
 }
 
