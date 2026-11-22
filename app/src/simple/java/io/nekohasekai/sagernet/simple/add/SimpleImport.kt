@@ -199,17 +199,20 @@ object SimpleImport {
         return detail
     }
 
-    /** Daily automatic updates (simple-ui "Готовые настройки после импорта подписки"); what is about to be turned on. */
+    /** The fallback interval of automatic updates when the provider sends none (simple-ui "Готовые настройки"). */
     const val DAILY_MINUTES = 24 * 60
 
     /**
-     * The subscription [gid] updates itself once a day: its own interval (only `sub_options_json` is written, so the
-     * row's other columns, which `:bg` writes, stay as they are) and the global switch, without which nothing is
-     * automatic.
+     * The subscription [gid] updates itself: as often as its provider asks (`profile-update-interval`, when «respect
+     * the server's interval» is on — SimpleDefaults turns it on, the group follows the global switch), otherwise once a
+     * day (its own interval). Only `sub_options_json` and the name are written, so the row's other columns, which
+     * `:bg` writes, stay as they are. The global switch must be on too, or nothing is automatic; there is no per-group
+     * switch for that, so turning it on also lets the user's other subscriptions that do not skip automatic updates
+     * update (with the interval they follow). Returns the interval in effect, in hours, 0 when none.
      */
-    suspend fun updateDaily(gid: Long, plan: Plan.Subscription) {
-        val group = GroupRepo.get(gid) ?: return
-        val options = group.subOptions.copy(updateInterval = DAILY_MINUTES, respectServerInterval = false)
+    suspend fun updateAutomatically(gid: Long, plan: Plan.Subscription): Int {
+        val group = GroupRepo.get(gid) ?: return 0
+        val options = group.subOptions.copy(updateInterval = DAILY_MINUTES)
         val db = SagerDatabase.instance.openHelper.writableDatabase
         db.execSQL("UPDATE `groups` SET `sub_options_json` = ? WHERE `id` = ?", arrayOf<Any>(options.toJsonString(), gid))
         // A link without a name of its own: the provider's Profile-Title names the group, as the summary does,
@@ -221,10 +224,13 @@ object SimpleImport {
         if (DataStore.subAutoUpdate < SubscriptionScheduler.MIN_INTERVAL_MINUTES) DataStore.subAutoUpdate = DAILY_MINUTES
         GroupRepo.postUpdate(gid)
         SubscriptionScheduler.schedule()
+        val seconds = GroupRepo.get(gid)?.let { SubscriptionScheduler.interval(it) } ?: 0L
+        Logs.i("simple add: subscription $gid updates every ${seconds / 60} min")
+        return ((seconds + 1800) / 3600).toInt()
     }
 
     /** What the summary of an added subscription shows (simple-ui "Сводка импорта"). */
-    fun summary(gid: Long, enabled: List<Enabled>): ImportSummary? {
+    fun summary(gid: Long, enabled: List<Enabled>, updateHours: Int): ImportSummary? {
         val group = GroupRepo.get(gid) ?: return null
         val members = SagerDatabase.proxyDao.getByGroup(gid).filter { !TrafficModes.isManagedSelector(it.id) }
         val countries = members.mapNotNull { p -> runCatching { CountryFlags.countryOf(p.displayName()) }.getOrNull() }
@@ -238,6 +244,7 @@ object SimpleImport {
             unlimited = info.valid && info.hasQuota && info.total <= 0L,
             expire = info.expire.takeIf { info.valid && it > 0L },
             enabled = enabled,
+            updateHours = updateHours,
         )
     }
 
@@ -310,7 +317,7 @@ object SimpleImport {
 }
 
 /** A ready setting the first subscription turned on, listed in its summary. */
-enum class Enabled { AUTO_SERVER, DAILY_UPDATE, AUTO_MODE }
+enum class Enabled { AUTO_SERVER, AUTO_UPDATE, AUTO_MODE }
 
 /** The summary of an added subscription. */
 data class ImportSummary(
@@ -324,4 +331,6 @@ data class ImportSummary(
     /** Epoch seconds, null when the provider sends none. */
     val expire: Long?,
     val enabled: List<Enabled>,
+    /** The interval of automatic updates in hours ([Enabled.AUTO_UPDATE]), 0 when none. */
+    val updateHours: Int,
 )

@@ -135,6 +135,8 @@ class SimpleActivity : AppCompatActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         add.setUpAuto = { modes.setUpAuto() }
+        // Subscription defaults of the simple UI (HWID, the provider's interval), once per install.
+        lifecycleScope.launch(Dispatchers.IO) { SimpleDefaults.apply(applicationContext) }
         setContent {
             SimpleTheme {
                 SimpleApp(

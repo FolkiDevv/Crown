@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.SimpleDefaults
 import io.nekohasekai.sagernet.simple.SimpleUi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -215,11 +216,16 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         mutableState.update { it.copy(busy = AddBusy.SUBSCRIPTION) }
-        when (val result = withContext(Dispatchers.IO) { SimpleImport.subscribe(plan) }) {
+        val result = withContext(Dispatchers.IO) {
+            // «Send HWID» and the provider's interval are on before the first download (SimpleDefaults).
+            SimpleDefaults.apply(getApplication())
+            SimpleImport.subscribe(plan)
+        }
+        when (result) {
             is SimpleImport.SubscribeResult.Failed -> show(AddDialog.SubscriptionFailed(result.detail))
             is SimpleImport.SubscribeResult.Done -> {
                 val enabled = ArrayList<Enabled>()
-                withContext(Dispatchers.IO) { SimpleImport.updateDaily(result.gid, plan) }
+                val updateHours = withContext(Dispatchers.IO) { SimpleImport.updateAutomatically(result.gid, plan) }
                 // The ready settings come with the first subscription added here (simple-ui "Готовые настройки").
                 val first = !prefs.getBoolean(KEY_FIRST_SUBSCRIPTION, false)
                 val auto = first && (setUpAuto?.invoke() ?: false)
@@ -227,10 +233,10 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
                     prefs.edit().putBoolean(KEY_FIRST_SUBSCRIPTION, true).apply()
                     enabled.add(Enabled.AUTO_SERVER)
                 }
-                enabled.add(Enabled.DAILY_UPDATE)
+                if (updateHours > 0) enabled.add(Enabled.AUTO_UPDATE)
                 if (auto) enabled.add(Enabled.AUTO_MODE)
                 eventChannel.send(AddEvent.Added)
-                val summary = withContext(Dispatchers.IO) { SimpleImport.summary(result.gid, enabled) }
+                val summary = withContext(Dispatchers.IO) { SimpleImport.summary(result.gid, enabled, updateHours) }
                 if (summary != null) show(AddDialog.Summary(summary))
             }
         }

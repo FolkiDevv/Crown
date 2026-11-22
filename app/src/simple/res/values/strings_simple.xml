@@ -160,6 +160,11 @@
     <string name="simple_summary_enabled">Turned on for you:</string>
     <string name="simple_summary_enabled_auto_server">Auto: the best server is picked for you</string>
     <string name="simple_summary_enabled_daily">Daily subscription update</string>
+    <!-- %d: hours between automatic updates, as the subscription provider asks -->
+    <plurals name="simple_summary_enabled_every_hours">
+        <item quantity="one">Subscription update every %d hour</item>
+        <item quantity="other">Subscription update every %d hours</item>
+    </plurals>
     <string name="simple_summary_enabled_auto_mode">Traffic mode: Auto</string>
     <string name="simple_summary_done">Done</string>
 

@@ -340,13 +340,20 @@ private fun SummaryDialog(summary: ImportSummary, canConnect: Boolean, onConnect
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                stringResource(
-                                    when (item) {
-                                        Enabled.AUTO_SERVER -> R.string.simple_summary_enabled_auto_server
-                                        Enabled.DAILY_UPDATE -> R.string.simple_summary_enabled_daily
-                                        Enabled.AUTO_MODE -> R.string.simple_summary_enabled_auto_mode
+                                when (item) {
+                                    Enabled.AUTO_SERVER -> stringResource(R.string.simple_summary_enabled_auto_server)
+                                    Enabled.AUTO_UPDATE -> if (summary.updateHours == 24) {
+                                        stringResource(R.string.simple_summary_enabled_daily)
+                                    } else {
+                                        pluralStringResource(
+                                            R.plurals.simple_summary_enabled_every_hours,
+                                            summary.updateHours,
+                                            summary.updateHours,
+                                        )
                                     }
-                                ),
+
+                                    Enabled.AUTO_MODE -> stringResource(R.string.simple_summary_enabled_auto_mode)
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }

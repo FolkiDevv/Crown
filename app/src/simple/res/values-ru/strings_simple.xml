@@ -147,6 +147,12 @@
     <string name="simple_summary_enabled">Мы включили:</string>
     <string name="simple_summary_enabled_auto_server">«Авто»: лучший сервер выбирается сам</string>
     <string name="simple_summary_enabled_daily">Ежедневное обновление подписки</string>
+    <plurals name="simple_summary_enabled_every_hours">
+        <item quantity="one">Обновление подписки каждый %d час</item>
+        <item quantity="few">Обновление подписки каждые %d часа</item>
+        <item quantity="many">Обновление подписки каждые %d часов</item>
+        <item quantity="other">Обновление подписки каждые %d часа</item>
+    </plurals>
     <string name="simple_summary_enabled_auto_mode">Режим трафика «Авто»</string>
     <string name="simple_summary_done">Готово</string>
 
