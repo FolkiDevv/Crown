@@ -43,11 +43,11 @@ class RepairEngineTest {
         val checks = FakeChecks(mapOf(RepairStep.INTERNET to StepResult.fail(Finding.NO_NETWORK)))
         val progress = engine(checks).run { }
         assertEquals(
-            listOf(RepairStep.INTERNET, RepairStep.PRIVATE_DNS_VPN, RepairStep.SUBSCRIPTION, RepairStep.BACKGROUND),
+            listOf(RepairStep.INTERNET, RepairStep.CLOCK, RepairStep.PRIVATE_DNS_VPN, RepairStep.SUBSCRIPTION, RepairStep.BACKGROUND),
             checks.ran,
         )
         val results = progress.results
-        for (step in listOf(RepairStep.WHITELISTS, RepairStep.CLOCK, RepairStep.DNS_DIRECT, RepairStep.SERVERS,
+        for (step in listOf(RepairStep.WHITELISTS, RepairStep.DNS_DIRECT, RepairStep.SERVERS,
             RepairStep.DNS_VPN, RepairStep.SITES_VPN, RepairStep.RU_DIRECT)) {
             assertEquals(step.name, StepStatus.SKIPPED, results.getValue(step).status)
             assertEquals(step.name, SkipReason.NO_INTERNET, results.getValue(step).skip)

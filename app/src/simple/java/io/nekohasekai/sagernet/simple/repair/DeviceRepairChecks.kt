@@ -12,7 +12,10 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.outbound.config.AutoSelectorPlanner
+import io.nekohasekai.sagernet.outbound.types.AutoSelector
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import io.nekohasekai.sagernet.simple.modes.TrafficMode
@@ -52,8 +55,8 @@ class RepairEnvironment(
     val vpnConnected: () -> Boolean,
     /** This app's service is off (not connecting, connected or stopping): another VPN can only be someone else's. */
     val serviceOff: () -> Boolean,
-    /** The delay through the running connection; > 0 ok, < 0 failed, null when the service cannot be asked. */
-    val testConnection: suspend () -> Int?,
+    /** The delay through the running connection within the time given; > 0 ok, < 0 failed, null: no answer. */
+    val testConnection: suspend (timeoutMs: Long) -> Int?,
 )
 
 /**
@@ -122,7 +125,10 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
         // the watcher does (design.md D6).
         if (result.inconclusive || result.partial) {
             delay(RECHECK_DELAY_MS)
-            result = NetworkProber.probe(physicalNetwork() ?: physical, config)
+            // The network the second look runs on is the one the later checks (time, DNS) use too.
+            val again = physicalNetwork() ?: physical
+            network = again
+            result = NetworkProber.probe(again, config)
             Logs.i("simple repair: internet (second look): ${result.summary()} -> ${result.regime.key}")
         }
         // Another app's VPN that takes this app in forbids requests over the physical network: nothing answering then
@@ -161,11 +167,12 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
     }
 
     /**
-     * The clock against the `Date` header of a trusted host (design.md D8). A clock off by far more breaks TLS itself;
-     * then the same host is asked over plain HTTP, which still tells the time.
+     * The clock against the `Date` header of a trusted host (design.md D8). A clock off by far more breaks TLS itself
+     * (and so «Интернет без VPN», whose requests are HTTPS); then the same host is asked over plain HTTP, which still
+     * tells the time. So the check needs a physical network, not a passed internet check.
      */
     private suspend fun clock(): StepResult {
-        val physical = network ?: return StepResult.skipped(SkipReason.NO_INTERNET)
+        val physical = network ?: physicalNetwork() ?: return StepResult.skipped(SkipReason.NO_INTERNET)
         val client = NetworkProber.client(physical, config)
         val http = client.http
         try {
@@ -325,8 +332,10 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
         val latency = rows.filterValues { it != null }.mapValues { it.value!! }
         val answering = latency.keys
         val current = DataStore.selectedProxy
-        val auto = withContext(Dispatchers.IO) { ProfileManager.getProfile(current)?.type == AutoSelectorProfiles.TYPE }
-        val currentAnswers = if (auto) answering.isNotEmpty() else current in answering
+        // An auto-selector (the managed «Авто», its whitelist twin, a country) answers when one of its own members
+        // does: the members as its planner picks them (groups, name and country filters), not the whole list.
+        val members = selectorMembers(current)
+        val currentAnswers = if (members != null) answering.any { it in members } else current in answering
         val whitelists = done[RepairStep.WHITELISTS]?.has(Finding.WHITELISTS_FOUND) == true
         val chosen = when {
             currentAnswers -> current
@@ -348,6 +357,17 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
             else -> StepStatus.WARN to setOf(Finding.CURRENT_SERVER_DOWN)
         }
         return StepResult(status, findings, servers = summary)
+    }
+
+    /** The members [id] runs when it is an auto-selector (AutoSelectorPlanner.rankingCandidates), else null. */
+    private fun selectorMembers(id: Long): Set<Long>? {
+        val selector = ProfileManager.getProfile(id)?.outbound as? AutoSelector ?: return null
+        return try {
+            AutoSelectorPlanner(SettingsMapper.selectorStore()).rankingCandidates(id, selector).toSet()
+        } catch (e: Exception) {
+            Logs.w(e)
+            null
+        }
     }
 
     /**
@@ -388,7 +408,9 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
     /** Sites through this app's VPN: the URL test of the running connection. */
     private suspend fun vpnSites(): StepResult {
         if (!env.vpnConnected()) return StepResult.skipped(SkipReason.VPN_OFF)
-        val delay = env.testConnection() ?: return StepResult.skipped(SkipReason.ERROR)
+        // Bounded below the step's own limit: the binder call itself cannot be interrupted.
+        val delay = env.testConnection(SITES_WAIT_MS)
+            ?: return StepResult.skipped(if (env.vpnConnected()) SkipReason.TIMED_OUT else SkipReason.VPN_OFF)
         return when {
             delay > 0 -> StepResult.ok(values = mapOf(RepairValues.LATENCY_MS to delay.toLong()))
             // -2: an OpenVPN/OpenConnect exit whose tunnel is up failed the test: says nothing either way.
@@ -445,6 +467,9 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
         const val CLOCK_TOLERANCE_MS = 60_000L
 
         const val DNS_WAIT_MS = 4_000L
+
+        /** The URL test through the VPN; below the 45 s limit of «Сайты через VPN» (RepairEngine.defaultTimeout). */
+        const val SITES_WAIT_MS = 40_000L
         const val DNS_MESSAGE = "application/dns-message"
 
         /** How long a test session of another part of the app may keep the engine busy. */

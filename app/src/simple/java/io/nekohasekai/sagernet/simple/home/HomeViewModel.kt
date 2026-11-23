@@ -32,6 +32,7 @@ import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** The server card: what runs (or would run) when the button is pressed. */
 data class ServerCard(
@@ -258,12 +260,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
 
     /**
      * One URL test of the running connection, as the server checks of this screen do («Починка»'s «Сайты через VPN»):
-     * the delay (> 0), [FAILED], [VPN_EXIT_UNKNOWN], or null when the service cannot be asked.
+     * the delay (> 0), [FAILED], [VPN_EXIT_UNKNOWN], or null when the service cannot be asked or gives no answer
+     * within [timeoutMs]. The binder call blocks until the core is done and cannot be interrupted, so it runs on its own
+     * and only the wait for it is bounded and cancellable: a stop of «Починка» does not wait for it.
      */
-    suspend fun testConnection(): Int? {
+    suspend fun testConnection(timeoutMs: Long): Int? {
         val service = connection.service ?: return null
         if (serviceState != BaseService.State.Connected) return null
-        return withContext(Dispatchers.IO) {
+        val call = viewModelScope.async(Dispatchers.IO) {
             try {
                 service.urlTest()
             } catch (e: Exception) {
@@ -271,6 +275,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 FAILED
             }
         }
+        return withTimeoutOrNull(timeoutMs) { call.await() }
     }
 
     /** Hides the banner; a loss is forgotten like a swiped error of the classic UI. */

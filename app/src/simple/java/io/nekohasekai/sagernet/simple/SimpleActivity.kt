@@ -551,7 +551,7 @@ fun SimpleApp(
         RepairEnvironment(
             vpnConnected = { home.vpnConnected },
             serviceOff = { home.serviceOff },
-            testConnection = { home.testConnection() },
+            testConnection = { timeoutMs -> home.testConnection(timeoutMs) },
         )
     }
     val openRepair = remember(repair, repairEnvironment) { { repair.open(repairEnvironment) } }
@@ -570,6 +570,8 @@ fun SimpleApp(
                         repair.close()
                         section = SimpleSection.SERVERS
                     } else {
+                        // The user goes to change what the checks look at: the run stops, the screen stays for «Проверить снова».
+                        repair.stop()
                         openRepairTarget(target)
                     }
                 },

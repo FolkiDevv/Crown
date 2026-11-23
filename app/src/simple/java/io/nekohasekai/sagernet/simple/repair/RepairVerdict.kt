@@ -16,21 +16,23 @@ sealed interface RepairVerdict {
     data class CauseFound(val cause: Cause, override val fixes: List<Pair<RepairStep, FixKind>> = emptyList()) : RepairVerdict
 
     /**
-     * «Причину определить не удалось»; [nothingFound]: no check found a problem at all (the problem may be elsewhere or
-     * gone), else something failed that no known cause explains. The report export is the main action (batch 9).
+     * «Причину определить не удалось»; [nothingFound]: no check that ran found a problem (the problem may be elsewhere or
+     * gone), else something failed that no known cause explains; [notChecked]: some checks did not run, so «all checks
+     * passed» cannot be said. The report export is the main action (batch 9).
      */
     data class Unknown(
         val nothingFound: Boolean,
         override val fixes: List<Pair<RepairStep, FixKind>> = emptyList(),
+        val notChecked: Boolean = false,
     ) : RepairVerdict
 
     /** The known causes, in the order they are looked for: the first that applies is the verdict. */
     enum class Cause {
-        /** «Интернет без VPN» failed: the problem is not the VPN. */
-        NO_INTERNET,
-
         /** The clock is off by more than a minute: TLS and most protocols fail. */
         CLOCK,
+
+        /** «Интернет без VPN» failed: the problem is not the VPN. */
+        NO_INTERNET,
 
         /** Another app's VPN is active. */
         OTHER_VPN,
@@ -72,7 +74,8 @@ sealed interface RepairVerdict {
             if (cause != null) return CauseFound(cause, fixes)
             val problems = results.values.any { it.status == StepStatus.FAIL || it.status == StepStatus.WARN }
             if (fixes.isNotEmpty() && !problems) return Fixed(fixes)
-            return Unknown(nothingFound = !problems && fixes.isEmpty(), fixes)
+            val notChecked = results.values.any { it.status == StepStatus.SKIPPED }
+            return Unknown(nothingFound = !problems && fixes.isEmpty(), fixes, notChecked)
         }
 
         private fun causeOf(results: Map<RepairStep, StepResult>): Cause? {
@@ -85,8 +88,10 @@ sealed interface RepairVerdict {
             val whitelistServers = servers?.servers?.whitelistTotal ?: 0
             val whitelists = found(RepairStep.WHITELISTS, Finding.WHITELISTS_FOUND)
             return when {
-                failed(RepairStep.INTERNET) -> Cause.NO_INTERNET
+                // A clock that got a reference time had a network that answers: when it is off, the failed HTTPS of
+                // «Интернет без VPN» is the clock's doing (TLS refuses certificates outside their validity), not the network's.
                 failed(RepairStep.CLOCK) && found(RepairStep.CLOCK, Finding.CLOCK_OFF) -> Cause.CLOCK
+                failed(RepairStep.INTERNET) -> Cause.NO_INTERNET
                 found(RepairStep.PRIVATE_DNS_VPN, Finding.OTHER_VPN) -> Cause.OTHER_VPN
                 found(RepairStep.PRIVATE_DNS_VPN, Finding.PRIVATE_DNS) -> Cause.PRIVATE_DNS
                 found(RepairStep.SUBSCRIPTION, Finding.SUBSCRIPTION_EXPIRED) ||

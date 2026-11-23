@@ -263,7 +263,13 @@ private fun VerdictCard(
                 }
 
                 is RepairVerdict.Unknown -> Text(
-                    stringResource(if (verdict.nothingFound) R.string.simple_repair_unknown_clean else R.string.simple_repair_unknown_text),
+                    stringResource(
+                        when {
+                            !verdict.nothingFound -> R.string.simple_repair_unknown_text
+                            verdict.notChecked -> R.string.simple_repair_unknown_partial
+                            else -> R.string.simple_repair_unknown_clean
+                        }
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                 )
 

@@ -38,7 +38,7 @@ class RepairPlanTest {
         val expected = mapOf(
             RepairStep.INTERNET to emptySet(),
             RepairStep.WHITELISTS to setOf(RepairStep.INTERNET),
-            RepairStep.CLOCK to setOf(RepairStep.INTERNET),
+            RepairStep.CLOCK to emptySet(),
             RepairStep.PRIVATE_DNS_VPN to emptySet(),
             RepairStep.DNS_DIRECT to setOf(RepairStep.INTERNET),
             RepairStep.SUBSCRIPTION to emptySet(),
@@ -95,6 +95,7 @@ class RepairPlanTest {
     @Test
     fun theChecksWithoutDependenciesRunWithoutInternet() {
         val done = mapOf(RepairStep.INTERNET to StepResult.fail(Finding.NOTHING_ANSWERS))
+        assertNull(RepairPlan.skipReason(RepairStep.CLOCK, done))
         assertNull(RepairPlan.skipReason(RepairStep.PRIVATE_DNS_VPN, done))
         assertNull(RepairPlan.skipReason(RepairStep.SUBSCRIPTION, done + (RepairStep.PRIVATE_DNS_VPN to ok)))
         assertNull(RepairPlan.skipReason(RepairStep.BACKGROUND, done))

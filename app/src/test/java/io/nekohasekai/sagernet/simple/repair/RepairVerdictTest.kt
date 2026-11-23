@@ -73,6 +73,28 @@ class RepairVerdictTest {
     }
 
     @Test
+    fun aClockFarOffWinsOverTheHttpsChecksItBroke() {
+        // TLS refuses the certificates, so «Интернет без VPN» (HTTPS) fails, while the clock got its time over HTTP.
+        val skipped = RepairPlan.ORDER.filter { RepairStep.INTERNET in RepairPlan.REQUIRES.getValue(it) }
+            .map { it to StepResult.skipped(SkipReason.NO_INTERNET) }.toTypedArray()
+        val results = run(
+            RepairStep.INTERNET to StepResult.fail(Finding.NOTHING_ANSWERS),
+            RepairStep.CLOCK to StepResult.fail(Finding.CLOCK_OFF, values = mapOf(RepairValues.CLOCK_OFFSET_S to -63_072_000L)),
+            *skipped,
+        )
+        assertEquals(Cause.CLOCK, cause(results))
+    }
+
+    @Test
+    fun noInternetWhenTheClockGotNoTime() {
+        val results = run(
+            RepairStep.INTERNET to StepResult.fail(Finding.NO_NETWORK),
+            RepairStep.CLOCK to StepResult.skipped(SkipReason.NO_INTERNET),
+        )
+        assertEquals(Cause.NO_INTERNET, cause(results))
+    }
+
+    @Test
     fun otherVpn() {
         val results = run(
             RepairStep.PRIVATE_DNS_VPN to StepResult.fail(Finding.OTHER_VPN),
@@ -232,7 +254,7 @@ class RepairVerdictTest {
     }
 
     @Test
-    fun notCheckedIsNoProblem() {
+    fun notCheckedIsNoProblemButIsNotAllChecksPassed() {
         val verdict = RepairVerdict.of(
             run(
                 RepairStep.DNS_VPN to StepResult.skipped(SkipReason.VPN_OFF),
@@ -240,7 +262,13 @@ class RepairVerdictTest {
                 RepairStep.CLOCK to StepResult.skipped(SkipReason.NO_TIME_SOURCE),
             )
         )
-        assertEquals(RepairVerdict.Unknown(nothingFound = true), verdict)
+        assertEquals(RepairVerdict.Unknown(nothingFound = true, notChecked = true), verdict)
+    }
+
+    @Test
+    fun allChecksRanAndPassed() {
+        val verdict = RepairVerdict.of(run()) as RepairVerdict.Unknown
+        assertEquals(false, verdict.notChecked)
     }
 
     @Test

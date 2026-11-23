@@ -229,7 +229,8 @@ object RepairPlan {
     val REQUIRES: Map<RepairStep, Set<RepairStep>> = mapOf(
         RepairStep.INTERNET to emptySet(),
         RepairStep.WHITELISTS to setOf(RepairStep.INTERNET),
-        RepairStep.CLOCK to setOf(RepairStep.INTERNET),
+        // A clock far off breaks the HTTPS of «Интернет без VPN» itself; the check then still tells the time over HTTP.
+        RepairStep.CLOCK to emptySet(),
         RepairStep.PRIVATE_DNS_VPN to emptySet(),
         RepairStep.DNS_DIRECT to setOf(RepairStep.INTERNET),
         RepairStep.SUBSCRIPTION to emptySet(),
