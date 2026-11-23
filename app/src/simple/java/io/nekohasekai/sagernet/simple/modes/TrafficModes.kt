@@ -23,7 +23,7 @@ import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import io.nekohasekai.sagernet.simple.servers.CountryChoice
 import io.nekohasekai.sagernet.simple.servers.ServerCatalog
-import java.util.regex.Pattern
+import io.nekohasekai.sagernet.simple.servers.ServerList
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.Callable
 
@@ -129,7 +129,13 @@ object TrafficModes {
      * What [ensureManaged] found or made: the ids, the routing profiles whose content it rewrote, and whether the
      * country selector now runs other servers (a subscription update renamed or replaced them).
      */
-    data class Ensured(val ids: Managed, val changedRoutes: Set<Long>, val countryChanged: Boolean = false)
+    data class Ensured(
+        val ids: Managed,
+        val changedRoutes: Set<Long>,
+        val countryChanged: Boolean = false,
+        /** The chosen country has no server left: «Авто» was selected instead of the country selector. */
+        val countryGone: Boolean = false,
+    )
 
     /**
      * Creates the managed entities that are missing (or were deleted in the classic interface) and brings the
@@ -140,11 +146,12 @@ object TrafficModes {
         val smart = guarded(0L) { ensureSmartRoute() }
         val (whitelist, whitelistChanged) = guarded(0L to false) { ensureWhitelistRoute(context, config) }
         val (auto, autoWhitelist) = guarded(0L to 0L) { ensureSelectors(context, config) }
-        val countryChanged = guarded(false) { syncCountrySelector(config) }
+        val country = guarded(CountrySync.NONE) { syncCountrySelector(config) }
         return Ensured(
             Managed(smart, whitelist, auto, autoWhitelist, store.getLong(KEY_MANAGED_COUNTRY) ?: 0L),
             if (whitelistChanged && whitelist > 0L) setOf(whitelist) else emptySet(),
-            countryChanged,
+            countryChanged = country == CountrySync.CHANGED,
+            countryGone = country == CountrySync.GONE,
         )
     }
 
@@ -345,20 +352,30 @@ object TrafficModes {
      * removed some. When none is left (or the subscription is gone) the last list stays, and the selector reports
      * that it has nothing to run, as the classic one does.
      */
-    private suspend fun syncCountrySelector(config: SimpleConfig): Boolean {
-        val choice = countryChoice() ?: return false
-        val id = store.getLong(KEY_MANAGED_COUNTRY) ?: return false
+    private suspend fun syncCountrySelector(config: SimpleConfig): CountrySync {
+        val choice = countryChoice() ?: return CountrySync.NONE
+        val id = store.getLong(KEY_MANAGED_COUNTRY) ?: return CountrySync.NONE
         val members = ServerCatalog.countryMembers(choice, config.wlKeywords)
-        if (members.isEmpty()) return false
-        return updateCountrySelector(id, choice.groupId, exactNames(members)) ?: false
+        if (members.isEmpty()) {
+            // The subscription has no server of that country any more (or is gone): rather than keep a server of
+            // another country, or none at all, the choice goes back to «Авто».
+            Logs.i("simple servers: no server of the chosen country is left, back to Auto")
+            setCountryChoice(null)
+            val auto = store.getLong(KEY_MANAGED_AUTO) ?: 0L
+            if (DataStore.selectedProxy == id && auto > 0L) {
+                DataStore.selectedProxy = auto
+                return CountrySync.GONE
+            }
+            return CountrySync.NONE
+        }
+        val changed = updateCountrySelector(id, choice.groupId, exactNames(members)) ?: false
+        return if (changed) CountrySync.CHANGED else CountrySync.NONE
     }
 
-    /** A name filter that matches exactly [names] (the auto-selector finds it case-insensitively in the name). */
-    private fun exactNames(names: List<String>): String {
-        val distinct = names.filter { it.isNotEmpty() }.distinct()
-        if (distinct.isEmpty()) return "(?!)"
-        return "^(?:" + distinct.joinToString("|") { Pattern.quote(it) } + ")$"
-    }
+    /** What [syncCountrySelector] did to the chosen country. */
+    enum class CountrySync { NONE, CHANGED, GONE }
+
+    private fun exactNames(names: List<String>): String = ServerList.exactNameFilter(names)
 
     /** Whether a profile other than an auto-selector exists. */
     fun hasServers(): Boolean = SagerDatabase.instance.query(

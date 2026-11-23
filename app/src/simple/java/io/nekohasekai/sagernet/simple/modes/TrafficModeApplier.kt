@@ -131,7 +131,7 @@ object TrafficModeApplier {
         return target
     }
 
-    private fun countrySelectorChanged(ensured: TrafficModes.Ensured): Boolean =
+    private fun countrySelectorChanged(ensured: TrafficModes.Ensured): Boolean = ensured.countryGone ||
         ensured.countryChanged && ensured.ids.country > 0L && DataStore.selectedProxy == ensured.ids.country
 
     /** The routing [mode] runs now; batch 6 adds the network check's result for «Авто». */

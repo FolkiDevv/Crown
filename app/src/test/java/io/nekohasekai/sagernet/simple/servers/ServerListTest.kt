@@ -117,6 +117,28 @@ class ServerListTest {
     }
 
     @Test
+    fun countrySelectorFilter() {
+        // Compiled the way the auto-selector compiles its filters.
+        fun matches(filter: String, name: String) =
+            java.util.regex.Pattern.compile(filter, WhitelistKeywords.FLAGS).matcher(name).find()
+        val filter = ServerList.exactNameFilter(listOf("Edge", "🇩🇪 Berlin (1)", "Edge", ""))
+        assertTrue(matches(filter, "Edge"))
+        assertTrue(matches(filter, "🇩🇪 Berlin (1)"))
+        assertFalse(matches(filter, "edge"))
+        assertFalse(matches(filter, "EDGE"))
+        assertFalse(matches(filter, "Edge 2"))
+        assertFalse(matches(filter, "🇩🇪 Berlin (1) copy"))
+        assertFalse(matches(ServerList.exactNameFilter(emptyList()), "Edge"))
+        // Cyrillic is compared exactly too.
+        assertFalse(matches(ServerList.exactNameFilter(listOf("Германия")), "германия"))
+        // A name another server of the group also has is left out, so the filter cannot admit that server.
+        assertEquals(
+            listOf("Berlin"),
+            ServerList.exclusiveNames(listOf("Berlin", "Edge", "Berlin"), listOf("Edge", "edge", "Paris")),
+        )
+    }
+
+    @Test
     fun countryChoiceCodec() {
         assertEquals(CountryChoice(12L, "DE"), CountryChoice.parse("12:DE"))
         assertEquals(CountryChoice(12L, "DE"), CountryChoice.parse(CountryChoice(12L, "de").encode()))

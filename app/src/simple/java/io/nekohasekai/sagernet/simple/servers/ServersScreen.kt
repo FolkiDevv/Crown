@@ -323,7 +323,8 @@ private fun SubscriptionCardView(card: SubscriptionCard, locale: Locale, onUpdat
                     )
                 }
                 val date = if (card.expire > 0L) dateFormat.format(Date(card.expire * 1000)) else ""
-                when (card.expiry) {
+                // From the ticking clock, so an end passing while the section is open shows at once.
+                when (SubscriptionHealth.expiry(card.expire, now)) {
                     SubscriptionHealth.Expiry.NONE -> Unit
                     SubscriptionHealth.Expiry.OK -> InfoLine(stringResource(R.string.simple_summary_expires, date), normal)
                     SubscriptionHealth.Expiry.SOON -> {

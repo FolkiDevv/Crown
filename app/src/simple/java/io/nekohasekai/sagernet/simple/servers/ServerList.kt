@@ -85,6 +85,26 @@ object ServerList {
     }
 
     /** By the name as the row shows it: without its leading flag (the flag column shows that) and blanks. */
+    /**
+     * The names of [chosen] that none of [others] has (compared exactly), once each: the members a name filter can
+     * admit without admitting a server it must not.
+     */
+    fun exclusiveNames(chosen: List<String>, others: List<String>): List<String> {
+        val taken = others.toHashSet()
+        return chosen.filter { it.isNotEmpty() && it !in taken }.distinct()
+    }
+
+    /**
+     * An auto-selector name filter that matches exactly [names]. The selector compiles its filters case-insensitively
+     * (CASE_INSENSITIVE | UNICODE_CASE) and finds them anywhere in the name; the anchors and the inline `(?-iu:…)`
+     * make it an exact, case-sensitive match, so «Edge» does not admit «edge» or «Edge 2». No name matches nothing.
+     */
+    fun exactNameFilter(names: List<String>): String {
+        val distinct = names.filter { it.isNotEmpty() }.distinct()
+        if (distinct.isEmpty()) return "(?!)"
+        return "(?-iu:^(?:" + distinct.joinToString("|") { java.util.regex.Pattern.quote(it) } + ")$)"
+    }
+
     private val byName: Comparator<ServerEntry> =
         compareBy<ServerEntry, String>(NaturalOrder) { CountryFromName.withoutLeadingFlag(it.name) }.thenBy { it.id }
 

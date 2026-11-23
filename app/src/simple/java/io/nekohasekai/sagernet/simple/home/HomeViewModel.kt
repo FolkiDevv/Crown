@@ -343,6 +343,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     override suspend fun onUpdated(data: List<TrafficData>) = Unit
     override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
         if (profile.id == DataStore.selectedProxy || profile.id == fallbackProfile) refreshProfilesLater()
+        // The auto-selector's running member was renamed or re-tested: its name and country are read again.
+        if (profile.id == pick?.id) viewModelScope.launch { lookUpPickCountry(profile.id, force = true) }
     }
 
     override suspend fun onRemoved(groupId: Long, profileId: Long) = refreshProfilesLater()
@@ -368,8 +370,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     /** The selected plain server's name as the list shows it (never its address). */
     private var selectedName: String = ""
 
-    private fun lookUpPickCountry(id: Long) {
-        if (id <= 0L || pick?.id == id) return
+    /** Looks the running pick [id] up in the catalog; [force] reads it again (it may have been renamed or re-tested). */
+    private fun lookUpPickCountry(id: Long, force: Boolean = false) {
+        if (id <= 0L || !force && pick?.id == id) return
         viewModelScope.launch {
             val found = withContext(Dispatchers.IO) {
                 try {
@@ -381,6 +384,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     null
                 }
             }
+            // A lookup for a pick that is no longer running is dropped (a newer one is under way or done).
+            if (autoStatus.selectedId != id) return@launch
             pick = found ?: Pick(id, null, "")
             publish()
         }
@@ -414,6 +419,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             fallbackProfile = fallback
             mutableState.update { it.copy(hasServers = hasServers) }
             publish()
+            // The profiles may have changed in :bg (a subscription update renamed the running member).
+            if (autoStatus.active && autoStatus.selectedId > 0L) lookUpPickCountry(autoStatus.selectedId, force = true)
         }
     }
 
@@ -448,9 +455,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 name = selectedName.ifEmpty { CountryFromName.tidy(it.displayName()) },
                 auto = auto,
                 // The core reports an unnamed member by its address: the name as the list shows it, once looked up.
-                autoSelected = running?.let { r ->
-                    currentPick?.name?.takeIf { n -> n.isNotEmpty() } ?: CountryFromName.tidy(r.selectedName)
-                }.orEmpty(),
+                // The catalog's name only: the core reports an unnamed member by its address. Until the lookup is
+                // through the card says that Auto is choosing; a member the catalog does not know is «unnamed».
+                autoSelected = currentPick?.name?.ifEmpty { unnamed() }.orEmpty(),
                 latencyMs = if (connected) liveLatency else it.latency.takeIf { ms -> ms > 0 && !auto },
                 localizedName = when (it.id) {
                     managed?.auto -> R.string.simple_selector_auto_name

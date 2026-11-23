@@ -46,11 +46,15 @@ object ServerCatalog {
      */
     fun countryMembers(choice: CountryChoice, keywords: List<String>): List<String> {
         val whitelist = whitelistPattern(keywords)
-        return SagerDatabase.proxyDao.getByGroup(choice.groupId)
+        val (chosen, others) = SagerDatabase.proxyDao.getByGroup(choice.groupId)
             .filter { it.type != AutoSelectorProfiles.TYPE }
-            .filter { !whitelist.matcher(nameOf(it)).find() }
-            .filter { CountryFromName.resolve(nameOf(it), it.testCountry).code == choice.code }
-            .map { it.outbound.displayName() }
+            .partition {
+                !whitelist.matcher(nameOf(it)).find() &&
+                    CountryFromName.resolve(nameOf(it), it.testCountry).code == choice.code
+            }
+        // The selector tells its members apart by name only: a name another server of the group (another country, a
+        // server for whitelists) also has would let that server in, so such names are left out.
+        return ServerList.exclusiveNames(chosen.map { it.outbound.displayName() }, others.map { it.outbound.displayName() })
     }
 
     /** The name the user gave the server, "" when none. */

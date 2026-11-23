@@ -126,6 +126,9 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     /** Servers of the current round shown as «Страна определяется…» until the round is through. */
     private val roundPending = HashSet<Long>()
 
+    /** Servers whose exit IP was checked at least once (they come after the others in the next batch). */
+    private val ipAttempted = HashSet<Long>()
+
     /** Servers added while a round ran, tested right after it ([testAgain]). */
     private val queued = HashSet<Long>()
     private var testAgain = false
@@ -193,8 +196,12 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
                     null
                 }
             } ?: return@launch
-            mutableState.update { loaded.copy(pick = it.pick, refreshing = it.refreshing, busy = it.busy) }
+            // The live results of a running test go over the stored ones here, on the main thread that owns them.
+            val live = loaded.copy(sections = loaded.sections?.let(::withLiveLatency))
+            mutableState.update { live.copy(pick = it.pick, refreshing = it.refreshing, busy = it.busy) }
             publishCards()
+            // Names and countries may have changed (an update in :bg): the running pick is looked up again.
+            pickInfo = null
             publishPick()
             if (testAfterLoad) {
                 testAfterLoad = false
@@ -235,8 +242,15 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     /** [pulled]: asked for by pull to refresh, whose indicator then follows this update. */
     private fun update(groupId: Long, pulled: Boolean) {
-        // An update that is queued or running already is not asked for again (repeated pulls).
-        if (groupId in updating || groupId in requested) return
+        // An update that is queued or running already is not asked for again (repeated pulls); a pull still shows
+        // its indicator until that update is through.
+        if (groupId in updating || groupId in requested) {
+            if (pulled) {
+                requested.putIfAbsent(groupId, SystemClock.elapsedRealtime())
+                this.pulled += groupId
+            }
+            return
+        }
         requested[groupId] = SystemClock.elapsedRealtime()
         if (pulled) this.pulled += groupId
         SubscriptionClient.refreshGroup(groupId, false)
@@ -260,6 +274,11 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         mutableState.update { it.copy(refreshing = true) }
         ids.forEach { update(it, pulled = true) }
         publishCards()
+        // Every deadline gets its publication: the indicator goes away then unless a pulled update still runs.
+        viewModelScope.launch {
+            delay(PULL_GRACE_MS)
+            publishCards()
+        }
     }
 
     override fun onCleared() {
@@ -294,9 +313,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val context = getApplication<Application>()
         val keywords = SimpleConfigRepo.current().wlKeywords
         val snapshot = ServerCatalog.load(keywords, detecting, context.getString(R.string.simple_server_unnamed))
-        val servers = snapshot.servers.map { server ->
-            liveLatency[server.id]?.let { server.copy(latency = it) } ?: server
-        }
+        val servers = snapshot.servers
         val locale = context.resources.configuration.locales[0]
         val sections = ServerList.build(snapshot.entries, servers) { CountryLabels.name(it, locale) }
         val now = System.currentTimeMillis() / 1000
@@ -411,11 +428,14 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     /** The exit IP check of the servers whose country the name does not give, which answered the URL test. */
     private fun startIpTest() {
-        val ids = mutableState.value.sections?.allServers
+        val candidates = mutableState.value.sections?.allServers
             ?.filter { it.country !is ServerCountry.Known && (it.latency > 0 || it.latency == ProxyEntity.LATENCY_CONNECT_ONLY) }
             ?.map { it.id }
-            ?.take(IP_TEST_LIMIT)
             .orEmpty()
+        // At most IP_TEST_LIMIT per round, those never checked first, so a long list is covered over the rounds.
+        val ids = candidates.sortedBy { it in ipAttempted }.take(IP_TEST_LIMIT)
+        // Servers left for a later round are not through with their first check yet.
+        roundPending.removeAll((candidates - ids.toSet()).toSet())
         val before = TestSessionClient.state.value
         if (ids.isEmpty() || !TestSessionClient.startProfiles(TestSpec.KIND_IP, ids)) {
             // Nothing answered (or another session runs): this round is through, what was detected is unknown.
@@ -424,6 +444,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         }
         stateBeforeTest = before
         ownTest = TestSpec.KIND_IP
+        ipAttempted += ids
         // The servers that did not answer are through; only those checked for the first time are «being detected».
         countryChecked += roundPending - ids.toSet()
         detecting = ids.filterTo(HashSet()) { it !in countryChecked } + queued
@@ -513,19 +534,20 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun publishLatency() {
-        mutableState.update { state ->
-            val sections = state.sections ?: return@update state
-            fun ServerEntry.live() = liveLatency[id]?.let { copy(latency = it) } ?: this
-            state.copy(
-                sections = sections.copy(
-                    subscriptions = sections.subscriptions.map { s ->
-                        s.copy(countries = s.countries.map { row -> row.copy(servers = row.servers.map { it.live() }) })
-                    },
-                    mine = sections.mine.map { it.live() },
-                    whitelist = sections.whitelist.map { it.live() },
-                ),
-            )
-        }
+        mutableState.update { state -> state.copy(sections = state.sections?.let(::withLiveLatency)) }
+    }
+
+    /** [sections] with the live URL test results over the stored delays; main thread only (it owns [liveLatency]). */
+    private fun withLiveLatency(sections: ServerSections): ServerSections {
+        if (liveLatency.isEmpty()) return sections
+        fun ServerEntry.live() = liveLatency[id]?.let { copy(latency = it) } ?: this
+        return sections.copy(
+            subscriptions = sections.subscriptions.map { s ->
+                s.copy(countries = s.countries.map { row -> row.copy(servers = row.servers.map { it.live() }) })
+            },
+            mine = sections.mine.map { it.live() },
+            whitelist = sections.whitelist.map { it.live() },
+        )
     }
 
     // ------------------------------------------------------------------------------------------------ running pick
@@ -540,7 +562,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val known = pickInfo?.takeIf { it.first == status.selectedId }?.second
         if (known != null) {
             // The core names an unnamed member by its address: the list's name for it instead.
-            val name = known.second.ifEmpty { CountryFromName.tidy(status.selectedName) }
+            val name = known.second.ifEmpty { getApplication<Application>().getString(R.string.simple_server_unnamed) }
             mutableState.update { it.copy(pick = RunningPick(status.selectorId, name, known.first)) }
             return
         }
@@ -556,6 +578,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
                     null
                 }
             }
+            // A lookup for a pick that is no longer running is dropped.
+            if (autoStatus.selectedId != status.selectedId) return@launch
             pickInfo = status.selectedId to (info ?: (null to ""))
             publishPick()
         }
