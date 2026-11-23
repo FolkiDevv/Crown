@@ -361,10 +361,15 @@ class SimpleActivity : AppCompatActivity() {
     private fun openClassicScreen(screen: ClassicScreen) {
         try {
             startActivity(ClassicVisit.intent(this, screen))
-            finish()
         } catch (e: ActivityNotFoundException) {
             Logs.w(e)
+            return
         }
+        finish()
+        // No transition, as SimpleUi.switchTo: with an animation the finishing window stays (and must still lose its
+        // focus) until the classic window is drawn, which is what timed out; without, it is removed right away.
+        @Suppress("DEPRECATION")
+        overridePendingTransition(0, 0)
     }
 
     private fun requestStart() {
