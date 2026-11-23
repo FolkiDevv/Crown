@@ -201,11 +201,12 @@ fun RepairScreen(
 @Composable
 private fun StepRow(step: RepairStep, state: StepState, open: (RepairAction) -> Unit, modifier: Modifier) {
     val result = (state as? StepState.Done)?.result
-    // Focusable for a remote: the results are text, and only a focus can scroll the list down to the last check.
+    val actions = result?.let { stepActions(step, it) }.orEmpty()
+    // Focusable for a remote: the results are text, and only a focus can scroll the list down to the last check. A
+    // check with a button has its focus there (a focusable row around it would hide the button from up and down).
     Row(
         modifier
-            .focusRing(FocusShapes.Card, outset = 0.dp)
-            .focusable()
+            .then(if (actions.isEmpty()) Modifier.focusRing(FocusShapes.Card, outset = 0.dp).focusable() else Modifier)
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -224,7 +225,7 @@ private fun StepRow(step: RepairStep, state: StepState, open: (RepairAction) -> 
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                for (action in stepActions(step, result)) {
+                for (action in actions) {
                     TextButton(
                         onClick = { open(action) },
                         contentPadding = PaddingValues(horizontal = 0.dp),

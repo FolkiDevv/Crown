@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -56,6 +57,7 @@ import io.nekohasekai.sagernet.simple.FocusShapes
 import io.nekohasekai.sagernet.simple.ServiceDetail
 import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
+import io.nekohasekai.sagernet.simple.leaveWithDpad
 import io.nekohasekai.sagernet.simple.trafficSize
 import java.text.DateFormat
 import java.util.Date
@@ -218,9 +220,11 @@ fun LinkDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
                     label = { Text(stringResource(R.string.simple_add_link_field)) },
                     maxLines = 4,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (text.isNotBlank()) onAdd(text) }),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .focusRequester(focus),
+                        .focusRequester(focus)
+                        .leaveWithDpad(),
                 )
             }
         },

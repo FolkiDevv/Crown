@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.FocusState
 import androidx.compose.ui.focus.focusRequester
@@ -24,6 +25,11 @@ import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DelegatingNode
@@ -33,7 +39,9 @@ import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.focus.FocusEventModifierNode
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -82,6 +90,12 @@ private fun ContentDrawScope.drawFocusRing(color: Color, shape: Shape, outset: D
 private fun CompositionLocalConsumerModifierNode.ringColor(): Color =
     currentValueOf(LocalFocusRingColor).takeOrElse { currentValueOf(LocalContentColor) }
 
+/**
+ * Whether the window has the input focus: a dialog or sheet above keeps the focus of the element below it, but its
+ * ring would show through the scrim. Read while drawing, so the ring comes back when the dialog closes.
+ */
+private fun CompositionLocalConsumerModifierNode.windowFocused(): Boolean = currentValueOf(LocalWindowInfo).isWindowFocused
+
 private inline fun Color.takeOrElse(block: () -> Color): Color = if (this != Color.Unspecified) this else block()
 
 /**
@@ -128,7 +142,7 @@ private class FocusRingIndicationNode(
 
     override fun ContentDrawScope.draw() {
         drawContent()
-        if (focused) drawFocusRing(ringColor(), ROW_RING, -RING_WIDTH)
+        if (focused && windowFocused()) drawFocusRing(ringColor(), ROW_RING, -RING_WIDTH)
     }
 }
 
@@ -168,7 +182,24 @@ private class FocusRingNode(var shape: Shape, var outset: Dp) :
 
     override fun ContentDrawScope.draw() {
         drawContent()
-        if (focused) drawFocusRing(ringColor(), shape, outset)
+        if (focused && windowFocused()) drawFocusRing(ringColor(), shape, outset)
+    }
+}
+
+/**
+ * A text field a remote can leave: the field keeps the arrow keys for its cursor, so on a D-pad nothing below it
+ * (the dialog's buttons) could take the focus. Up and down move the focus on when there is somewhere to go.
+ */
+@Composable
+fun Modifier.leaveWithDpad(): Modifier {
+    val focusManager = LocalFocusManager.current
+    return onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        when (event.key) {
+            Key.DirectionDown -> focusManager.moveFocus(FocusDirection.Down)
+            Key.DirectionUp -> focusManager.moveFocus(FocusDirection.Up)
+            else -> false
+        }
     }
 }
 
