@@ -268,6 +268,13 @@
     <string name="simple_repair_running">Проверяем всё, от чего зависит работа VPN…</string>
     <string name="simple_repair_stopped">Проверка остановлена</string>
     <string name="simple_repair_fixed">Исправлено</string>
+    <string name="simple_repair_undoing">Останавливаем: возвращаем настройки, изменённые «Починкой»…</string>
+    <string name="simple_repair_fix_server">Исправлено: переключились на отвечающий сервер</string>
+    <string name="simple_repair_fix_direct_dns">Исправлено: DNS напрямую заменён на DNS из белого списка</string>
+    <string name="simple_repair_fix_vpn_dns">Исправлено: DNS через VPN заменён на другой</string>
+    <string name="simple_repair_fix_subscription">Исправлено: подписка обновлена</string>
+    <string name="simple_repair_fix_routes">Исправлено: маршрутные профили обновлены</string>
+    <string name="simple_repair_fix_mtu">Исправлено: MTU VPN снижен до 1280</string>
     <string name="simple_repair_step_internet">Интернет без VPN</string>
     <string name="simple_repair_step_whitelists">Белые списки в сети</string>
     <string name="simple_repair_step_clock">Время на устройстве</string>
@@ -341,6 +348,7 @@
     <string name="simple_repair_skip_other_vpn">Не проверено: активно VPN другого приложения</string>
     <string name="simple_repair_skip_vpn_off">Не проверено: VPN выключен. Включите его и запустите «Починку» снова</string>
     <string name="simple_repair_skip_no_permission">Не проверено: нет разрешения на VPN</string>
+    <string name="simple_repair_skip_vpn_start">Не проверено: VPN не включился</string>
     <string name="simple_repair_skip_bypass">Не проверено: это приложение работает без VPN</string>
     <string name="simple_repair_skip_no_subscription">Не проверено: подписка не добавлена</string>
     <string name="simple_repair_skip_dns_kind">Не проверено: такой тип DNS-сервера проверка не поддерживает</string>

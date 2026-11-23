@@ -3,8 +3,10 @@ package io.nekohasekai.sagernet.simple.repair
 import android.content.Context
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.VpnService
 import android.os.Build
 import android.provider.Settings
+import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
 import io.nekohasekai.sagernet.bg.test.TestSpec
@@ -47,8 +49,8 @@ import kotlin.coroutines.resume
 import kotlin.math.abs
 
 /**
- * What «Починка» needs from the rest of the app: whether this app's VPN is on, and a URL test of the running
- * connection (the home screen's service connection).
+ * What «Починка» needs from the rest of the app: the state of this app's VPN, a URL test of the running connection
+ * (the home screen's service connection), and starting and stopping the VPN with the user's consent.
  */
 class RepairEnvironment(
     /** This app's VPN is connected. */
@@ -57,18 +59,45 @@ class RepairEnvironment(
     val serviceOff: () -> Boolean,
     /** The delay through the running connection within the time given; > 0 ok, < 0 failed, null: no answer. */
     val testConnection: suspend (timeoutMs: Long) -> Int?,
+    /** Shows the system's VPN consent request; true when the user gave it. */
+    val requestConsent: suspend () -> Boolean,
+    /** Starts the service on the selected server (the consent is there). */
+    val startVpn: () -> Unit,
+    /** Stops the service as the user's own stop does (no «Соединение потеряно»). */
+    val stopVpn: () -> Unit,
+    /** How many times the service has connected so far; with [awaitConnected] a start or reload is waited for. */
+    val connects: () -> Int,
+    /** Waits until the service has connected more than `after` times and is connected; false after `timeoutMs`. */
+    val awaitConnected: suspend (after: Int, timeoutMs: Long) -> Boolean,
 )
 
 /**
  * The checks of «Починка» on the device (design.md D8). The checks without the VPN go through the physical network
  * (`SagerNet.underlyingNetwork`, the same source as the network watcher of D6) with [NetworkProber]; the servers with a
- * URL test session of `:bg` ([TestSessionClient]); the checks through the VPN only while this app's VPN is on (batch 8
- * raises it for them). Nothing here changes a setting of the app or of Android. Requests carry no results of the checks
- * and no identifiers (connection-repair "Без автоматической отправки").
+ * URL test session of `:bg` ([TestSessionClient]). For the checks through the VPN a VPN that is off is started on the
+ * server «Доступность серверов» chose (connection-repair "Подключение для проверок через VPN"), after the system's
+ * consent request when there is no consent yet, and never while another app's VPN is active; it stays on when «Сайты
+ * через VPN» passes and is stopped again otherwise ([journal]). The automatic fixes are [DeviceRepairFixes]; Android's
+ * own settings are never changed. Requests carry no results of the checks and no identifiers (connection-repair "Без
+ * автоматической отправки").
  */
-class DeviceRepairChecks(private val context: Context, private val env: RepairEnvironment) : RepairChecks {
+class DeviceRepairChecks(
+    private val context: Context,
+    private val env: RepairEnvironment,
+    private val journal: RepairJournal,
+) : RepairChecks {
 
     private val config: SimpleConfig = SimpleConfigRepo.current()
+
+    private val fixes = DeviceRepairFixes(env, config) { id -> urlTest(listOf(id))?.get(id) }
+
+    /** Why the VPN could not be had for the checks through it; both checks share the answer (one consent request). */
+    private var vpnProblem: SkipReason? = null
+
+    override suspend fun fixesFor(step: RepairStep, result: StepResult, done: Map<RepairStep, StepResult>): List<RepairFix> =
+        withContext(Dispatchers.IO) { fixes.fixesFor(step, result) }
+
+    override suspend fun settle(wait: Boolean) = fixes.settle(wait)
 
     /** The physical network the checks went through, from «Интернет без VPN» on. */
     private var network: Network? = null
@@ -86,8 +115,8 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
             RepairStep.DNS_DIRECT -> directDns()
             RepairStep.SUBSCRIPTION -> subscription()
             RepairStep.SERVERS -> servers(done)
-            RepairStep.DNS_VPN -> vpnDns()
-            RepairStep.SITES_VPN -> vpnSites()
+            RepairStep.DNS_VPN -> ensureVpn(step, done)?.let { StepResult.skipped(it) } ?: vpnDns()
+            RepairStep.SITES_VPN -> ensureVpn(step, done)?.let { StepResult.skipped(it) } ?: vpnSites()
             RepairStep.RU_DIRECT -> russianSites()
             RepairStep.BACKGROUND -> background()
         }
@@ -398,16 +427,65 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
         }
     }
 
+    /**
+     * This app's VPN for the checks through it (connection-repair "Подключение для проверок через VPN", "Согласие на
+     * VPN и чужое VPN при проверках через VPN"): null when it is connected, else why it is not. A VPN that is off is
+     * started on the server «Доступность серверов» chose, unless another app's VPN is active (the system would revoke
+     * that app's VPN); without the consent the system's request is shown first. The start is recorded in the [journal]
+     * to stay only while «Сайты через VPN» passes, and goes with a stop of «Починка».
+     */
+    private suspend fun ensureVpn(step: RepairStep, done: Map<RepairStep, StepResult>): SkipReason? {
+        if (env.vpnConnected()) return null
+        vpnProblem?.let { return it }
+        if (!env.serviceOff()) {
+            // Starting or stopping meanwhile (the user's button, a reload): a start in flight is waited for.
+            return if (env.awaitConnected(env.connects(), VPN_START_MS)) null else SkipReason.VPN_OFF
+        }
+        if (otherVpnActive()) return SkipReason.OTHER_VPN.also { vpnProblem = it }
+        val chosen = done[RepairStep.SERVERS]?.servers?.chosenId ?: 0L
+        if (chosen <= 0L) return SkipReason.NO_WORKING_SERVER
+        if (DataStore.serviceMode == Key.MODE_VPN && VpnService.prepare(context) != null) {
+            Logs.i("simple repair: no VPN consent yet, asking for it")
+            if (!env.requestConsent()) {
+                Logs.i("simple repair: the VPN consent was refused")
+                return SkipReason.NO_VPN_PERMISSION.also { vpnProblem = it }
+            }
+        }
+        val selected = DataStore.selectedProxy
+        val connects = env.connects()
+        val entry = journal.record(step, kind = null, keepIf = RepairStep.SITES_VPN) {
+            Logs.i("simple repair: stopping the VPN started for the checks")
+            fixes.vpnStopped()
+            env.stopVpn()
+            if (selected != chosen && DataStore.selectedProxy == chosen) DataStore.selectedProxy = selected
+        }
+        if (selected != chosen) withContext(Dispatchers.IO) { DataStore.selectedProxy = chosen }
+        Logs.i("simple repair: starting the VPN on server $chosen for the checks through it")
+        env.startVpn()
+        if (env.awaitConnected(connects, VPN_START_MS)) return null
+        Logs.w("simple repair: the VPN started for the checks did not connect")
+        journal.restore(entry)
+        return SkipReason.VPN_START_FAILED.also { vpnProblem = it }
+    }
+
     /** DNS through this app's VPN: a name of the blocked addresses looked up through the VPN network. */
     private suspend fun vpnDns(): StepResult {
         if (!env.vpnConnected()) return StepResult.skipped(SkipReason.VPN_OFF)
         val connectivity = SagerNet.connectivity
-        val active = connectivity.activeNetwork
-        val inVpn = active != null &&
-            connectivity.getNetworkCapabilities(active)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-        if (!inVpn) return StepResult.skipped(SkipReason.APP_BYPASSES_VPN)
+        fun vpnNetwork(): Network? = connectivity.activeNetwork?.takeIf {
+            connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        }
+        // A VPN that has just connected becomes this app's default network a moment later.
+        val active = vpnNetwork() ?: withTimeoutOrNull(VPN_NETWORK_WAIT_MS) {
+            var network = vpnNetwork()
+            while (network == null) {
+                delay(250L)
+                network = vpnNetwork()
+            }
+            network
+        } ?: return StepResult.skipped(SkipReason.APP_BYPASSES_VPN)
         val name = config.probesBlocked.firstNotNullOfOrNull { hostOf(it) } ?: return StepResult.skipped(SkipReason.ERROR)
-        val found = withContext(Dispatchers.IO) { NetworkProber.lookupSystem(active!!, name, DNS_WAIT_MS) }
+        val found = withContext(Dispatchers.IO) { NetworkProber.lookupSystem(active, name, DNS_WAIT_MS) }
         return if (found.isNullOrEmpty()) StepResult.fail(Finding.VPN_DNS_NO_ANSWER) else StepResult.ok()
     }
 
@@ -474,8 +552,15 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
 
         const val DNS_WAIT_MS = 4_000L
 
-        /** The URL test through the VPN; below the 45 s limit of «Сайты через VPN» (RepairEngine.defaultTimeout). */
+        /** The URL test through the VPN; within the limit of «Сайты через VPN» (RepairEngine.defaultTimeout). */
         const val SITES_WAIT_MS = 40_000L
+
+        /** A VPN start (or a start in flight) for the checks through it; a cold core start may take a while. */
+        const val VPN_START_MS = 75_000L
+
+        /** How long a VPN that has just connected may take to become the default network. */
+        const val VPN_NETWORK_WAIT_MS = 5_000L
+
         const val DNS_MESSAGE = "application/dns-message"
 
         /** How long a test session of another part of the app may keep the engine busy. */

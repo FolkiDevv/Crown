@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
@@ -143,7 +144,12 @@ class SimpleActivity : AppCompatActivity() {
         if (refused) home.message(R.string.simple_vpn_permission_denied)
     }
 
-    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    /** The system's VPN consent dialog «Починка» asks for; the answer goes back to it (a rotation keeps it). */
+    private val repairConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        repair.consentAnswered(result.resultCode == RESULT_OK)
+    }
+
+    private val notificationPermission =registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     /** «Открыть файл»: any file; a backup goes to the stock restore, the rest to the import. */
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -177,6 +183,12 @@ class SimpleActivity : AppCompatActivity() {
                     requestedSection = requestedSection.value,
                     onSectionShown = { requestedSection.value = null },
                 )
+            }
+        }
+        // «Починка» asks for the VPN consent before starting the VPN for its checks through it.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                repair.consentRequests.collect { askRepairConsent() }
             }
         }
         lifecycleScope.launch {
@@ -425,6 +437,30 @@ class SimpleActivity : AppCompatActivity() {
         }
     }
 
+    /** Shows the system's VPN consent dialog for «Починка»; a device without it counts as a refusal. */
+    private fun askRepairConsent() {
+        val intent = try {
+            VpnService.prepare(this)
+        } catch (e: Exception) {
+            Logs.w(e)
+            repair.consentAnswered(false)
+            return
+        }
+        if (intent == null) {
+            repair.consentAnswered(true)
+            return
+        }
+        try {
+            repairConsent.launch(intent)
+        } catch (e: ActivityNotFoundException) {
+            Logs.w(e)
+            repair.consentAnswered(false)
+        } catch (e: SecurityException) {
+            Logs.w(e)
+            repair.consentAnswered(false)
+        }
+    }
+
     private fun requestStart() {
         try {
             connect.launch(null)
@@ -555,12 +591,18 @@ fun SimpleApp(
         add.notices.collect { notice -> snackbar.showSnackbar(notice.resolve(context)) }
     }
 
-    // «Починка» (batch 7): from the settings' top button and the home banner; a run starts as it opens.
-    val repairEnvironment = remember(home) {
+    // «Починка» (batch 7): from the settings' top button and the home banner; a run starts as it opens. Batch 8: it
+    // starts the VPN for its checks through it (with the consent the activity asks for) and stops it like the button.
+    val repairEnvironment = remember(home, repair) {
         RepairEnvironment(
             vpnConnected = { home.vpnConnected },
             serviceOff = { home.serviceOff },
             testConnection = { timeoutMs -> home.testConnection(timeoutMs) },
+            requestConsent = { repair.requestConsent() },
+            startVpn = { SagerNet.startService() },
+            stopVpn = { home.stop() },
+            connects = { home.connects },
+            awaitConnected = { after, timeoutMs -> home.awaitConnected(after, timeoutMs) },
         )
     }
     val openRepair = remember(repair, repairEnvironment) { { repair.open(repairEnvironment) } }

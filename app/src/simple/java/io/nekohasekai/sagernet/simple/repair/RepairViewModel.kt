@@ -15,6 +15,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -130,7 +131,9 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
             if (run == runs) mutableState.update(change)
         }
         job = viewModelScope.launch {
-            val engine = RepairEngine(DeviceRepairChecks(getApplication(), environment))
+            // What this run changes, to be put back when a fix does not help or the run is stopped.
+            val journal = RepairJournal()
+            val engine = RepairEngine(DeviceRepairChecks(getApplication(), environment, journal), journal)
             try {
                 val progress = engine.run { progress -> publish { it.copy(progress = progress) } }
                 val verdict = RepairVerdict.of(progress.results)
@@ -145,6 +148,35 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private var runs = 0
+
+    private val consentChannel = Channel<Unit>(Channel.CONFLATED)
+
+    /**
+     * Requests of the system's VPN consent dialog (the checks through the VPN, connection-repair "Согласие на VPN и
+     * чужое VPN при проверках через VPN"); the activity shows it and answers with [consentAnswered].
+     */
+    val consentRequests: Flow<Unit> = consentChannel.receiveAsFlow()
+
+    @Volatile
+    private var consent: CompletableDeferred<Boolean>? = null
+
+    /** Asks the activity for the VPN consent and waits for the answer; kept here, so a rotation does not lose it. */
+    suspend fun requestConsent(): Boolean {
+        val waiter = CompletableDeferred<Boolean>()
+        consent?.complete(false)
+        consent = waiter
+        consentChannel.trySend(Unit)
+        return try {
+            waiter.await()
+        } finally {
+            if (consent === waiter) consent = null
+        }
+    }
+
+    /** The user's answer to the consent dialog (false also when the dialog could not open). */
+    fun consentAnswered(granted: Boolean) {
+        consent?.complete(granted)
+    }
 
     /** «Остановить»: the check in flight and those after it are «не проверено: остановлено». */
     fun stop() {

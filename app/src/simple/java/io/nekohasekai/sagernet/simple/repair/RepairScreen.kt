@@ -157,7 +157,7 @@ fun RepairScreen(
             when {
                 state.running -> item(key = "running") {
                     Text(
-                        stringResource(R.string.simple_repair_running),
+                        stringResource(if (progress.undoing) R.string.simple_repair_undoing else R.string.simple_repair_running),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = width.padding(vertical = 8.dp),
@@ -280,9 +280,10 @@ private fun VerdictCard(
 
                 is RepairVerdict.Fixed -> Unit
             }
-            for ((step, _) in verdict.fixes) {
+            // Each fix says what it changed, so the verdict lists them as they are.
+            for ((_, fix) in verdict.fixes) {
                 Text(
-                    "${stringResource(step.title)}: ${stringResource(R.string.simple_repair_fixed)}",
+                    stringResource(fix.text),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -468,7 +469,7 @@ private fun explanation(step: RepairStep, result: StepResult): List<String> {
             }
         )
     }
-    if (result.status == StepStatus.FIXED) lines += stringResource(R.string.simple_repair_fixed)
+    if (result.status == StepStatus.FIXED) lines += stringResource(result.fix.text)
     return lines
 }
 
@@ -485,6 +486,18 @@ private fun duration(seconds: Long): String {
     }
 }
 
+/** What an automatic fix did, after the check's own explanation and in the verdict. */
+private val FixKind?.text: Int
+    get() = when (this) {
+        FixKind.SWITCHED_SERVER -> R.string.simple_repair_fix_server
+        FixKind.DIRECT_DNS_WHITELISTED -> R.string.simple_repair_fix_direct_dns
+        FixKind.VPN_DNS_ALTERNATIVE -> R.string.simple_repair_fix_vpn_dns
+        FixKind.SUBSCRIPTION_UPDATED -> R.string.simple_repair_fix_subscription
+        FixKind.ROUTES_UPDATED -> R.string.simple_repair_fix_routes
+        FixKind.MTU_LOWERED -> R.string.simple_repair_fix_mtu
+        null -> R.string.simple_repair_fixed
+    }
+
 private val SkipReason?.text: Int
     get() = when (this) {
         SkipReason.NO_INTERNET -> R.string.simple_repair_skip_no_internet
@@ -492,6 +505,7 @@ private val SkipReason?.text: Int
         SkipReason.OTHER_VPN -> R.string.simple_repair_skip_other_vpn
         SkipReason.VPN_OFF -> R.string.simple_repair_skip_vpn_off
         SkipReason.NO_VPN_PERMISSION -> R.string.simple_repair_skip_no_permission
+        SkipReason.VPN_START_FAILED -> R.string.simple_repair_skip_vpn_start
         SkipReason.APP_BYPASSES_VPN -> R.string.simple_repair_skip_bypass
         SkipReason.NO_SUBSCRIPTION -> R.string.simple_repair_skip_no_subscription
         SkipReason.UNSUPPORTED_DNS -> R.string.simple_repair_skip_dns_kind
