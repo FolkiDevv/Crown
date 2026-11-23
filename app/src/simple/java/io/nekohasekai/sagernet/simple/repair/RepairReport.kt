@@ -133,8 +133,12 @@ object RepairReport {
     private fun changeJson(change: FixChange): JSONObject =
         JSONObject().put("setting", change.setting).put("before", change.before).put("after", change.after)
 
+    /**
+     * "(server was 67, now 21)": no `key: value` form, which the log cleaning (LogRedactor's `server: …` rule) would
+     * take for a server address and hide. Public IP addresses (DNS servers) are still hidden by the cleaning.
+     */
     private fun changeText(change: FixChange?): String =
-        change?.let { " (${it.setting}: ${it.before} -> ${it.after})" }.orEmpty()
+        change?.let { " (${it.setting} was ${it.before}, now ${it.after})" }.orEmpty()
 
     private fun fixes(results: Map<RepairStep, StepResult>, verdict: RepairVerdict?): List<Pair<RepairStep, FixKind>> =
         verdict?.fixes ?: RepairPlan.ORDER.mapNotNull { step -> results[step]?.fix?.let { step to it } }
