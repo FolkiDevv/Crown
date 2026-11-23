@@ -72,11 +72,9 @@ object TrafficModeApplier {
         lock.withLock {
             val ensured = TrafficModes.ensureManaged(context)
             if (DataStore.currentRouteId in ensured.changedRoutes && DataStore.serviceState.canStop) {
-                Logs.i("simple modes: the routing profile in use was updated, reload of the running service")
-                SagerNet.reloadService()
+                reloadNow("simple modes: the routing profile in use was updated, reload of the running service")
             } else if (countrySelectorChanged(ensured) && DataStore.serviceState.canStop) {
-                Logs.i("simple servers: the chosen country's servers changed, reload of the running service")
-                SagerNet.reloadService()
+                reloadNow("simple servers: the chosen country's servers changed, reload of the running service")
             }
             ensured
         }
@@ -142,10 +140,11 @@ object TrafficModeApplier {
                 SystemClock.elapsedRealtime() - lastReloadAt >= RESTART_WAIT_MS
             if (quiet) {
                 reloadNow("simple servers: server $target chosen, reload of the running service")
-                settle(target, mustReload = false)
+                settle(target)
             } else {
                 Logs.i("simple servers: server $target chosen, applied once the service is connected")
-                settle(target, mustReload = rebuilt)
+                if (rebuilt) pendingRebuild = target
+                settle(target)
             }
         }
         return target
@@ -160,22 +159,31 @@ object TrafficModeApplier {
     @Volatile
     private var lastReloadAt = 0L
 
+    /**
+     * A selector rebuilt under the same id while the service could not reload yet (0 = none): the running core still
+     * has its old members, so it needs one reload even though it runs that id. Kept here rather than in one watch, so a
+     * watch that replaces it still honours it; any reload sent from here rebuilds the whole config and clears it.
+     */
+    @Volatile
+    private var pendingRebuild = 0L
+
+    /** Every reload of the running service from here, so the guard of [switchTo] and [settle] knows about it. */
     private fun reloadNow(message: String) {
         Logs.i(message)
         lastReloadAt = SystemClock.elapsedRealtime()
+        pendingRebuild = 0L
         SagerNet.reloadService()
     }
 
     /**
      * Makes the running service end up on [target]: whenever it is connected (and not just asked to reload — a reload
      * sent moments ago may not have reached `:bg` yet), the profile it started with is compared with the choice and it
-     * reloads if they differ, or once anyway with [mustReload] (the country selector was rebuilt under the same id).
+     * reloads if they differ, or once anyway while [pendingRebuild] names it (rebuilt under the same id).
      * Twice at most. A newer choice, a stopped service or the time limit ends the watch.
      */
-    private fun settle(target: Long, mustReload: Boolean) {
+    private fun settle(target: Long) {
         settleJob?.cancel()
         settleJob = settleScope.launch {
-            var pending = mustReload
             var reloads = 0
             var restartSeen = false
             val deadline = SystemClock.elapsedRealtime() + SETTLE_MS
@@ -190,11 +198,10 @@ object TrafficModeApplier {
                         continue
                     }
                     if (!restartSeen && SystemClock.elapsedRealtime() - lastReloadAt < RESTART_WAIT_MS) continue
-                    if (!pending && DataStore.currentProfile == target) return@launch
+                    if (pendingRebuild != target && DataStore.currentProfile == target) return@launch
                     if (reloads >= 2) return@launch
                     val running = DataStore.currentProfile
                     reloads++
-                    pending = false
                     restartSeen = false
                     reloadNow(
                         if (running == target) "simple servers: selector $target was rebuilt; reload"
@@ -268,11 +275,9 @@ object TrafficModeApplier {
         }
         val change = TrafficModePlan.change(before, after, ensured.changedRoutes, stagedScopeMayRun)
         if (change != ServiceChange.NONE && DataStore.serviceState.canStop) {
-            Logs.i("simple modes: «${mode.key}» applied, ${change.name.lowercase()} of the running service")
-            SagerNet.reloadService()
+            reloadNow("simple modes: «${mode.key}» applied, ${change.name.lowercase()} of the running service")
         } else if (countrySelectorChanged(ensured) && DataStore.serviceState.canStop) {
-            Logs.i("simple servers: the chosen country's servers changed, reload of the running service")
-            SagerNet.reloadService()
+            reloadNow("simple servers: the chosen country's servers changed, reload of the running service")
         }
         return Result(mode, change, fellBack)
     }

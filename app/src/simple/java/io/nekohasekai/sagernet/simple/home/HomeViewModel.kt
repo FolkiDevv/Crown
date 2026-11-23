@@ -373,6 +373,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     /** The selected plain server's name as the list shows it (never its address). */
     private var selectedName: String = ""
 
+    /** What one [refreshProfiles] read. */
+    private class ProfilesSnapshot(
+        val profile: ProxyEntity?,
+        val fallback: Long,
+        val hasServers: Boolean,
+        val managed: Managed,
+        val country: String?,
+        val name: String,
+        val choiceCountry: String?,
+    )
+
     /** Looks the running pick [id] up in the catalog; [force] reads it again (it may have been renamed or re-tested). */
     private fun lookUpPickCountry(id: Long, force: Boolean = false) {
         if (id <= 0L || !force && pick?.id == id) return
@@ -401,27 +412,46 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     private fun refreshProfiles() {
         profilesJob?.cancel()
         profilesJob = viewModelScope.launch {
-            val (profile, fallback, hasServers) = withContext(Dispatchers.IO) {
+            // Everything is read into one snapshot and assigned here on the main thread: a refresh cancelled while
+            // reading cannot leave its (older) metadata behind for the profile a newer refresh publishes.
+            val snapshot = withContext(Dispatchers.IO) {
                 try {
-                    managed = TrafficModes.managedIds()
+                    val managedIds = TrafficModes.managedIds()
                     val selected = ProfileManager.getProfile(DataStore.selectedProxy)
-                    selectedCountry = selected?.let { CountryFromName.resolve(it.outbound.name, it.testCountry).code }
-                    selectedName = selected?.let { ServerCatalog.nameOf(it, unnamed()) }.orEmpty()
-                    choiceCountry = TrafficModes.countryChoice()?.code
-                        ?.takeIf { selected != null && selected.id == managed?.country }
                     val first = if (selected == null) firstProfile() else null
+                    val shown = selected ?: first
                     // The managed auto-selectors of the traffic modes are no server of their own.
                     val hasServers = TrafficModes.hasServers() ||
                         selected != null && !TrafficModes.isManagedSelector(selected.id)
-                    Triple(selected ?: first, first?.id ?: 0L, hasServers)
+                    ProfilesSnapshot(
+                        profile = shown,
+                        fallback = first?.id ?: 0L,
+                        hasServers = hasServers,
+                        managed = managedIds,
+                        country = shown?.let { CountryFromName.resolve(it.outbound.name, it.testCountry).code },
+                        name = shown?.let { ServerCatalog.nameOf(it, unnamed()) }.orEmpty(),
+                        choiceCountry = TrafficModes.countryChoice()?.code
+                            ?.takeIf { selected != null && selected.id == managedIds.country },
+                    )
                 } catch (e: Exception) {
                     Logs.w(e)
-                    Triple(null, 0L, mutableState.value.hasServers ?: false)
+                    null
                 }
             }
-            selectedProfile = profile
-            fallbackProfile = fallback
-            mutableState.update { it.copy(hasServers = hasServers) }
+            if (snapshot == null) {
+                selectedProfile = null
+                fallbackProfile = 0L
+                mutableState.update { it.copy(hasServers = it.hasServers ?: false) }
+                publish()
+                return@launch
+            }
+            selectedProfile = snapshot.profile
+            fallbackProfile = snapshot.fallback
+            managed = snapshot.managed
+            selectedCountry = snapshot.country
+            selectedName = snapshot.name
+            choiceCountry = snapshot.choiceCountry
+            mutableState.update { it.copy(hasServers = snapshot.hasServers) }
             publish()
             // The profiles may have changed in :bg (a subscription update renamed the running member).
             if (autoStatus.active && autoStatus.selectedId > 0L) lookUpPickCountry(autoStatus.selectedId, force = true)
