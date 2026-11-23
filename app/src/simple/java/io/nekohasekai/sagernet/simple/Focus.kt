@@ -1,22 +1,32 @@
 package io.nekohasekai.sagernet.simple
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.FocusState
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -30,6 +40,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DelegatingNode
@@ -39,12 +50,14 @@ import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.focus.FocusEventModifierNode
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -155,7 +168,29 @@ private class FocusRingIndicationNode(
  * The focus ring around a Material component that draws its own ripple (Button, Card, IconButton, Surface): put it
  * on the component's modifier. [outset]: how far outside the bounds the ring runs (negative: inside).
  */
-fun Modifier.focusRing(shape: Shape, outset: Dp = 3.dp): Modifier = this then FocusRingElement(shape, outset)
+fun Modifier.focusRing(shape: Shape, outset: Dp = 3.dp): Modifier =
+    if (outset > 0.dp) ringInView(outset) then FocusRingElement(shape, outset) else this then FocusRingElement(shape, outset)
+
+/**
+ * A ring outside the bounds in view too: the focus brings only the element itself into view, so at the edge of a
+ * scrolling list (above «Починка»'s bottom bar, the last card of the home column) its ring was cut off.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.ringInView(outset: Dp): Modifier = composed {
+    val requester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    bringIntoViewRequester(requester)
+        .onSizeChanged { size = it }
+        .onFocusChanged { state ->
+            if (!state.isFocused) return@onFocusChanged
+            val extent = with(density) { (outset + RING_WIDTH).toPx() }
+            scope.launch {
+                requester.bringIntoView(Rect(-extent, -extent, size.width + extent, size.height + extent))
+            }
+        }
+}
 
 private data class FocusRingElement(val shape: Shape, val outset: Dp) : ModifierNodeElement<FocusRingNode>() {
     override fun create() = FocusRingNode(shape, outset)
