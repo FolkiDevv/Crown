@@ -71,6 +71,8 @@ class RepairActions(
     val again: () -> Unit,
     val close: () -> Unit,
     val open: (RepairAction) -> Unit,
+    /** «Экспортировать отчёт» (batch 9). */
+    val export: () -> Unit = {},
 )
 
 /**
@@ -137,7 +139,9 @@ fun RepairScreen(
                 .fillMaxWidth()
             state.verdict?.let { verdict ->
                 item(key = "verdict") {
-                    VerdictCard(verdict, progress.results, actions.open, width.padding(bottom = 12.dp))
+                    VerdictCard(verdict, progress.results, actions.open, width.padding(bottom = 12.dp)) {
+                        ExportButton(state, actions.export, main = verdict is RepairVerdict.Unknown)
+                    }
                 }
             }
             if (!detail.isNullOrBlank()) {
@@ -161,11 +165,10 @@ fun RepairScreen(
                 }
 
                 state.stopped -> item(key = "stopped") {
-                    Text(
-                        stringResource(R.string.simple_repair_stopped),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = width.padding(vertical = 8.dp),
-                    )
+                    Column(width.padding(vertical = 8.dp)) {
+                        Text(stringResource(R.string.simple_repair_stopped), style = MaterialTheme.typography.titleMedium)
+                        if (state.canExport) ExportButton(state, actions.export, main = false)
+                    }
                 }
             }
             items(RepairPlan.ORDER, key = { it.name }) { step ->
@@ -237,6 +240,8 @@ private fun VerdictCard(
     results: Map<RepairStep, StepResult>,
     open: (RepairAction) -> Unit,
     modifier: Modifier,
+    /** The report export, at the end of the card with any verdict. */
+    export: @Composable () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val (container, content) = when (verdict) {
@@ -286,7 +291,24 @@ private fun VerdictCard(
                 Spacer(Modifier.height(4.dp))
                 Button(onClick = { open(action) }) { Text(stringResource(action.label)) }
             }
+            export()
         }
+    }
+}
+
+/**
+ * «Экспортировать отчёт»: the main button of «Причину определить не удалось» ([main]), a quieter one with the other
+ * outcomes and after a stop (connection-repair "Экспорт отчёта": with any outcome).
+ */
+@Composable
+private fun ExportButton(state: RepairUiState, export: () -> Unit, main: Boolean) {
+    val label = stringResource(if (state.exporting) R.string.simple_repair_exporting else R.string.simple_repair_export)
+    val enabled = state.canExport && !state.exporting
+    if (main) {
+        Spacer(Modifier.height(4.dp))
+        Button(onClick = export, enabled = enabled) { Text(label) }
+    } else {
+        TextButton(onClick = export, enabled = enabled, contentPadding = PaddingValues(horizontal = 0.dp)) { Text(label) }
     }
 }
 

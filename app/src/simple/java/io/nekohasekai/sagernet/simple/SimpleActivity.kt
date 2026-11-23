@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
+import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -83,6 +84,8 @@ import io.nekohasekai.sagernet.simple.modes.ModesViewModel
 import io.nekohasekai.sagernet.simple.repair.RepairAction
 import io.nekohasekai.sagernet.simple.repair.RepairActions
 import io.nekohasekai.sagernet.simple.repair.RepairEnvironment
+import io.nekohasekai.sagernet.simple.repair.RepairExport
+import io.nekohasekai.sagernet.simple.repair.RepairReportExport
 import io.nekohasekai.sagernet.simple.repair.RepairScreen
 import io.nekohasekai.sagernet.simple.repair.RepairViewModel
 import io.nekohasekai.sagernet.simple.servers.ServersActions
@@ -556,6 +559,24 @@ fun SimpleApp(
     }
     val openRepair = remember(repair, repairEnvironment) { { repair.open(repairEnvironment) } }
     val repairState by repair.state.collectAsStateWithLifecycle()
+    // The report archive (batch 9): the share sheet opens only for the user's own press of «Экспортировать отчёт».
+    LaunchedEffect(repair) {
+        repair.exportEvents.collect { event ->
+            val message = when (event) {
+                is RepairExport.Ready -> try {
+                    context.startActivity(
+                        RepairReportExport.shareIntent(context, event.file, context.getString(R.string.simple_repair_export_share))
+                    )
+                    null
+                } catch (_: ActivityNotFoundException) {
+                    R.string.simple_repair_export_no_target
+                }
+
+                RepairExport.Failed -> R.string.simple_repair_export_failed
+            }
+            if (message != null) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
     if (repairState.open) {
         val homeState by home.state.collectAsStateWithLifecycle()
         RepairScreen(
@@ -565,6 +586,7 @@ fun SimpleApp(
                 stop = repair::stop,
                 again = { repair.start(repairEnvironment) },
                 close = repair::close,
+                export = repair::export,
                 open = { target ->
                     if (target == RepairAction.SERVERS) {
                         repair.close()

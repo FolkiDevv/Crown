@@ -379,9 +379,15 @@
     <string name="simple_repair_verdict_fixed">Fixed it ourselves</string>
     <string name="simple_repair_verdict_found">Cause found</string>
     <string name="simple_repair_verdict_unknown">Could not find the cause</string>
-    <string name="simple_repair_unknown_text">Some checks failed, but no known cause explains it. If the problem goes on, contact your VPN service\'s support.</string>
-    <string name="simple_repair_unknown_clean">All checks passed. If the problem goes on, contact your VPN service\'s support.</string>
-    <string name="simple_repair_unknown_partial">The checks that ran found no problem; some checks did not run (see why next to them). If the problem goes on, contact your VPN service\'s support.</string>
+    <string name="simple_repair_unknown_text">Some checks failed, but no known cause explains it. If the problem goes on, export the report and send it to your VPN service\'s support.</string>
+    <string name="simple_repair_unknown_clean">All checks passed. If the problem goes on, export the report and send it to your VPN service\'s support.</string>
+    <string name="simple_repair_unknown_partial">The checks that ran found no problem; some checks did not run (see why next to them). If the problem goes on, export the report and send it to your VPN service\'s support.</string>
+    <!-- Repair: the report export (one archive without passwords, keys, server addresses or subscription links) -->
+    <string name="simple_repair_export">Export report</string>
+    <string name="simple_repair_exporting">Preparing the report…</string>
+    <string name="simple_repair_export_share">Send the report</string>
+    <string name="simple_repair_export_failed">Could not prepare the report</string>
+    <string name="simple_repair_export_no_target">No app to send the report with</string>
     <string name="simple_repair_cause_no_internet">The problem is not the VPN: the device has no internet</string>
     <string name="simple_repair_cause_no_internet_steps">Turn off airplane mode and check Wi‑Fi or mobile data.</string>
     <string name="simple_repair_cause_clock">The time on the device is wrong</string>

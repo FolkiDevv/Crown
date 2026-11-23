@@ -359,9 +359,14 @@
     <string name="simple_repair_verdict_fixed">Исправили сами</string>
     <string name="simple_repair_verdict_found">Причина найдена</string>
     <string name="simple_repair_verdict_unknown">Причину определить не удалось</string>
-    <string name="simple_repair_unknown_text">Часть проверок не прошла, но ни одна известная причина этого не объясняет. Если проблема повторяется, обратитесь в поддержку VPN-сервиса.</string>
-    <string name="simple_repair_unknown_clean">Все проверки прошли успешно. Если проблема повторяется, обратитесь в поддержку VPN-сервиса.</string>
-    <string name="simple_repair_unknown_partial">Выполненные проверки проблем не нашли, часть проверок не выполнена (причина указана рядом с ними). Если проблема повторяется, обратитесь в поддержку VPN-сервиса.</string>
+    <string name="simple_repair_unknown_text">Часть проверок не прошла, но ни одна известная причина этого не объясняет. Если проблема повторяется, экспортируйте отчёт и отправьте его в поддержку VPN-сервиса.</string>
+    <string name="simple_repair_unknown_clean">Все проверки прошли успешно. Если проблема повторяется, экспортируйте отчёт и отправьте его в поддержку VPN-сервиса.</string>
+    <string name="simple_repair_unknown_partial">Выполненные проверки проблем не нашли, часть проверок не выполнена (причина указана рядом с ними). Если проблема повторяется, экспортируйте отчёт и отправьте его в поддержку VPN-сервиса.</string>
+    <string name="simple_repair_export">Экспортировать отчёт</string>
+    <string name="simple_repair_exporting">Готовим отчёт…</string>
+    <string name="simple_repair_export_share">Отправить отчёт</string>
+    <string name="simple_repair_export_failed">Не удалось подготовить отчёт</string>
+    <string name="simple_repair_export_no_target">Нет приложения, чтобы отправить отчёт</string>
     <string name="simple_repair_cause_no_internet">Проблема не в VPN: на устройстве нет интернета</string>
     <string name="simple_repair_cause_no_internet_steps">Выключите режим полёта и проверьте Wi‑Fi или мобильные данные.</string>
     <string name="simple_repair_cause_clock">На устройстве неверное время</string>
