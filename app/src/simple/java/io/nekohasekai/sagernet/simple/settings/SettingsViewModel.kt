@@ -5,12 +5,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.nekohasekai.sagernet.BootReceiver
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.add.SimpleImport
 import io.nekohasekai.sagernet.utils.Theme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,23 +46,17 @@ object SettingsValues {
 
     /**
      * `sub_auto_update` after the switch: sign-encoded minutes, the magnitude kept while off (as the classic
-     * Settings › Subscriptions does). Switching on uses a day — the interval the simple UI gives a subscription, as
-     * the first import does (design.md D3) — unless the user set an interval of their own in the classic settings:
-     * a magnitude below the scheduler's minimum or the untouched classic default (30 min) becomes a day.
+     * Settings › Subscriptions does), so an interval the user set — 30 minutes too — comes back when switched on.
+     * [stored] is null when the setting was never written (the classic default, -30, is then only implied): switching
+     * on uses a day, the interval the simple UI gives a subscription, as the first import does (design.md D3). A
+     * stored magnitude below the scheduler's minimum also becomes a day.
      */
-    fun autoUpdate(subAutoUpdate: Int, on: Boolean): Int {
-        if (on && autoUpdateOn(subAutoUpdate)) return subAutoUpdate
-        val kept = abs(subAutoUpdate).takeIf { it >= SubscriptionScheduler.MIN_INTERVAL_MINUTES }
-        val minutes = when {
-            kept == null -> SimpleImport.DAILY_MINUTES
-            on && kept == CLASSIC_DEFAULT_MINUTES -> SimpleImport.DAILY_MINUTES
-            else -> kept
-        }
+    fun autoUpdate(stored: Int?, on: Boolean): Int {
+        if (stored != null && on && autoUpdateOn(stored)) return stored
+        val minutes = stored?.let { abs(it) }?.takeIf { it >= SubscriptionScheduler.MIN_INTERVAL_MINUTES }
+            ?: SimpleImport.DAILY_MINUTES
         return if (on) minutes else -minutes
     }
-
-    /** The magnitude of the classic default `sub_auto_update` (-30: off, 30 minutes). */
-    private const val CLASSIC_DEFAULT_MINUTES = 30
 
     /** The theme choices: the three plain ones, and the classic battery-saver mode only while it is in effect. */
     fun nightModes(current: NightMode): List<NightMode> =
@@ -93,8 +89,27 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     )
     val state: StateFlow<SettingsUiState> = mutableState.asStateFlow()
 
+    /**
+     * The settings writes, run one at a time in the order they were asked for: a quick on-off of a switch must end
+     * with "off" stored, never with an earlier write landing last.
+     */
+    private val writes = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            for (write in writes) {
+                try {
+                    write()
+                } catch (e: Exception) {
+                    Logs.w(e)
+                }
+            }
+        }
         refresh()
+    }
+
+    private fun write(block: suspend () -> Unit) {
+        writes.trySend(block)
     }
 
     fun refresh() {
@@ -108,7 +123,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setAutostart(on: Boolean) {
         mutableState.update { it.copy(autostart = on) }
-        viewModelScope.launch(Dispatchers.IO) {
+        write {
             DataStore.rememberEnable = on
             // The boot receiver follows the switch at once, as in the classic Settings › General.
             try {
@@ -121,8 +136,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setAutoUpdate(on: Boolean) {
         mutableState.update { it.copy(autoUpdate = on) }
-        viewModelScope.launch(Dispatchers.IO) {
-            DataStore.subAutoUpdate = SettingsValues.autoUpdate(DataStore.subAutoUpdate, on)
+        write {
+            val stored = DataStore.configurationStore.getInt(SettingsRegistry.SUB_AUTO_UPDATE.key)
+            DataStore.subAutoUpdate = SettingsValues.autoUpdate(stored, on)
             SubscriptionScheduler.schedule()
         }
     }
@@ -131,7 +147,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setNightMode(mode: NightMode) {
         if (mode == mutableState.value.nightMode) return
         mutableState.update { it.copy(nightMode = mode) }
-        viewModelScope.launch(Dispatchers.IO) {
+        write {
             DataStore.nightTheme = mode.value
             withContext(Dispatchers.Main) {
                 Theme.currentNightMode = mode.value

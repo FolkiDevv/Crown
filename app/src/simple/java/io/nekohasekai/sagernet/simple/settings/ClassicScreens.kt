@@ -91,6 +91,9 @@ object ClassicVisit {
 
     const val EXTRA_SCREEN = "io.nekohasekai.sagernet.simple.CLASSIC_SCREEN"
 
+    /** In the arguments of the settings host a visit opened; they are saved with it, so a recreation keeps the mark. */
+    private const val ARG_OPENED_BY_VISIT = "io.nekohasekai.sagernet.simple.OPENED_BY_VISIT"
+
     /** Visits in progress, one per MainActivity instance. */
     private val visits = WeakHashMap<Activity, Visit>()
 
@@ -120,7 +123,8 @@ object ClassicVisit {
         visits[main] = visit
         main.application.registerActivityLifecycleCallbacks(visit)
         main.supportFragmentManager.registerFragmentLifecycleCallbacks(visit.settingsWatch, false)
-        if (restored && screen.settingsScreen != null) visit.expectSettings = true
+        // A recreated visit finds the settings host it opened by the mark in its arguments (saved with the fragment),
+        // not by the intent: the drawer may have put another settings host in its place since.
         // onNewIntent of a started instance: no onActivityStarted comes before the screen should show.
         if (!creating) visit.start()
     }
@@ -146,8 +150,15 @@ object ClassicVisit {
          */
         val settingsWatch = object : FragmentManager.FragmentLifecycleCallbacks() {
             override fun onFragmentViewCreated(fm: FragmentManager, f: Fragment, v: View, savedInstanceState: Bundle?) {
-                if (f !is SettingsFragment || !expectSettings) return
-                expectSettings = false
+                if (f !is SettingsFragment) return
+                val args = f.arguments ?: return
+                if (expectSettings) {
+                    expectSettings = false
+                    args.putBoolean(ARG_OPENED_BY_VISIT, true)
+                } else if (!args.getBoolean(ARG_OPENED_BY_VISIT, false)) {
+                    // A settings host the drawer opened during the visit: its back stays the classic one.
+                    return
+                }
                 val children = f.childFragmentManager
                 val leaveSubScreen = object : OnBackPressedCallback(true) {
                     override fun handleOnBackPressed() = closeDrawerOrLeave()

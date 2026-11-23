@@ -28,10 +28,25 @@ class SettingsValuesTest {
     }
 
     @Test
-    fun theClassicDefaultSwitchesOnOnceADay() {
-        // a fresh install keeps -30 (off, 30 min): the simple UI's switch means daily updates, as the first import
-        assertEquals(1440, SettingsValues.autoUpdate(-30, on = true))
-        assertEquals(-30, SettingsValues.autoUpdate(-30, on = false))
+    fun neverStoredSwitchesOnOnceADay() {
+        // a fresh install has no sub_auto_update (the classic default -30 is only implied): daily, as the first import
+        assertEquals(1440, SettingsValues.autoUpdate(null, on = true))
+        assertEquals(-1440, SettingsValues.autoUpdate(null, on = false))
+    }
+
+    @Test
+    fun aStoredThirtyMinutesComesBack() {
+        // 30 minutes set in the classic settings and switched off is the user's interval, not the default
+        assertEquals(-30, SettingsValues.autoUpdate(30, on = false))
+        assertEquals(30, SettingsValues.autoUpdate(-30, on = true))
+    }
+
+    @Test
+    fun quickOnOffEndsWithTheLastChoice() {
+        var stored: Int? = null
+        for (on in listOf(true, false, true, false)) stored = SettingsValues.autoUpdate(stored, on)
+        assertEquals(-1440, stored)
+        assertFalse(SettingsValues.autoUpdateOn(stored!!))
     }
 
     @Test
