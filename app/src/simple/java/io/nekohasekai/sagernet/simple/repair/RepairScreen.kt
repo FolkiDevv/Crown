@@ -470,6 +470,7 @@ private fun explanation(step: RepairStep, result: StepResult): List<String> {
         )
     }
     if (result.status == StepStatus.FIXED) lines += stringResource(result.fix.text)
+    if (result.undoneFix != null) lines += stringResource(R.string.simple_repair_fix_undone)
     return lines
 }
 

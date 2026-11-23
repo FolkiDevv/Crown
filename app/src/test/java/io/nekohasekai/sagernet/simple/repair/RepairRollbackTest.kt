@@ -245,6 +245,12 @@ class RepairRollbackTest {
         assertTrue(published.any { it.undoing })
         assertFalse(published.last().undoing)
         assertEquals(SkipReason.STOPPED, published.last().results.getValue(RepairStep.SITES_VPN).skip)
+        // The check fixed before the stop no longer claims the fix: its own result, and that the fix was undone.
+        val dns = published.last().results.getValue(RepairStep.DNS_DIRECT)
+        assertEquals(StepStatus.FAIL, dns.status)
+        assertNull(dns.fix)
+        assertEquals(FixKind.DIRECT_DNS_WHITELISTED, dns.undoneFix)
+        assertTrue(dns.has(Finding.DNS_NO_ANSWER))
     }
 
     @Test

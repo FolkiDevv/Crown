@@ -181,6 +181,8 @@ data class StepResult(
     val findings: Set<Finding> = emptySet(),
     val skip: SkipReason? = null,
     val fix: FixKind? = null,
+    /** A fix that had helped, put back because the user stopped «Починка»; the status is the one before the fix. */
+    val undoneFix: FixKind? = null,
     val values: Map<String, Long> = emptyMap(),
     val servers: ServersSummary? = null,
     /** Free text for the report only (an error message); never shown as the explanation. */
