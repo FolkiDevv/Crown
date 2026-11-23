@@ -2,7 +2,6 @@ package io.nekohasekai.sagernet.simple.settings
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import io.nekohasekai.sagernet.BootReceiver
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SettingsRegistry
@@ -13,6 +12,7 @@ import io.nekohasekai.sagernet.simple.add.SimpleImport
 import io.nekohasekai.sagernet.utils.Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,15 +95,32 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         refresh()
     }
 
+    /**
+     * [block] in the process-wide queue, then the stored values published once nothing else waits in it: a read
+     * ([refresh]) never overtakes a write asked before it (also one left by the screen a classic visit closed), and
+     * what the switches show at the end is what is stored, not a value read before the last write.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun write(block: suspend () -> Unit) {
-        writes.trySend(block)
+        writes.trySend {
+            block()
+            if (writes.isEmpty) publishStored()
+        }
+    }
+
+    private fun publishStored() {
+        val autostart = DataStore.rememberEnable
+        val autoUpdate = SettingsValues.autoUpdateOn(DataStore.subAutoUpdate)
+        val night = NightMode.of(DataStore.nightTheme)
+        mutableState.update { it.copy(autostart = autostart, autoUpdate = autoUpdate, nightMode = night) }
     }
 
     private companion object {
         /**
-         * The settings writes, run one at a time in the order they were asked for: a quick on-off of a switch must
-         * end with "off" stored, never with an earlier write landing last. Process-wide, so a write asked just
-         * before the screen closes (opening a classic screen closes it) still lands.
+         * The settings reads and writes, run one at a time in the order they were asked for: a quick on-off of a
+         * switch must end with "off" stored, never with an earlier write landing last. Process-wide, so a write
+         * asked just before the screen closes (opening a classic screen closes it) still lands, and the next
+         * screen's read comes after it.
          */
         val writes = Channel<suspend () -> Unit>(Channel.UNLIMITED).also { channel ->
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
@@ -118,14 +135,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun refresh() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val autostart = DataStore.rememberEnable
-            val autoUpdate = SettingsValues.autoUpdateOn(DataStore.subAutoUpdate)
-            val night = NightMode.of(DataStore.nightTheme)
-            mutableState.update { it.copy(autostart = autostart, autoUpdate = autoUpdate, nightMode = night) }
-        }
-    }
+    /** Reads the stored switches again (they may have changed in the classic interface), after any queued write. */
+    fun refresh() = write {}
 
     fun setAutostart(on: Boolean) {
         mutableState.update { it.copy(autostart = on) }
