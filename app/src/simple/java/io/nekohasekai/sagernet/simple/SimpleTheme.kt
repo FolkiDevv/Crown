@@ -85,6 +85,7 @@ private val DarkColors: ColorScheme = darkColorScheme(
     surfaceContainerHighest = Color(0xFF3C3235),
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SimpleTheme(content: @Composable () -> Unit) {
     val systemDark = isSystemInDarkTheme()

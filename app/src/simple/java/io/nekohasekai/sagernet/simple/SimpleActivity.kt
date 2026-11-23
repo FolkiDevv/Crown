@@ -549,7 +549,7 @@ enum class SimpleSection(@StringRes val label: Int, val icon: ImageVector) {
     SETTINGS(R.string.simple_nav_settings, Icons.Filled.Settings),
 }
 
-@OptIn(ExperimentalMaterial3AdaptiveNavigationSuiteApi::class)
+@OptIn(ExperimentalMaterial3AdaptiveNavigationSuiteApi::class, ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 fun SimpleApp(
     home: HomeViewModel,
