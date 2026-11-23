@@ -31,15 +31,15 @@ data class RepairUiState(
     val stopped: Boolean = false,
     /** The report archive is being built (batch 9). */
     val exporting: Boolean = false,
+    /**
+     * A built archive whose share sheet has not come back yet: the screen opens the sheet while it is resumed, again
+     * after each return if Android did not let the sheet open (an activity start from the background is blocked
+     * silently), and clears it when the sheet returns ([RepairViewModel.shareDone]).
+     */
+    val pendingShare: File? = null,
 ) {
     /** The report can be exported: a run ended, with any outcome or stopped (connection-repair "Экспорт отчёта"). */
     val canExport: Boolean get() = !running && progress != null && (verdict != null || stopped)
-}
-
-/** The report archive is ready to share, or could not be built. */
-sealed interface RepairExport {
-    class Ready(val file: File) : RepairExport
-    data object Failed : RepairExport
 }
 
 /**
@@ -92,39 +92,43 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         job?.cancel()
     }
 
-    private val exports = Channel<RepairExport>(Channel.BUFFERED)
+    private val failures = Channel<Unit>(Channel.BUFFERED)
 
-    /** The archives built by [export], for the screen to open the share sheet. */
-    val exportEvents: Flow<RepairExport> = exports.receiveAsFlow()
+    /** An archive could not be built (the screen says so). */
+    val exportFailures: Flow<Unit> = failures.receiveAsFlow()
 
     /**
-     * «Экспортировать отчёт»: builds the archive of the last run off the main thread. Only on the user's press: the
-     * report never leaves the device by itself (connection-repair "Без автоматической отправки").
+     * «Экспортировать отчёт»: builds the archive of the last run off the main thread and makes it [RepairUiState.pendingShare].
+     * Only on the user's press: the report never leaves the device by itself (connection-repair "Без автоматической
+     * отправки").
      */
     fun export() {
         val current = state.value
-        if (!current.canExport || current.exporting) return
+        if (!current.canExport || current.exporting || current.pendingShare != null) return
         val results = current.progress?.results ?: return
         mutableState.update { it.copy(exporting = true) }
         viewModelScope.launch {
-            val event = try {
-                RepairExport.Ready(withContext(Dispatchers.IO) {
-                    RepairReportExport.build(getApplication(), results, current.verdict)
-                })
+            val file = try {
+                withContext(Dispatchers.IO) { RepairReportExport.build(getApplication(), results, current.verdict) }
             } catch (e: CancellationException) {
+                mutableState.update { it.copy(exporting = false) }
                 throw e
             } catch (e: Exception) {
                 Logs.w("simple repair: report export failed", e)
-                RepairExport.Failed
+                null
             } catch (e: LinkageError) {
                 // A pattern the platform's regex engine rejects fails the redactor's class init with an Error.
                 Logs.w("simple repair: report redaction unavailable", e)
-                RepairExport.Failed
-            } finally {
-                mutableState.update { it.copy(exporting = false) }
+                null
             }
-            exports.send(event)
+            mutableState.update { it.copy(exporting = false, pendingShare = file) }
+            if (file == null) failures.send(Unit)
         }
+    }
+
+    /** The share sheet of [RepairUiState.pendingShare] came back (sent or dismissed), or could not be opened at all. */
+    fun shareDone() {
+        mutableState.update { it.copy(pendingShare = null) }
     }
 
     /** Leaving the screen stops a run in progress; the last results stay for the next opening's new run. */

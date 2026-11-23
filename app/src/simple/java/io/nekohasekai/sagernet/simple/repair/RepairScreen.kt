@@ -303,7 +303,7 @@ private fun VerdictCard(
 @Composable
 private fun ExportButton(state: RepairUiState, export: () -> Unit, main: Boolean) {
     val label = stringResource(if (state.exporting) R.string.simple_repair_exporting else R.string.simple_repair_export)
-    val enabled = state.canExport && !state.exporting
+    val enabled = state.canExport && !state.exporting && state.pendingShare == null
     if (main) {
         Spacer(Modifier.height(4.dp))
         Button(onClick = export, enabled = enabled) { Text(label) }

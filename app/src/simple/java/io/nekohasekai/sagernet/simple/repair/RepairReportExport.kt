@@ -91,15 +91,17 @@ object RepairReportExport {
         return Intent.createChooser(send, title)
     }
 
-    /** The cleaning with every server name and subscription link of this device. */
+    /** The cleaning with every server name, secret value and subscription link of this device. */
     private fun redactor(): ReportRedactor {
         val servers = LinkedHashSet<String>()
+        val secrets = LinkedHashSet<String>()
         for (profile in SagerDatabase.proxyDao.getAll()) {
             val server = runCatching { profile.outbound.server }.getOrDefault("")
             servers += ReportRedactor.serverNames(server, profile.outboundJson)
+            secrets += ReportRedactor.secretValues(profile.outboundJson)
         }
         val subscriptions = SagerDatabase.groupDao.allGroups().map { it.url }.filter { it.isNotBlank() }
-        return ReportRedactor(servers, subscriptions)
+        return ReportRedactor(servers, subscriptions, secrets)
     }
 
     /**

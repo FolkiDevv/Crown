@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,7 +86,6 @@ import io.nekohasekai.sagernet.simple.modes.ModesViewModel
 import io.nekohasekai.sagernet.simple.repair.RepairAction
 import io.nekohasekai.sagernet.simple.repair.RepairActions
 import io.nekohasekai.sagernet.simple.repair.RepairEnvironment
-import io.nekohasekai.sagernet.simple.repair.RepairExport
 import io.nekohasekai.sagernet.simple.repair.RepairReportExport
 import io.nekohasekai.sagernet.simple.repair.RepairScreen
 import io.nekohasekai.sagernet.simple.repair.RepairViewModel
@@ -105,6 +105,8 @@ import io.nekohasekai.sagernet.ui.ScannerActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
 import io.nekohasekai.sagernet.utils.BatteryOptimizations
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -561,26 +563,32 @@ fun SimpleApp(
     val openRepair = remember(repair, repairEnvironment) { { repair.open(repairEnvironment) } }
     val repairState by repair.state.collectAsStateWithLifecycle()
     // The report archive (batch 9): the share sheet opens only for the user's own press of «Экспортировать отчёт».
-    // Only while the activity is started: an archive finished in the background waits in the view model's channel and
-    // opens the share sheet when the user comes back (Android may block an activity start from the background).
+    // The archive stays pending until the sheet comes back with a result. It is opened while the activity is resumed,
+    // and again at every resume while still pending: Android silently blocks an activity start from the background (the
+    // user pressed Home as the archive got ready), and no result ever comes for a start that did not happen. A sheet
+    // that did open keeps this activity paused until it returns, and its result comes before the next resume.
+    val shareSheet = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        repair.shareDone()
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(repair, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            repair.exportEvents.collect { event ->
-                val message = when (event) {
-                    is RepairExport.Ready -> try {
-                        context.startActivity(
-                            RepairReportExport.shareIntent(context, event.file, context.getString(R.string.simple_repair_export_share))
-                        )
-                        null
-                    } catch (_: ActivityNotFoundException) {
-                        R.string.simple_repair_export_no_target
-                    }
-
-                    RepairExport.Failed -> R.string.simple_repair_export_failed
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            repair.state.map { it.pendingShare }.distinctUntilChanged().collect { file ->
+                if (file == null) return@collect
+                try {
+                    shareSheet.launch(
+                        RepairReportExport.shareIntent(context, file, context.getString(R.string.simple_repair_export_share))
+                    )
+                } catch (_: ActivityNotFoundException) {
+                    repair.shareDone()
+                    Toast.makeText(context, R.string.simple_repair_export_no_target, Toast.LENGTH_SHORT).show()
                 }
-                if (message != null) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+    LaunchedEffect(repair) {
+        repair.exportFailures.collect {
+            Toast.makeText(context, R.string.simple_repair_export_failed, Toast.LENGTH_SHORT).show()
         }
     }
     if (repairState.open) {

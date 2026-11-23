@@ -170,6 +170,36 @@ class ReportRedactorTest {
         assertFalse(line, line.contains(serviceName))
     }
 
+    /**
+     * Xray's own debug lines name the gRPC service and the server in plain words (device re-check of review #10): the
+     * profile's secret values go anywhere, and a server name after "tcp:" gets its label.
+     */
+    @Test
+    fun xrayDebugLines() {
+        val xrayService = "XrSvc-b9rv-3390"
+        val xrayHost = "xr.b9vx-test.example"
+        val vcn = "vcn.b9vx-test.example"
+        val xrayProfile = """{"type":"vless","server":"$xrayHost","server_port":443,"uuid":"$uuid",
+            "tls":{"enabled":true,"server_name":"$sni","verifyPeerCertByName":"$vcn"},
+            "transport":{"type":"grpc","serviceName":"$xrayService"}}"""
+        assertTrue(ReportRedactor.secretValues(xrayProfile).containsAll(listOf(uuid, xrayService)))
+        assertFalse(ReportRedactor.secretValues(xrayProfile).contains(xrayHost))
+        val r = ReportRedactor(
+            ReportRedactor.serverNames(xrayHost, xrayProfile),
+            emptyList(),
+            ReportRedactor.secretValues(xrayProfile),
+        )
+        val grpc = r.redact("[Debug] transport/internet/grpc: using gRPC tun mode service name: `$xrayService` stream name: `Tun`")
+        assertEquals("[Debug] transport/internet/grpc: using gRPC tun mode service name: `<redacted>` stream name: `Tun`", grpc)
+        val dial = r.redact("[Debug] transport/internet: dialing to tcp:$xrayHost:443")
+        assertEquals("[Debug] transport/internet: dialing to tcp:<server-1>:443", dial)
+        val config = r.redactJson("""{"xray":[{"streamSettings":{"tlsSettings":{"verifyPeerCertByName":"$vcn"},"grpcSettings":{"serviceName":"$xrayService"}}}]}""")
+        for (secret in listOf(xrayService, vcn, "b9vx-test")) assertFalse(config, config.contains(secret, ignoreCase = true))
+        JSONObject(config)
+        // Short config words are no secrets: "/ws" under "path" stays readable elsewhere.
+        assertFalse(ReportRedactor.secretValues("""{"transport":{"path":"/ws"}}""").contains("/ws"))
+    }
+
     /** A key that names a server (DNS hosts) is cleaned like a value; the document stays JSON. */
     @Test
     fun hostKeysAreCleaned() {

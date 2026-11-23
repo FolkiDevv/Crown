@@ -12,9 +12,17 @@ import org.json.JSONObject
  * labels: `<server-1>`, `<host-1>`, `<subscription-1>`, `<subscription-1-host>`. A name gets the same label everywhere
  * in one report, so the specialist still sees which lines speak of the same server.
  *
+ * The secret values of the user's profiles ([secrets]: passwords, UUIDs, keys, gRPC service names… — [secretValues])
+ * become `<redacted>` wherever they are left after the patterns, whatever the text around them: the cores also print
+ * them in their own words (Xray: ``service name: `…` ``).
+ *
  * One instance per report: the labels of the hosts not known in advance are given out as they are met.
  */
-class ReportRedactor(servers: Collection<String>, subscriptions: Collection<String>) {
+class ReportRedactor(
+    servers: Collection<String>,
+    subscriptions: Collection<String>,
+    secrets: Collection<String> = emptyList(),
+) {
 
     private val log = LogRedactor(hideDestinations = true)
 
@@ -28,6 +36,11 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
     /** The known names in free text, the longest first. */
     private val names: Regex?
 
+    /** The known secret values, anywhere, the longest first. */
+    private val secretPattern: Regex? = secrets.map { it.trim() }.filter { it.length >= MIN_SECRET }.distinct()
+        .sortedByDescending { it.length }.takeIf { it.isNotEmpty() }
+        ?.let { known -> Regex(known.joinToString("|") { Regex.escape(it) }, RegexOption.IGNORE_CASE) }
+
     init {
         servers.mapNotNull(::normalize).distinct().forEachIndexed { i, name -> labels[name] = "<server-${i + 1}>" }
         val distinctLinks = subscriptions.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -39,7 +52,8 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
         // "vpn.example.com" (group 1 is dropped).
         names = labels.keys.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
             Regex(
-                "(?<![\\w.:\\-])((?:[a-z0-9_\\-]+\\.)*)(" + known.joinToString("|") { Regex.escape(it) } +
+                // A colon may come before a name ("dialing to tcp:host:443"): only a letter, digit, dot or dash may not.
+                "(?<![\\w.\\-])((?:[a-z0-9_\\-]+\\.)*)(" + known.joinToString("|") { Regex.escape(it) } +
                     ")(?![\\w\\-]|\\.[\\w\\-])",
                 RegexOption.IGNORE_CASE,
             )
@@ -55,6 +69,7 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
             val (_, quote, key, separator, value) = m.groupValues
             "$quote$key$quote$separator" + if (value.startsWith("[")) "[\"<redacted>\"]" else "\"<redacted>\""
         }
+        secretPattern?.let { pattern -> s = pattern.replace(s, "<redacted>") }
         val cleaned = s
         s = URL.replace(cleaned) { m ->
             val host = m.groups[HOST]!!
@@ -114,12 +129,16 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
     companion object {
         private const val HOST = 3
 
+        /** Shorter values ("/ws", "none") are words of the config, not secrets: replacing them would blur the report. */
+        private const val MIN_SECRET = 6
+
         /**
          * Secrets under the keys LogRedactor does not know: Xray writes them in camelCase (`shortId`, `serverName`, the
-         * gRPC `serviceName`), and the mKCP `seed` and the ML-DSA-65 verify key have no "key" / "password" in their names.
+         * gRPC `serviceName`, `verifyPeerCertByName`), and the mKCP `seed` and the ML-DSA-65 verify key have no "key" /
+         * "password" in their names.
          */
         private val SECRET = Regex(
-            """(?i)("?)(short[_\-]?ids?|server[_\-]?names?|service[_\-]?names?|seed|mldsa65[_\-]?verify)\1(\s*[:=]\s*)("(?:[^"\\]|\\.)*"|\[(?:[^\[\]"]|"(?:[^"\\]|\\.)*")*\]|[^\s,;&}\]]+)"""
+            """(?i)("?)(short[_\-]?ids?|server[_\-]?names?|service[_\-]?names?|verify[_\-]?peer[_\-]?cert[_\-]?by[_\-]?names?|seed|mldsa65[_\-]?verify)\1(\s*[:=]\s*)("(?:[^"\\]|\\.)*"|\[(?:[^\[\]"]|"(?:[^"\\]|\\.)*")*\]|[^\s,;&}\]]+)"""
         )
 
         /**
@@ -130,7 +149,7 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
 
         /** The keys whose values the line patterns clean (LogRedactor's SECRET, SERVER and Wi-Fi keys, and [SECRET]). */
         private val SECRET_KEY = Regex(
-            """(?i)[\w\-]*(?:password|passwd|pass|secret|token|key|uuid|auth|psk|short_id)[\w\-]*|server|server_name|sni|host|address|path|service[_\-]?names?|(?:wifi_)?b?ssid|short[_\-]?ids?|server[_\-]?names?|seed|mldsa65[_\-]?verify"""
+            """(?i)[\w\-]*(?:password|passwd|pass|secret|token|key|uuid|auth|psk|short_id)[\w\-]*|server|server_name|sni|host|address|path|service[_\-]?names?|(?:wifi_)?b?ssid|short[_\-]?ids?|server[_\-]?names?|verify[_\-]?peer[_\-]?cert[_\-]?by[_\-]?names?|seed|mldsa65[_\-]?verify"""
         )
 
         fun isSecretKey(key: String): Boolean = SECRET_KEY.matches(key)
@@ -138,8 +157,39 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
         /** The keys of a profile whose values name a server: its address, the TLS name, the transport's host. */
         private val SERVER_KEYS = setOf(
             "server", "server_name", "servername", "sni", "host", "hostname", "address", "peer", "endpoint",
-            "server_address", "serveraddress", "remote", "remote_address", "ip",
+            "server_address", "serveraddress", "remote", "remote_address", "ip", "verifypeercertbyname",
+            "verify_peer_cert_by_name",
         )
+
+        /**
+         * The secret values of one profile ([outboundJson]): every string (also in arrays) at least [MIN_SECRET] long
+         * under a key the patterns treat as secret, or the Xray user `id`, except the server names — those get labels
+         * from [serverNames] instead.
+         */
+        fun secretValues(outboundJson: String): Set<String> {
+            val out = LinkedHashSet<String>()
+            val root = runCatching { JSONObject(outboundJson) }.getOrNull() ?: return out
+            fun addValue(value: Any?) {
+                when (value) {
+                    is String -> value.trim().takeIf { it.length >= MIN_SECRET }?.let(out::add)
+                    is JSONArray -> for (i in 0 until value.length()) addValue(value.opt(i))
+                }
+            }
+            fun walk(node: Any?) {
+                when (node) {
+                    is JSONObject -> node.keys().forEach { key ->
+                        val value = node.opt(key)
+                        val lower = key.lowercase()
+                        if (lower !in SERVER_KEYS && (lower == "id" || isSecretKey(key))) addValue(value)
+                        walk(value)
+                    }
+
+                    is JSONArray -> for (i in 0 until node.length()) walk(node.opt(i))
+                }
+            }
+            walk(root)
+            return out
+        }
 
         /** "Host", "host:port", "[v6]:port", "scheme://host:port/path", "1.2.3.4/32" → the host, lowercase; null if none. */
         fun normalize(raw: String): String? {
