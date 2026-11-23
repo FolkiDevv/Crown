@@ -96,13 +96,14 @@ object ServerList {
 
     /**
      * An auto-selector name filter that matches exactly [names]. The selector compiles its filters case-insensitively
-     * (CASE_INSENSITIVE | UNICODE_CASE) and finds them anywhere in the name; the anchors and the inline `(?-iu:…)`
+     * (CASE_INSENSITIVE | UNICODE_CASE) and finds them anywhere in the name; the anchors `\A`/`\z` and the inline `(?-iu:…)`
      * make it an exact, case-sensitive match, so «Edge» does not admit «edge» or «Edge 2». No name matches nothing.
      */
     fun exactNameFilter(names: List<String>): String {
         val distinct = names.filter { it.isNotEmpty() }.distinct()
         if (distinct.isEmpty()) return "(?!)"
-        return "(?-iu:^(?:" + distinct.joinToString("|") { java.util.regex.Pattern.quote(it) } + ")$)"
+        // \A and \z: the very start and end of the name (`$` would also match before a final line break).
+        return "(?-iu:\\A(?:" + distinct.joinToString("|") { java.util.regex.Pattern.quote(it) } + ")\\z)"
     }
 
     private val byName: Comparator<ServerEntry> =

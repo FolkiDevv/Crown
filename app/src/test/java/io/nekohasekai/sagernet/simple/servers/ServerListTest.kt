@@ -128,6 +128,9 @@ class ServerListTest {
         assertFalse(matches(filter, "EDGE"))
         assertFalse(matches(filter, "Edge 2"))
         assertFalse(matches(filter, "🇩🇪 Berlin (1) copy"))
+        // A name with a line break after it is another name.
+        assertFalse(matches(filter, "Edge\n"))
+        assertFalse(matches(filter, "x\nEdge"))
         assertFalse(matches(ServerList.exactNameFilter(emptyList()), "Edge"))
         // Cyrillic is compared exactly too.
         assertFalse(matches(ServerList.exactNameFilter(listOf("Германия")), "германия"))
