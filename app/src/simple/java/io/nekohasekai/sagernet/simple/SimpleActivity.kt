@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.simple
 
 import android.Manifest
+import android.app.Activity
 import android.app.ActivityManager
 import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
@@ -46,6 +47,7 @@ import androidx.compose.material3.adaptive.navigationsuite.ExperimentalMaterial3
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +60,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -564,13 +567,25 @@ fun SimpleApp(
     val repairState by repair.state.collectAsStateWithLifecycle()
     // The report archive (batch 9): the share sheet opens only for the user's own press of «Экспортировать отчёт».
     // The archive stays pending until the sheet comes back with a result. It is opened while the activity is resumed,
-    // and again at every resume while still pending: Android silently blocks an activity start from the background (the
-    // user pressed Home as the archive got ready), and no result ever comes for a start that did not happen. A sheet
-    // that did open keeps this activity paused until it returns, and its result comes before the next resume.
-    val shareSheet = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        repair.shareDone()
+    // and again at every resume while still pending. Android silently blocks an activity start from the background (the
+    // user pressed Home just as the archive got ready): such a sheet is finished, cancelled, when the user returns, and
+    // RepairViewModel.shareResult tells it from a dismissed one by the app leaving right after the start (ShareGuard).
+    // A sheet that did open keeps this activity paused until it returns, and its result comes before the next resume.
+    val shareSheet = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        repair.shareResult(ok = result.resultCode == Activity.RESULT_OK)
     }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycle = lifecycleOwner.lifecycle
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            // A rotation stops the activity too, with the sheet still up over it: not the user leaving.
+            if (event == Lifecycle.Event.ON_STOP && (context as? Activity)?.isChangingConfigurations != true) {
+                repair.appStopped()
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(repair, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             repair.state.map { it.pendingShare }.distinctUntilChanged().collect { file ->
@@ -579,6 +594,7 @@ fun SimpleApp(
                     shareSheet.launch(
                         RepairReportExport.shareIntent(context, file, context.getString(R.string.simple_repair_export_share))
                     )
+                    repair.shareLaunched()
                 } catch (_: ActivityNotFoundException) {
                     repair.shareDone()
                     Toast.makeText(context, R.string.simple_repair_export_no_target, Toast.LENGTH_SHORT).show()

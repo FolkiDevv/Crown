@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.simple.repair
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.nekohasekai.sagernet.ktx.Logs
@@ -40,6 +41,41 @@ data class RepairUiState(
 ) {
     /** The report can be exported: a run ended, with any outcome or stopped (connection-repair "Экспорт отчёта"). */
     val canExport: Boolean get() = !running && progress != null && (verdict != null || stopped)
+}
+
+/**
+ * Whether a share sheet that came back was ever shown. Android silently blocks an activity start from the background:
+ * when the user presses Home just before the app starts the sheet, the sheet is created hidden and finished, cancelled,
+ * when the user returns. Nothing tells that apart from a sheet the user dismissed except the timing: the app went to the
+ * background within [BLOCKED_WINDOW_MS] of the start — before anyone could have looked at a sheet — so it was not seen.
+ * Pure Kotlin over [now] (elapsed ms), covered by a JVM unit test.
+ */
+class ShareGuard(private val now: () -> Long) {
+    private var launchedAt = -1L
+    private var stoppedAt = -1L
+
+    fun launched() {
+        launchedAt = now()
+        stoppedAt = -1L
+    }
+
+    /** The app went to the background (a rotation is not one). */
+    fun stopped() {
+        if (launchedAt >= 0 && stoppedAt < 0) stoppedAt = now()
+    }
+
+    /** true: the sheet was there and is done with; false: it never showed, offer the archive again. */
+    fun cameBack(ok: Boolean): Boolean {
+        val unseen = !ok && launchedAt >= 0 && stoppedAt >= 0 && stoppedAt - launchedAt <= BLOCKED_WINDOW_MS
+        launchedAt = -1L
+        stoppedAt = -1L
+        return !unseen
+    }
+
+    companion object {
+        /** Seen on the emulator: the app stops 0.3–0.5 s after a blocked start; nobody picks a target that fast. */
+        const val BLOCKED_WINDOW_MS = 1_000L
+    }
 }
 
 /**
@@ -123,6 +159,29 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
             }
             mutableState.update { it.copy(exporting = false, pendingShare = file) }
             if (file == null) failures.send(Unit)
+        }
+    }
+
+    private val shareGuard = ShareGuard(SystemClock::elapsedRealtime)
+
+    /** The screen started the share sheet of [RepairUiState.pendingShare]. */
+    fun shareLaunched() = shareGuard.launched()
+
+    /** The activity went to the background (not for a rotation). */
+    fun appStopped() {
+        if (state.value.pendingShare != null) shareGuard.stopped()
+    }
+
+    /**
+     * The share sheet came back with [ok] (a target was chosen) or not. A sheet Android did not let open — the user left
+     * the app as it started — comes back cancelled too, when the user returns: then the archive stays pending and the
+     * screen offers it again ([ShareGuard]).
+     */
+    fun shareResult(ok: Boolean) {
+        if (shareGuard.cameBack(ok)) {
+            shareDone()
+        } else {
+            Logs.i("simple repair: the share sheet did not open (the app was left as it started), offered again")
         }
     }
 
