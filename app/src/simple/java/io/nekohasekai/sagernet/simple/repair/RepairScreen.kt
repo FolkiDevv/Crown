@@ -59,6 +59,7 @@ import io.nekohasekai.sagernet.simple.FocusShapes
 import io.nekohasekai.sagernet.simple.ServiceDetail
 import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
+import io.nekohasekai.sagernet.simple.unavailable
 import kotlin.math.abs
 
 /** Where a button of «Починка» leads: a system settings screen (only the user changes Android's settings) or «Серверы». */
@@ -336,16 +337,16 @@ private fun VerdictCard(
 @Composable
 private fun ExportButton(state: RepairUiState, export: () -> Unit, main: Boolean) {
     val label = stringResource(if (state.exporting) R.string.simple_repair_exporting else R.string.simple_repair_export)
+    // Not disabled while the archive is made: a remote's focus would leave the button (Focus.kt unavailable).
     val enabled = state.canExport && !state.exporting && state.pendingShare == null
     if (main) {
         Spacer(Modifier.height(4.dp))
-        Button(onClick = export, enabled = enabled, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(label) }
+        Button(onClick = { if (enabled) export() }, modifier = Modifier.focusRing(FocusShapes.Pill).unavailable(!enabled)) { Text(label) }
     } else {
         TextButton(
-            onClick = export,
-            enabled = enabled,
+            onClick = { if (enabled) export() },
             contentPadding = PaddingValues(horizontal = 0.dp),
-            modifier = Modifier.focusRing(FocusShapes.Pill),
+            modifier = Modifier.focusRing(FocusShapes.Pill).unavailable(!enabled),
         ) { Text(label) }
     }
 }

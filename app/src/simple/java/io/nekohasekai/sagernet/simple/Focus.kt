@@ -42,6 +42,8 @@ import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -55,6 +57,9 @@ import kotlinx.coroutines.launch
 
 /** The colour of the focus ring (SimpleTheme: the primary colour). */
 val LocalFocusRingColor = staticCompositionLocalOf { Color.Unspecified }
+
+/** Frames [rememberFocusWhenShown] waits at most for its element to be laid out. */
+private const val FOCUS_TRIES = 5
 
 /** The ring's width. */
 private val RING_WIDTH = 3.dp
@@ -187,6 +192,13 @@ private class FocusRingNode(var shape: Shape, var outset: Dp) :
 }
 
 /**
+ * A control that is unavailable for a while (busy) without losing a remote's focus: Compose takes the focus from a
+ * disabled clickable, and it then drops to the navigation. Such a control stays enabled for the focus, ignores presses
+ * itself while [unavailable] and tells accessibility services it is disabled.
+ */
+fun Modifier.unavailable(unavailable: Boolean): Modifier = if (unavailable) semantics { disabled() } else this
+
+/**
  * A text field a remote can leave: the field keeps the arrow keys for its cursor, so on a D-pad nothing below it
  * (the dialog's buttons) could take the focus. Up and down move the focus on when there is somewhere to go.
  */
@@ -220,9 +232,12 @@ fun rememberFocusWhenShown(key: Any? = Unit, enabled: Boolean = true): FocusRequ
     val inputMode = LocalInputModeManager.current
     LaunchedEffect(key, enabled) {
         if (enabled && inputMode.inputMode == InputMode.Keyboard) {
-            // After the first layout, when the element can take the focus.
-            withFrameNanos { }
-            runCatching { requester.requestFocus() }
+            // After a layout has placed the element: the first frame after a recreated activity (a theme change)
+            // comes before its first layout, and an item of a lazy list exists only after the list's measure.
+            repeat(FOCUS_TRIES) {
+                withFrameNanos { }
+                if (runCatching { requester.requestFocus() }.isSuccess) return@LaunchedEffect
+            }
         }
     }
     return requester

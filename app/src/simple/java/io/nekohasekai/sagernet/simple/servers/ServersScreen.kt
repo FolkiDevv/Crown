@@ -34,7 +34,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,8 +52,10 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -66,6 +70,7 @@ import io.nekohasekai.sagernet.simple.FocusShapes
 import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
 import io.nekohasekai.sagernet.simple.rememberFocusWhenShown
+import io.nekohasekai.sagernet.simple.unavailable
 import io.nekohasekai.sagernet.simple.trafficSize
 import kotlinx.coroutines.delay
 import java.text.DateFormat
@@ -100,12 +105,23 @@ fun ServersScreen(
     when {
         sections == null -> Box(modifier.fillMaxSize())
         sections.isEmpty && state.cards.isEmpty() -> EmptyServers(actions.add, modifier, focus)
-        else -> PullToRefreshBox(
-            isRefreshing = state.refreshing,
-            onRefresh = actions.updateAll,
-            modifier = modifier.fillMaxSize(),
-        ) {
-            ServerListView(state, sections, actions, focus)
+        else -> {
+            // Pull to refresh only by touch: a remote's focus scrolling the list to its top would leave the indicator
+            // half pulled (the subscription cards have their own update buttons).
+            val touch = LocalInputModeManager.current.inputMode == InputMode.Touch
+            val pull = rememberPullToRefreshState()
+            Box(
+                modifier
+                    .fillMaxSize()
+                    .pullToRefresh(isRefreshing = state.refreshing, state = pull, enabled = touch, onRefresh = actions.updateAll),
+            ) {
+                ServerListView(state, sections, actions, focus)
+                PullToRefreshDefaults.Indicator(
+                    state = pull,
+                    isRefreshing = state.refreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+            }
         }
     }
 }
@@ -264,7 +280,9 @@ private fun ChoiceRow(
     val rowModifier = modifier
         .fillMaxWidth()
         .then(if (extra != null) Modifier.focusRequester(rowFocus).focusProperties { right = extraFocus } else Modifier)
-        .selectable(selected = selected, enabled = enabled, role = if (selectable) Role.RadioButton else Role.Button, onClick = onClick)
+        // Busy rows keep a remote's focus (Focus.kt unavailable).
+        .unavailable(!enabled)
+        .selectable(selected = selected, role = if (selectable) Role.RadioButton else Role.Button) { if (enabled) onClick() }
         .padding(start = if (indent) 24.dp else 0.dp)
     ListItem(
         modifier = rowModifier,
