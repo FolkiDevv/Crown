@@ -107,6 +107,32 @@ class ReportRedactorTest {
         assertEquals("<redacted>", json.getJSONObject("kcpSettings").getString("seed"))
     }
 
+    /** The final configuration: one JSON document that still parses, with nothing of the servers in it. */
+    @Test
+    fun configStaysValidJson() {
+        val config = """
+            {"sing_box":{"log":{"level":"info"},
+              "inbounds":[{"type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],"auto_route":true,"mtu":9000}],
+              "outbounds":[{"type":"vless","tag":"proxy","server":"$serverDomain","server_port":443,"uuid":"$uuid",
+                "tls":{"enabled":true,"server_name":"$sni","reality":{"enabled":true,"public_key":"$publicKey","short_id":"$shortId"}},
+                "transport":{"type":"ws","path":"/ws","headers":{"Host":"$sni"}}},
+               {"type":"shadowsocks","tag":"ss","server":"$privateServerIp","server_port":8388,"password":"$password"},
+               {"type":"hysteria2","tag":"hy","server":"$serverIp","up_mbps":100,"auth_timeout":30,"obfs":{"type":"salamander","password":"$password"}}],
+              "route":{"rule_set":[{"tag":"sub","type":"remote","url":"$subscription"}],"rules":[{"wifi_ssid":["Home WiFi"],"outbound":"direct"}]},
+              "dns":{"servers":[{"tag":"dns-remote","address":"https://$serverDomain/dns-query"}]}},
+             "xray":[{"outbounds":[{"protocol":"vless","settings":{"vnext":[{"address":"$serverDomain","port":443,"users":[{"id":"$uuid"}]}]},
+               "streamSettings":{"realitySettings":{"serverName":"$sni","publicKey":"$publicKey","shortId":"$shortId","spiderX":"/"},"kcpSettings":{"seed":"$seed"}}}]}]}
+        """.trimIndent().replace("\n", "")
+        val out = redactor().redactJson(config)
+        for (secret in secrets + "Home WiFi") assertFalse("left: $secret in\n$out", out.contains(secret, ignoreCase = true))
+        val json = JSONObject(out)
+        val tun = json.getJSONObject("sing_box").getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(9000, tun.getInt("mtu"))
+        assertEquals("tun", tun.getString("type"))
+        assertEquals(443, json.getJSONObject("sing_box").getJSONArray("outbounds").getJSONObject(0).getInt("server_port"))
+        assertTrue(out.lines().size > 10)
+    }
+
     @Test
     fun escapedJsonIsCleanedAndStillParses() {
         val line = redactor().redact(report[16])

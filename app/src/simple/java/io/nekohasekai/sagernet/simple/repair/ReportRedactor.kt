@@ -67,6 +67,29 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
     /** Every line of [text]. */
     fun redactText(text: String): String = text.lineSequence().joinToString("\n") { redact(it) }
 
+    /**
+     * A JSON config (the final configuration): first the values under every key the line patterns would clean become
+     * the string "<redacted>" in the parsed tree — the log export's patterns, written for log lines, cut a JSON array
+     * of addresses in the middle and leave a number or `true` unquoted, which is no longer JSON — then the whole text
+     * goes through [redact] on one line and is pretty-printed if it still parses. Not JSON: [redactText].
+     */
+    fun redactJson(text: String): String {
+        val tree = runCatching { JSONObject(text) }.getOrNull() ?: return redactText(text)
+        blankSecrets(tree)
+        val line = redact(tree.toString())
+        return runCatching { JSONObject(line).toString(2).replace("\\/", "/") }.getOrDefault(line)
+    }
+
+    private fun blankSecrets(node: Any?) {
+        when (node) {
+            is JSONObject -> node.keys().asSequence().toList().forEach { key ->
+                if (isSecretKey(key)) node.put(key, "<redacted>") else blankSecrets(node.opt(key))
+            }
+
+            is JSONArray -> for (i in 0 until node.length()) blankSecrets(node.opt(i))
+        }
+    }
+
     private fun labelFor(host: String): String {
         val name = normalize(host) ?: return host
         if (isLoopback(name)) return host
@@ -89,6 +112,13 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
          * the label's angle brackets. A host is a bracketed IPv6 address or a name / IPv4 address up to the port.
          */
         private val URL = Regex("""\b([a-zA-Z][a-zA-Z0-9+.\-]*)://([^\s/"']*@)?(\[[0-9A-Fa-f:.%]+\]|[^\s/?#"'<>:@\[\]\\]+)""")
+
+        /** The keys whose values the line patterns clean (LogRedactor's SECRET, SERVER and Wi-Fi keys, and [SECRET]). */
+        private val SECRET_KEY = Regex(
+            """(?i)[\w\-]*(?:password|passwd|pass|secret|token|key|uuid|auth|psk|short_id)[\w\-]*|server|server_name|sni|host|address|path|service_name|(?:wifi_)?b?ssid|short[_\-]?ids?|server[_\-]?names?|seed|mldsa65[_\-]?verify"""
+        )
+
+        fun isSecretKey(key: String): Boolean = SECRET_KEY.matches(key)
 
         /** The keys of a profile whose values name a server: its address, the TLS name, the transport's host. */
         private val SERVER_KEYS = setOf(

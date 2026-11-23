@@ -15,6 +15,7 @@ import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import moe.matsuri.nb4a.utils.CoreLog
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -64,8 +65,12 @@ object RepairReportExport {
         ZipOutputStream(file.outputStream().buffered()).use { zip ->
             for (name in ENTRIES) {
                 zip.putNextEntry(ZipEntry(name))
-                // config.json is cleaned while it is built (it is pretty-printed after the cleaning).
-                val text = files.getValue(name).let { if (name == "config.json") it else redactor.redactText(it) }
+                // config.json is cleaned while it is built; the JSON files stay valid JSON (ReportRedactor.redactJson).
+                val text = when (name) {
+                    "config.json" -> files.getValue(name)
+                    "report.json" -> redactor.redactJson(files.getValue(name))
+                    else -> redactor.redactText(files.getValue(name))
+                }
                 zip.write(text.toByteArray())
                 zip.closeEntry()
             }
@@ -99,21 +104,18 @@ object RepairReportExport {
 
     /**
      * The final configuration of the selected server, as the classic "Export configuration" builds it: sing-box and
-     * any Xray configs. Each is cleaned on one line (the log export's patterns take whole JSON arrays and objects
-     * there) and pretty-printed after, if it still parses.
+     * any Xray configs, in one JSON document `{"sing_box": …, "xray": […]}`, cleaned by [ReportRedactor.redactJson].
      */
     private fun config(redactor: ReportRedactor): String = try {
         val profile = ProfileManager.getProfile(DataStore.selectedProxy) ?: return "{\"error\": \"no server selected\"}\n"
         val generated = CoreConfigs.buildMain(profile)
-        val parts = buildList {
-            add(generated.coreConfig)
+        val xray = buildList {
             generated.xrayConfig?.takeIf { it.isNotBlank() }?.let(::add)
             addAll(generated.xrayFullConfigs.filter { it.isNotBlank() })
         }
-        parts.joinToString("\n\n") { part ->
-            val line = redactor.redact(runCatching { JSONObject(part).toString() }.getOrDefault(part.replace('\n', ' ')))
-            runCatching { JSONObject(line).toString(2).replace("\\/", "/") }.getOrDefault(line)
-        } + "\n"
+        val root = JSONObject().put("sing_box", JSONObject(generated.coreConfig))
+        if (xray.isNotEmpty()) root.put("xray", JSONArray(xray.map { JSONObject(it) }))
+        redactor.redactJson(root.toString()) + "\n"
     } catch (e: Exception) {
         // The message names no server: the generator's errors are about settings; it is cleaned all the same.
         redactor.redact("{\"error\": ${JSONObject.quote("${e.javaClass.simpleName}: ${e.message}")}}") + "\n"
