@@ -148,6 +148,7 @@
     <string name="simple_summary_enabled">Мы включили:</string>
     <string name="simple_summary_enabled_auto_server">«Авто»: лучший сервер выбирается сам</string>
     <string name="simple_summary_enabled_daily">Ежедневное обновление подписки</string>
+    <string name="simple_summary_enabled_hourly">Обновление подписки каждый час</string>
     <plurals name="simple_summary_enabled_every_hours">
         <item quantity="one">Обновление подписки каждый %d час</item>
         <item quantity="few">Обновление подписки каждые %d часа</item>

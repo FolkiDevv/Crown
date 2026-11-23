@@ -362,8 +362,12 @@ private fun SummaryDialog(summary: ImportSummary, canConnect: Boolean, onConnect
                             Text(
                                 when (item) {
                                     Enabled.AUTO_SERVER -> stringResource(R.string.simple_summary_enabled_auto_server)
+                                    // One hour and a day get their own words («каждый час», not «каждый 1 час»);
+                                    // the plural's «one» also covers 21, 31… hours, so it cannot drop the number.
                                     Enabled.AUTO_UPDATE -> if (summary.updateHours == 24) {
                                         stringResource(R.string.simple_summary_enabled_daily)
+                                    } else if (summary.updateHours == 1) {
+                                        stringResource(R.string.simple_summary_enabled_hourly)
                                     } else {
                                         pluralStringResource(
                                             R.plurals.simple_summary_enabled_every_hours,
