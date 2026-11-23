@@ -45,6 +45,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -223,8 +225,8 @@ private fun CountryRowView(
         selectable = code != null,
         enabled = !state.busy || code == null,
         onClick = if (code != null) ({ actions.chooseCountry(row) }) else onToggle,
-        extra = {
-            IconButton(onClick = onToggle, modifier = Modifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
+        extra = { extraModifier ->
+            IconButton(onClick = onToggle, modifier = extraModifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
                 Icon(
                     if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                     contentDescription = stringResource(
@@ -236,7 +238,11 @@ private fun CountryRowView(
     )
 }
 
-/** One row of the list: a radio choice (or, unselectable, a plain row), with an optional extra control at the end. */
+/**
+ * One row of the list: a radio choice (or, unselectable, a plain row), with an optional extra control at the end; the
+ * extra control takes the modifier it is given, which lets a remote move to it with right and back with left (it
+ * lies inside the row, where the D-pad's search for the next element on the right does not look).
+ */
 @Composable
 private fun ChoiceRow(
     leading: @Composable () -> Unit,
@@ -249,12 +255,15 @@ private fun ChoiceRow(
     trailingError: Boolean = false,
     selectable: Boolean = true,
     indent: Boolean = false,
-    extra: (@Composable () -> Unit)? = null,
+    extra: (@Composable (Modifier) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val rowFocus = remember { FocusRequester() }
+    val extraFocus = remember { FocusRequester() }
     // The ring of a remote's focus comes with the indication of SimpleTheme (Focus.kt).
     val rowModifier = modifier
         .fillMaxWidth()
+        .then(if (extra != null) Modifier.focusRequester(rowFocus).focusProperties { right = extraFocus } else Modifier)
         .selectable(selected = selected, enabled = enabled, role = if (selectable) Role.RadioButton else Role.Button, onClick = onClick)
         .padding(start = if (indent) 24.dp else 0.dp)
     ListItem(
@@ -276,7 +285,7 @@ private fun ChoiceRow(
                         color = if (trailingError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                extra?.invoke()
+                extra?.invoke(Modifier.focusRequester(extraFocus).focusProperties { left = rowFocus })
                 if (selectable) {
                     if (trailing != null && extra == null) Spacer(Modifier.width(8.dp))
                     RadioButton(selected = selected, onClick = null, enabled = enabled)
