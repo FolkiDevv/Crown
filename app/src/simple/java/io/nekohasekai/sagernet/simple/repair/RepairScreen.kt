@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.simple.repair
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.simple.FocusShapes
+import io.nekohasekai.sagernet.simple.ServiceDetail
+import io.nekohasekai.sagernet.simple.focusRing
+import io.nekohasekai.sagernet.simple.focusWhenShown
 import kotlin.math.abs
 
 /** Where a button of «Починка» leads: a system settings screen (only the user changes Android's settings) or «Серверы». */
@@ -98,7 +103,13 @@ fun RepairScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.simple_repair_title)) },
                 navigationIcon = {
-                    IconButton(onClick = actions.close) {
+                    // A remote starts here: the way back, and a step down to the verdict's buttons.
+                    IconButton(
+                        onClick = actions.close,
+                        modifier = Modifier
+                            .focusRing(FocusShapes.Pill, outset = (-3).dp)
+                            .focusWhenShown(),
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.simple_repair_back))
                     }
                 },
@@ -119,12 +130,12 @@ fun RepairScreen(
                         OutlinedButton(
                             onClick = actions.stop,
                             enabled = !state.stopping,
-                            modifier = Modifier.widthIn(min = 200.dp),
+                            modifier = Modifier.widthIn(min = 200.dp).focusRing(FocusShapes.Pill),
                         ) {
                             Text(stringResource(if (state.stopping) R.string.simple_repair_stopping else R.string.simple_repair_stop))
                         }
                     } else {
-                        Button(onClick = actions.again, modifier = Modifier.widthIn(min = 200.dp)) {
+                        Button(onClick = actions.again, modifier = Modifier.widthIn(min = 200.dp).focusRing(FocusShapes.Pill)) {
                             Text(stringResource(R.string.simple_repair_again))
                         }
                     }
@@ -152,12 +163,7 @@ fun RepairScreen(
             }
             if (!detail.isNullOrBlank()) {
                 item(key = "detail") {
-                    Text(
-                        stringResource(R.string.simple_repair_details, detail.take(600)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = width.padding(vertical = 4.dp),
-                    )
+                    ServiceDetail(detail, width.padding(vertical = 4.dp))
                 }
             }
             when {
@@ -195,7 +201,14 @@ fun RepairScreen(
 @Composable
 private fun StepRow(step: RepairStep, state: StepState, open: (RepairAction) -> Unit, modifier: Modifier) {
     val result = (state as? StepState.Done)?.result
-    Row(modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.Top) {
+    // Focusable for a remote: the results are text, and only a focus can scroll the list down to the last check.
+    Row(
+        modifier
+            .focusRing(FocusShapes.Card, outset = 0.dp)
+            .focusable()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
         Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { StatusIcon(state) }
         Column(
             Modifier
@@ -212,7 +225,11 @@ private fun StepRow(step: RepairStep, state: StepState, open: (RepairAction) -> 
                     )
                 }
                 for (action in stepActions(step, result)) {
-                    TextButton(onClick = { open(action) }, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                    TextButton(
+                        onClick = { open(action) },
+                        contentPadding = PaddingValues(horizontal = 0.dp),
+                        modifier = Modifier.focusRing(FocusShapes.Pill),
+                    ) {
                         Text(stringResource(action.label))
                     }
                 }
@@ -304,7 +321,7 @@ private fun VerdictCard(
             val action = (verdict as? RepairVerdict.CauseFound)?.cause?.action(results)
             if (action != null) {
                 Spacer(Modifier.height(4.dp))
-                Button(onClick = { open(action) }) { Text(stringResource(action.label)) }
+                Button(onClick = { open(action) }, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(action.label)) }
             }
             export()
         }
@@ -321,9 +338,14 @@ private fun ExportButton(state: RepairUiState, export: () -> Unit, main: Boolean
     val enabled = state.canExport && !state.exporting && state.pendingShare == null
     if (main) {
         Spacer(Modifier.height(4.dp))
-        Button(onClick = export, enabled = enabled) { Text(label) }
+        Button(onClick = export, enabled = enabled, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(label) }
     } else {
-        TextButton(onClick = export, enabled = enabled, contentPadding = PaddingValues(horizontal = 0.dp)) { Text(label) }
+        TextButton(
+            onClick = export,
+            enabled = enabled,
+            contentPadding = PaddingValues(horizontal = 0.dp),
+            modifier = Modifier.focusRing(FocusShapes.Pill),
+        ) { Text(label) }
     }
 }
 

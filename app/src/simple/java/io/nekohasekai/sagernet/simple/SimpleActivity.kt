@@ -43,7 +43,13 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.layout.AnimatedPane
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
+import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
+import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
+import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
 import androidx.compose.material3.adaptive.navigationsuite.ExperimentalMaterial3AdaptiveNavigationSuiteApi
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
@@ -55,8 +61,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
@@ -66,6 +74,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.window.core.layout.WindowHeightSizeClass
 import androidx.window.core.layout.WindowWidthSizeClass
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
@@ -124,6 +133,8 @@ import kotlinx.coroutines.withContext
  * Batch 10: the whole settings section with the advanced mode (classic screens through [ClassicVisit]) and the
  * once-only hint after an upgrade on the way back to the classic interface.
  * Batch 7: «Починка» (RepairScreen) over the sections, from the settings' top button and the home banner.
+ * Batch 11: home and «Серверы» side by side (ListDetailPaneScaffold) on a wide window that is not low, and the D-pad
+ * (Android TV): a focus ring on every control and the focus on the main control of a screen as it opens (Focus.kt).
  */
 class SimpleActivity : AppCompatActivity() {
 
@@ -685,6 +696,11 @@ fun SimpleApp(
     val layoutType = if (adaptiveInfo.windowPosture.isTabletop ||
         adaptiveInfo.windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.COMPACT
     ) NavigationSuiteType.NavigationBar else NavigationSuiteType.NavigationRail
+    // Home and the server list side by side (simple-ui "Планшет или развёрнутый складной телефон") on a wide window
+    // that is not low: a tablet, an unfolded foldable, a TV. A phone in landscape is as wide but low; it keeps one
+    // section at a time with the button beside the cards, as the two panes would leave the button no room.
+    val twoPane = adaptiveInfo.windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED &&
+        adaptiveInfo.windowSizeClass.windowHeightSizeClass != WindowHeightSizeClass.COMPACT
     NavigationSuiteScaffold(
         layoutType = layoutType,
         navigationSuiteItems = {
@@ -694,6 +710,7 @@ fun SimpleApp(
                     onClick = { section = item },
                     icon = { Icon(item.icon, contentDescription = null) },
                     label = { Text(stringResource(item.label)) },
+                    modifier = Modifier.focusRing(FocusShapes.NavItem, outset = (-3).dp),
                 )
             }
         },
@@ -706,8 +723,8 @@ fun SimpleApp(
             Modifier
         }
         Box(contentInsets) {
-            when (section) {
-                SimpleSection.HOME -> HomeSection(
+            val homeSection = @Composable { focus: Boolean, showSnackbar: Boolean ->
+                HomeSection(
                     home,
                     modes,
                     settings,
@@ -720,10 +737,25 @@ fun SimpleApp(
                         openRepair = openRepair,
                     ),
                     snackbar,
+                    focus = focus,
+                    showSnackbar = showSnackbar,
+                )
+            }
+            val serversSection = @Composable { focus: Boolean, showSnackbar: Boolean ->
+                ServersSection(servers, onAdd = { addSheet = true }, snackbar, focus = focus, showSnackbar = showSnackbar)
+            }
+            when {
+                // The section chosen gets the focus of a remote; the other pane keeps its place.
+                twoPane && section != SimpleSection.SETTINGS -> HomeAndServers(
+                    directive = calculatePaneScaffoldDirective(adaptiveInfo),
+                    home = { homeSection(section == SimpleSection.HOME, false) },
+                    servers = { serversSection(section == SimpleSection.SERVERS, false) },
+                    snackbar = snackbar,
                 )
 
-                SimpleSection.SERVERS -> ServersSection(servers, onAdd = { addSheet = true }, snackbar = snackbar)
-                SimpleSection.SETTINGS -> SettingsSection(
+                section == SimpleSection.HOME -> homeSection(true, true)
+                section == SimpleSection.SERVERS -> serversSection(true, true)
+                else -> SettingsSection(
                     modes,
                     settings,
                     openAppList,
@@ -777,6 +809,10 @@ private fun HomeSection(
     openSettings: () -> Unit,
     actions: HomeActions,
     snackbar: SnackbarHostState,
+    /** A remote starts on the connect button as the section opens. */
+    focus: Boolean,
+    /** The section shows the snackbar itself (not when it shares the window with the server list). */
+    showSnackbar: Boolean,
 ) {
     val state by home.state.collectAsStateWithLifecycle()
     val modesState by modes.state.collectAsStateWithLifecycle()
@@ -792,7 +828,7 @@ private fun HomeSection(
     LaunchedEffect(state.server?.name, state.server?.localizedName) { modes.refresh() }
     // A mode applied (also from Settings while the VPN is off) may have switched the managed auto-selector.
     LaunchedEffect(modesState.applied) { if (modesState.applied > 0) home.refreshServer() }
-    SectionScaffold(SimpleSection.HOME, snackbar) { modifier ->
+    SectionScaffold(SimpleSection.HOME, snackbar.takeIf { showSnackbar }) { modifier ->
         Column(modifier) {
             // After an upgrade, once: the classic interface is in the settings (simple-ui "Подсказка после обновления").
             if (settingsState.classicHint) {
@@ -811,6 +847,7 @@ private fun HomeSection(
                 onToggle = { home.toggle(actions.requestStart) },
                 onDismissProblem = home::dismissProblem,
                 modifier = Modifier.weight(1f),
+                focus = focus,
             )
         }
     }
@@ -835,7 +872,13 @@ private fun SectionScaffold(
 }
 
 @Composable
-private fun ServersSection(servers: ServersViewModel, onAdd: () -> Unit, snackbar: SnackbarHostState) {
+private fun ServersSection(
+    servers: ServersViewModel,
+    onAdd: () -> Unit,
+    snackbar: SnackbarHostState,
+    focus: Boolean,
+    showSnackbar: Boolean,
+) {
     val state by servers.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(servers) {
@@ -849,9 +892,9 @@ private fun ServersSection(servers: ServersViewModel, onAdd: () -> Unit, snackba
     LaunchedEffect(servers) { servers.opened() }
     SectionScaffold(
         SimpleSection.SERVERS,
-        snackbar,
+        snackbar.takeIf { showSnackbar },
         actions = {
-            IconButton(onClick = onAdd) {
+            IconButton(onClick = onAdd, modifier = Modifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
                 Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.simple_add_server))
             }
         },
@@ -867,7 +910,32 @@ private fun ServersSection(servers: ServersViewModel, onAdd: () -> Unit, snackba
                 add = onAdd,
             ),
             modifier = modifier,
+            focus = focus,
         )
+    }
+}
+
+/**
+ * The wide layout (simple-ui "Адаптивная навигация и раскладка"): home as the list pane and «Серверы» as the detail
+ * pane of ListDetailPaneScaffold, both shown; one snackbar for the two, over the whole width.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+private fun HomeAndServers(
+    directive: PaneScaffoldDirective,
+    home: @Composable () -> Unit,
+    servers: @Composable () -> Unit,
+    snackbar: SnackbarHostState,
+) {
+    val navigator = rememberListDetailPaneScaffoldNavigator<Any>(scaffoldDirective = directive)
+    Box {
+        ListDetailPaneScaffold(
+            directive = navigator.scaffoldDirective,
+            value = navigator.scaffoldValue,
+            listPane = { AnimatedPane { home() } },
+            detailPane = { AnimatedPane { servers() } },
+        )
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
 }
 

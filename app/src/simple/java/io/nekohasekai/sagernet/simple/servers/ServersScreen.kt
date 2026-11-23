@@ -45,6 +45,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalConfiguration
@@ -59,6 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.simple.FocusShapes
+import io.nekohasekai.sagernet.simple.focusRing
+import io.nekohasekai.sagernet.simple.focusWhenShown
+import io.nekohasekai.sagernet.simple.rememberFocusWhenShown
 import io.nekohasekai.sagernet.simple.trafficSize
 import kotlinx.coroutines.delay
 import java.text.DateFormat
@@ -82,23 +87,29 @@ class ServersActions(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ServersScreen(state: ServersUiState, actions: ServersActions, modifier: Modifier = Modifier) {
+fun ServersScreen(
+    state: ServersUiState,
+    actions: ServersActions,
+    modifier: Modifier = Modifier,
+    /** A remote (D-pad) starts on «Авто» (or on «Добавить сервер») as the section opens. */
+    focus: Boolean = true,
+) {
     val sections = state.sections
     when {
         sections == null -> Box(modifier.fillMaxSize())
-        sections.isEmpty && state.cards.isEmpty() -> EmptyServers(actions.add, modifier)
+        sections.isEmpty && state.cards.isEmpty() -> EmptyServers(actions.add, modifier, focus)
         else -> PullToRefreshBox(
             isRefreshing = state.refreshing,
             onRefresh = actions.updateAll,
             modifier = modifier.fillMaxSize(),
         ) {
-            ServerListView(state, sections, actions)
+            ServerListView(state, sections, actions, focus)
         }
     }
 }
 
 @Composable
-private fun ServerListView(state: ServersUiState, sections: ServerSections, actions: ServersActions) {
+private fun ServerListView(state: ServersUiState, sections: ServerSections, actions: ServersActions, focus: Boolean) {
     val locale = LocalConfiguration.current.locales[0]
     // Expanded countries, as "<group>:<country>" keys joined by newlines (saveable as one string).
     var expandedKeys by rememberSaveable { mutableStateOf("") }
@@ -106,6 +117,8 @@ private fun ServerListView(state: ServersUiState, sections: ServerSections, acti
     fun toggle(key: String) {
         expandedKeys = (if (key in expanded) expanded - key else expanded + key).joinToString("\n")
     }
+    // Asked here, not in the item: «Авто» scrolling back into view must not take the focus again.
+    val autoFocus = rememberFocusWhenShown(enabled = focus)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item(key = "auto") {
             val pick = state.pick?.takeIf { state.autoSelected }
@@ -117,6 +130,7 @@ private fun ServerListView(state: ServersUiState, sections: ServerSections, acti
                 selected = state.autoSelected,
                 enabled = !state.busy,
                 onClick = actions.chooseAuto,
+                modifier = Modifier.focusRequester(autoFocus),
             )
         }
         for (subscription in sections.subscriptions) {
@@ -210,7 +224,7 @@ private fun CountryRowView(
         enabled = !state.busy || code == null,
         onClick = if (code != null) ({ actions.chooseCountry(row) }) else onToggle,
         extra = {
-            IconButton(onClick = onToggle) {
+            IconButton(onClick = onToggle, modifier = Modifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
                 Icon(
                     if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                     contentDescription = stringResource(
@@ -236,8 +250,10 @@ private fun ChoiceRow(
     selectable: Boolean = true,
     indent: Boolean = false,
     extra: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
-    val rowModifier = Modifier
+    // The ring of a remote's focus comes with the indication of SimpleTheme (Focus.kt).
+    val rowModifier = modifier
         .fillMaxWidth()
         .selectable(selected = selected, enabled = enabled, role = if (selectable) Role.RadioButton else Role.Button, onClick = onClick)
         .padding(start = if (indent) 24.dp else 0.dp)
@@ -344,7 +360,7 @@ private fun SubscriptionCardView(card: SubscriptionCard, locale: Locale, onUpdat
                 if (card.refreshing) {
                     CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 } else {
-                    IconButton(onClick = onUpdate) {
+                    IconButton(onClick = onUpdate, modifier = Modifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
                         Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.simple_sub_update))
                     }
                 }
@@ -359,7 +375,7 @@ private fun InfoLine(text: String, color: Color) {
 }
 
 @Composable
-private fun EmptyServers(onAdd: () -> Unit, modifier: Modifier) {
+private fun EmptyServers(onAdd: () -> Unit, modifier: Modifier, focus: Boolean) {
     Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text(
@@ -369,7 +385,13 @@ private fun EmptyServers(onAdd: () -> Unit, modifier: Modifier) {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(20.dp))
-            Button(onClick = onAdd, contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
+            Button(
+                onClick = onAdd,
+                contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+                modifier = Modifier
+                    .focusRing(FocusShapes.Pill)
+                    .focusWhenShown(enabled = focus),
+            ) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
                 Text(stringResource(R.string.simple_add_server))
             }
