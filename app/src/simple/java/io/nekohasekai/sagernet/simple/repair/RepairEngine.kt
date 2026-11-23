@@ -80,6 +80,8 @@ class RepairEngine(
         fun publish(undoing: Boolean = false) = RepairProgress(LinkedHashMap(steps), undoing).also(onProgress)
         publish()
         val done = LinkedHashMap<RepairStep, StepResult>()
+        // The checks fixed in this run, with their status before the fix (a stop puts the fix back).
+        val fixedFrom = LinkedHashMap<RepairStep, StepStatus>()
         try {
             for (step in RepairPlan.ORDER) {
                 val started = now()
@@ -92,7 +94,9 @@ class RepairEngine(
                     runOne(step, done)
                 }
                 if (result.status == StepStatus.FAIL || result.status == StepStatus.WARN) {
+                    val before = result.status
                     result = tryFixes(step, result, done)
+                    if (result.status == StepStatus.FIXED) fixedFrom[step] = before
                 }
                 // A change kept only while this check passes (the VPN raised for it) goes when it does not.
                 if (!result.status.passed && journal.restoreKeptBy(step).isNotEmpty()) settle(wait = true)
@@ -111,6 +115,12 @@ class RepairEngine(
                     publish(undoing = true)
                     journal.restoreAll()
                     settle(wait = false)
+                }
+                // A check fixed in this run is no longer fixed: it shows what it found and that the fix was undone.
+                for ((step, status) in fixedFrom) {
+                    val result = (steps[step] as? StepState.Done)?.result ?: continue
+                    if (result.status != StepStatus.FIXED) continue
+                    steps[step] = StepState.Done(result.copy(status = status, fix = null, undoneFix = result.fix))
                 }
                 publish()
             }

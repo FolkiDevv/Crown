@@ -275,6 +275,7 @@
     <string name="simple_repair_fix_subscription">Исправлено: подписка обновлена</string>
     <string name="simple_repair_fix_routes">Исправлено: маршрутные профили обновлены</string>
     <string name="simple_repair_fix_mtu">Исправлено: MTU VPN снижен до 1280</string>
+    <string name="simple_repair_fix_undone">Исправление отменено: проверка остановлена</string>
     <string name="simple_repair_step_internet">Интернет без VPN</string>
     <string name="simple_repair_step_whitelists">Белые списки в сети</string>
     <string name="simple_repair_step_clock">Время на устройстве</string>

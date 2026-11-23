@@ -292,6 +292,7 @@
     <string name="simple_repair_fix_subscription">Fixed: the subscription was updated</string>
     <string name="simple_repair_fix_routes">Fixed: the routing profiles were updated</string>
     <string name="simple_repair_fix_mtu">Fixed: the VPN\'s MTU was lowered to 1280</string>
+    <string name="simple_repair_fix_undone">The fix was undone: the check was stopped</string>
     <!-- Repair: the checks in their order -->
     <string name="simple_repair_step_internet">Internet without VPN</string>
     <string name="simple_repair_step_whitelists">Whitelists in the network</string>
