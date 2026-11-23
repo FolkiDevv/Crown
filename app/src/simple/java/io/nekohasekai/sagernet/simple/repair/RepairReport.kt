@@ -63,6 +63,8 @@ object RepairReport {
                 if (result.findings.isNotEmpty()) put("findings", JSONArray(result.findings.map { it.name.lowercase() }))
                 result.skip?.let { put("skip_reason", it.name.lowercase()) }
                 result.fix?.let { put("fix", it.name.lowercase()) }
+                result.undoneFix?.let { put("fix_undone", it.name.lowercase()) }
+                result.fixChange?.let { put("fix_change", changeJson(it)) }
                 if (result.values.isNotEmpty()) put("values", JSONObject(result.values.toSortedMap()))
                 result.servers?.let { s ->
                     put("servers", JSONObject().apply {
@@ -81,7 +83,9 @@ object RepairReport {
         }
         root.put("steps", steps)
         root.put("fixes", JSONArray(fixes(results, verdict).map { (step, fix) ->
-            JSONObject().put("step", step.name.lowercase()).put("fix", fix.name.lowercase())
+            JSONObject().put("step", step.name.lowercase()).put("fix", fix.name.lowercase()).apply {
+                results[step]?.fixChange?.let { put("change", changeJson(it)) }
+            }
         }))
         return root.toString(2).replace("\\/", "/")
     }
@@ -109,7 +113,10 @@ object RepairReport {
                 appendLine()
                 if (result != null) {
                     appendLine("   ${explain(step, result)}")
-                    result.fix?.let { appendLine("   fixed: ${fixText(it)}") }
+                    result.fix?.let { appendLine("   fixed: ${fixText(it)}${changeText(result.fixChange)}") }
+                    result.undoneFix?.let {
+                        appendLine("   fix undone (the run was stopped): ${fixText(it)}${changeText(result.fixChange)}")
+                    }
                     result.note?.let { appendLine("   note: $it") }
                 }
             }
@@ -117,8 +124,17 @@ object RepairReport {
             appendLine()
             appendLine("===== fixes =====")
             if (fixes.isEmpty()) appendLine("none")
-            fixes.forEach { (step, fix) -> appendLine("${step.name.lowercase()}: ${fixText(fix)}") }
+            fixes.forEach { (step, fix) ->
+                appendLine("${step.name.lowercase()}: ${fixText(fix)}${changeText(results[step]?.fixChange)}")
+            }
         }
+
+    /** The setting a fix changed, before and after (a server by its id, never its address). */
+    private fun changeJson(change: FixChange): JSONObject =
+        JSONObject().put("setting", change.setting).put("before", change.before).put("after", change.after)
+
+    private fun changeText(change: FixChange?): String =
+        change?.let { " (${it.setting}: ${it.before} -> ${it.after})" }.orEmpty()
 
     private fun fixes(results: Map<RepairStep, StepResult>, verdict: RepairVerdict?): List<Pair<RepairStep, FixKind>> =
         verdict?.fixes ?: RepairPlan.ORDER.mapNotNull { step -> results[step]?.fix?.let { step to it } }
@@ -229,6 +245,7 @@ object RepairReport {
         SkipReason.OTHER_VPN -> "another app's VPN is active"
         SkipReason.VPN_OFF -> "the VPN is off"
         SkipReason.NO_VPN_PERMISSION -> "no VPN permission"
+        SkipReason.VPN_START_FAILED -> "the VPN started for the checks did not connect"
         SkipReason.APP_BYPASSES_VPN -> "this app's own traffic bypasses the VPN"
         SkipReason.NO_SUBSCRIPTION -> "no subscription"
         SkipReason.UNSUPPORTED_DNS -> "the DNS server kind is not supported by the check"
