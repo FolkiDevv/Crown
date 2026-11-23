@@ -162,7 +162,11 @@ object SimpleImport {
         val listener = launch { SubscriptionClient.reports.collect { reports.trySend(it) } }
         try {
             delay(200)
-            val gid = SubscriptionClient.subscribeUrl(plan.url, plan.name, autoUpdate = true)
+            // Without automatic updates for now: subscribeUrl would schedule a poll while the new group has no
+            // `sub_last_update` yet, and with another subscription already updating itself that poll takes the new
+            // group as due and downloads it a second time right after its first download. updateAutomatically turns
+            // them on once the first download has stamped the group.
+            val gid = SubscriptionClient.subscribeUrl(plan.url, plan.name, autoUpdate = false)
             if (gid <= 0L) {
                 return@coroutineScope SubscribeResult.Failed(drainError(reports, -1L))
             }
@@ -252,7 +256,12 @@ object SimpleImport {
         val group = GroupRepo.get(gid) ?: return 0
         val options = group.subOptions.copy(updateInterval = DAILY_MINUTES)
         val db = SagerDatabase.instance.openHelper.writableDatabase
-        db.execSQL("UPDATE `groups` SET `sub_options_json` = ? WHERE `id` = ?", arrayOf<Any>(options.toJsonString(), gid))
+        // `subscribe` added the group without automatic updates (no early poll); they start here, after its first
+        // download stamped `sub_last_update`, so the next automatic update is one interval away.
+        db.execSQL(
+            "UPDATE `groups` SET `sub_options_json` = ?, `skip_auto_update` = 0 WHERE `id` = ?",
+            arrayOf<Any>(options.toJsonString(), gid),
+        )
         // A link without a name of its own: the provider's Profile-Title names the group, as the summary does,
         // rather than the host of the URL.
         val title = group.subMetadata.title.trim()
