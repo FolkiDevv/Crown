@@ -8,7 +8,9 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleHooks
+import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import io.nekohasekai.sagernet.simple.servers.CountryChoice
+import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -113,12 +115,16 @@ object TrafficModeApplier {
     }
 
     /**
-     * The user chose a country: the managed country selector runs the best of [members] (the names of its servers);
-     * 0 when the selector could not be made.
+     * The user chose a country: the managed country selector runs the best of its servers (their names, read here);
+     * 0 when no server of it can be told apart by name or the selector could not be made.
      */
-    suspend fun selectCountry(context: Context, choice: CountryChoice, members: List<String>): Long =
+    suspend fun selectCountry(context: Context, choice: CountryChoice): Long =
         withContext(Dispatchers.IO) {
             lock.withLock {
+                // The members are read under the lock, so a synchronisation that ran meanwhile cannot be overwritten
+                // with an older list.
+                val members = ServerCatalog.countryMembers(choice, SimpleConfigRepo.current().wlKeywords)
+                if (members.isEmpty()) return@withLock 0L
                 val (id, changed) = TrafficModes.ensureCountrySelector(context, choice, members)
                 if (id <= 0L) return@withLock 0L
                 TrafficModes.setCountryChoice(choice)

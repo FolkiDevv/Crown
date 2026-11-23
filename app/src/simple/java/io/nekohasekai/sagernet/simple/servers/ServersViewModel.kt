@@ -226,13 +226,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     fun chooseCountry(row: CountryRow) {
         val code = row.code ?: return
         choose {
-            val choice = CountryChoice(row.groupId, code)
-            val members = withContext(Dispatchers.IO) {
-                ServerCatalog.countryMembers(choice, SimpleConfigRepo.current().wlKeywords)
-            }
-            if (members.isEmpty() ||
-                TrafficModeApplier.selectCountry(getApplication(), choice, members) <= 0L
-            ) {
+            // 0: no server of that country can be told apart by name, or the selector could not be made.
+            if (TrafficModeApplier.selectCountry(getApplication(), CountryChoice(row.groupId, code)) <= 0L) {
                 mutableMessages.tryEmit(ServersMessage(R.string.simple_servers_choose_failed))
             }
         }
