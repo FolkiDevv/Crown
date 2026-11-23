@@ -607,6 +607,9 @@ private fun HomeSection(
     }
     // A mode applied while the service starts or reloads: read what is in effect once the state settles.
     LaunchedEffect(state.phase) { modes.refresh() }
+    // «Авто» following the network switches the route and the managed selector together: when the server card shows
+    // the other selector, the mode card reads the route again, so the two cards never disagree for long.
+    LaunchedEffect(state.server?.name, state.server?.localizedName) { modes.refresh() }
     // A mode applied (also from Settings while the VPN is off) may have switched the managed auto-selector.
     LaunchedEffect(modesState.applied) { if (modesState.applied > 0) home.refreshServer() }
     SectionScaffold(SimpleSection.HOME, snackbar) { modifier ->

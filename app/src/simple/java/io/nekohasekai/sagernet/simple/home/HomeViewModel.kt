@@ -24,7 +24,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.modes.Managed
+import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
+import io.nekohasekai.sagernet.simple.modes.WhitelistKeywords
 import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +61,13 @@ data class ServerCard(
     val country: String? = null,
     /** The country chosen in «Серверы» when the managed country selector runs; null otherwise. */
     val countryChoice: String? = null,
-)
+    /** The plain server, or the server the auto-selector picked, is a server for whitelists (WhitelistKeywords). */
+    val whitelistServer: Boolean = false,
+    /** How many servers of the running auto-selector work in this network; null before its first round. */
+    val working: Working? = null,
+) {
+    data class Working(val alive: Int, val total: Int)
+}
 
 data class HomeUiState(
     val phase: ConnectionPhase = ConnectionPhase.OFF,
@@ -362,8 +370,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     private var selectedCountry: String? = null
     private var choiceCountry: String? = null
 
-    /** The auto-selector's pick as the list shows it: its id, country (ISO code or null) and name. */
-    private class Pick(val id: Long, val country: String?, val name: String)
+    /** The auto-selector's pick as the list shows it: its id, country (ISO code or null), name, whitelist category. */
+    private class Pick(val id: Long, val country: String?, val name: String, val whitelist: Boolean = false)
+
+    /** The selected plain server is a server for whitelists. */
+    private var selectedWhitelist = false
 
     private var pick: Pick? = null
 
@@ -382,6 +393,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         val country: String?,
         val name: String,
         val choiceCountry: String?,
+        /** The shown plain server is a server for whitelists. */
+        val whitelist: Boolean,
     )
 
     /** Looks the running pick [id] up in the catalog; [force] reads it again (it may have been renamed or re-tested). */
@@ -392,7 +405,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             val found = withContext(Dispatchers.IO) {
                 try {
                     ProfileManager.getProfile(id)?.let {
-                        Pick(id, CountryFromName.resolve(it.outbound.name, it.testCountry).code, ServerCatalog.nameOf(it, unnamed()))
+                        Pick(
+                            id,
+                            CountryFromName.resolve(it.outbound.name, it.testCountry).code,
+                            ServerCatalog.nameOf(it, unnamed()),
+                            isWhitelistServer(it),
+                        )
                     }
                 } catch (e: Exception) {
                     Logs.w(e)
@@ -432,6 +450,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                         name = shown?.let { ServerCatalog.nameOf(it, unnamed()) }.orEmpty(),
                         choiceCountry = TrafficModes.countryChoice()?.code
                             ?.takeIf { selected != null && selected.id == managedIds.country },
+                        whitelist = shown != null && shown.type != AutoSelectorProfiles.TYPE && isWhitelistServer(shown),
                     )
                 } catch (e: Exception) {
                     Logs.w(e)
@@ -451,6 +470,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             selectedCountry = snapshot.country
             selectedName = snapshot.name
             choiceCountry = snapshot.choiceCountry
+            selectedWhitelist = snapshot.whitelist
             mutableState.update { it.copy(hasServers = snapshot.hasServers) }
             publish()
             // The profiles may have changed in :bg (a subscription update renamed the running member).
@@ -504,6 +524,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     selectedCountry
                 },
                 countryChoice = choiceCountry,
+                whitelistServer = if (auto) currentPick?.whitelist == true else selectedWhitelist,
+                working = running?.takeIf { r -> r.membersProbed > 0 && r.membersTotal > 0 }
+                    ?.let { r -> ServerCard.Working(r.membersAlive, r.membersTotal) },
             )
         }
         val exhausted = running != null && running.exhaustedSinceMs > 0L
@@ -527,6 +550,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun unnamed(): String = getApplication<Application>().getString(R.string.simple_server_unnamed)
+
+    /** By the name the list sorts it with («Для белых списков», ServerCatalog); blocking. */
+    private fun isWhitelistServer(profile: ProxyEntity): Boolean =
+        WhitelistKeywords.isWhitelistServer(profile.outbound.name.trim(), SimpleConfigRepo.current().wlKeywords)
 
     private companion object {
         const val FIRST_CHECK_MS = 2_000L

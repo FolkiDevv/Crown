@@ -21,6 +21,7 @@ import io.nekohasekai.sagernet.route.RouteRule
 import io.nekohasekai.sagernet.route.RouteShare
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
+import io.nekohasekai.sagernet.simple.regime.RegimeStore
 import io.nekohasekai.sagernet.simple.servers.CountryChoice
 import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import io.nekohasekai.sagernet.simple.servers.ServerList
@@ -374,8 +375,13 @@ object TrafficModes {
         return if (changed) CountrySync.CHANGED else CountrySync.NONE
     }
 
-    /** The routing [mode] runs now; batch 6 adds the network check's result for «Авто». */
-    fun routingNow(mode: TrafficMode): Routing = TrafficModePlan.routing(mode, whitelistsDetected = false)
+    /**
+     * The routing [mode] runs now, the one place of the rule: «Авто» follows the network check's result, but only one
+     * found in the physical network the device is in now (design.md D6, RegimeStore); until there is one it routes like
+     * «Умный».
+     */
+    fun routingNow(mode: TrafficMode): Routing =
+        TrafficModePlan.routing(mode, whitelistsDetected = mode == TrafficMode.AUTO && RegimeStore.whitelistsDetected())
 
     /** What [syncCountrySelector] did to the chosen country. */
     enum class CountrySync { NONE, CHANGED, GONE }

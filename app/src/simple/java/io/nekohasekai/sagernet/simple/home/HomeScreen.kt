@@ -132,7 +132,7 @@ fun HomeScreen(
                 ) {
                     val cardWidth = Modifier.fillMaxWidth()
                     banner(cardWidth, if (low) 8.dp else 16.dp)
-                    ServerCardView(state, actions.openServers, cardWidth)
+                    ServerCardView(state, modeCard?.whitelists == true, actions.openServers, cardWidth)
                     Spacer(Modifier.height(if (low) 8.dp else 12.dp))
                     ModeCardView(modeCard, actions.openMode, cardWidth)
                 }
@@ -156,7 +156,7 @@ fun HomeScreen(
                         Spacer(Modifier.height(20.dp))
                         Status(state)
                         Spacer(Modifier.height(28.dp))
-                        ServerCardView(state, actions.openServers, cardWidth)
+                        ServerCardView(state, modeCard?.whitelists == true, actions.openServers, cardWidth)
                         Spacer(Modifier.height(12.dp))
                         ModeCardView(modeCard, actions.openMode, cardWidth)
                         Spacer(Modifier.height(16.dp))
@@ -292,7 +292,7 @@ private fun elapsedSince(since: Long): Long {
 }
 
 @Composable
-private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Modifier) {
+private fun ServerCardView(state: HomeUiState, whitelists: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val server = state.server?.let { card ->
         card.localizedName?.let { card.copy(name = stringResource(it)) } ?: card
     }
@@ -341,10 +341,20 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
         }
     }
     val latency = server?.latencyMs?.let { stringResource(R.string.simple_latency_ms, it) }
+    // With whitelists in effect: whether the server is one for whitelists, and how many of «Авто»'s servers work in
+    // this network (traffic-modes "Применение результата в режиме «Авто»").
+    val notes = buildList {
+        if (server?.whitelistServer == true) add(stringResource(R.string.simple_server_whitelist))
+        val working = server?.working
+        if (whitelists && working != null) {
+            add(stringResource(R.string.simple_server_working, working.alive, working.total))
+        }
+    }
     HomeCard(
         overline = stringResource(R.string.simple_card_server),
         headline = headline,
         supporting = supporting,
+        note = notes.takeIf { it.isNotEmpty() }?.joinToString(" · "),
         trailing = latency,
         onClick = onClick,
         modifier = modifier,
@@ -388,6 +398,8 @@ private fun HomeCard(
     modifier: Modifier,
     /** Whitelists are in effect: the card stands out in a warning colour (simple-ui spec, mode card). */
     warning: Boolean = false,
+    /** A short third line under [supporting]. */
+    note: String? = null,
 ) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val container = when {
@@ -433,6 +445,15 @@ private fun HomeCard(
                     Text(
                         it,
                         style = MaterialTheme.typography.bodyMedium,
+                        color = secondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                note?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
                         color = secondary,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,

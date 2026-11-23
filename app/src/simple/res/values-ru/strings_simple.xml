@@ -49,7 +49,7 @@
     <!-- Режимы трафика: настройки -->
     <string name="simple_settings_mode">Режим трафика</string>
     <string name="simple_mode_auto">Авто</string>
-    <string name="simple_mode_auto_summary">Сам выбирает режим под сеть. Пока работает как «Умный».</string>
+    <string name="simple_mode_auto_summary">«Умный» в обычной сети, «Белые списки» там, где они обнаружены. Переключается сам.</string>
     <string name="simple_mode_smart_summary">Российские сайты — напрямую, остальные — через VPN.</string>
     <string name="simple_mode_whitelist">Белые списки</string>
     <string name="simple_mode_whitelist_summary">Всё через VPN, кроме локальной сети и приложений без VPN. Для сетей, где открываются только разрешённые сайты.</string>
@@ -257,4 +257,6 @@
     <string name="simple_hint_classic_text">Классический никуда не делся: «Настройки» › «Классический интерфейс».</string>
     <string name="simple_hint_classic_open">Открыть настройки</string>
     <string name="simple_hint_classic_close">Понятно</string>
+    <string name="simple_server_whitelist">Сервер для белых списков</string>
+    <string name="simple_server_working">Работают в этой сети: %1$d из %2$d</string>
 </resources>

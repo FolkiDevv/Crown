@@ -7,8 +7,14 @@ import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
+import io.nekohasekai.sagernet.simple.regime.NetworkRegimeWatcher
+import io.nekohasekai.sagernet.simple.regime.ProbeGate
+import io.nekohasekai.sagernet.simple.regime.Regime
+import io.nekohasekai.sagernet.simple.regime.RegimeRecord
+import io.nekohasekai.sagernet.simple.regime.RegimeStore
 import io.nekohasekai.sagernet.simple.servers.CountryChoice
 import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.CoroutineScope
@@ -44,15 +50,23 @@ object TrafficModeApplier {
         val fellBack: Boolean,
     )
 
-    /** The user chose [mode]: it is stored (a new mode revision, design.md D6) and applied. */
+    /**
+     * The user chose [mode]: it is stored (a new mode revision, design.md D6, so a network check that started before
+     * is not applied) and applied. Choosing «Авто» asks a running network watcher for a check of the current network;
+     * with the VPN off the check waits for the connection.
+     */
     suspend fun select(context: Context, mode: TrafficMode, stagedScopeMayRun: Boolean = false): Result =
         withContext(Dispatchers.IO) {
-            lock.withLock {
-                TrafficModes.setFallbackNotice(false)
-                TrafficModes.setMode(mode)
-                TrafficModes.bumpModeRevision()
+            val result = lock.withLock {
+                SagerDatabase.instance.runInTransaction {
+                    TrafficModes.setFallbackNotice(false)
+                    TrafficModes.setMode(mode)
+                    TrafficModes.bumpModeRevision()
+                }
                 applyLocked(context, stagedScopeMayRun)
             }
+            if (result.mode == TrafficMode.AUTO) NetworkRegimeWatcher.requestCheck(context)
+            result
         }
 
     /**
@@ -73,10 +87,10 @@ object TrafficModeApplier {
     suspend fun ensure(context: Context): TrafficModes.Ensured = withContext(Dispatchers.IO) {
         lock.withLock {
             val ensured = TrafficModes.ensureManaged(context)
-            if (DataStore.currentRouteId in ensured.changedRoutes && DataStore.serviceState.canStop) {
-                reloadNow("simple modes: the routing profile in use was updated, reload of the running service")
-            } else if (countrySelectorChanged(ensured) && DataStore.serviceState.canStop) {
-                reloadNow("simple servers: the chosen country's servers changed, reload of the running service")
+            if (DataStore.currentRouteId in ensured.changedRoutes) {
+                reloadWhenConnected("simple modes: the routing profile in use was updated, reload of the running service")
+            } else if (countrySelectorChanged(ensured)) {
+                reloadWhenConnected("simple servers: the chosen country's servers changed, reload of the running service")
             }
             ensured
         }
@@ -94,8 +108,8 @@ object TrafficModeApplier {
         DataStore.selectedProxy = auto
         val result = select(context, TrafficMode.AUTO)
         // The applier compares with the server already switched above; a running service follows here.
-        if (before != auto && result.change == ServiceChange.NONE && DataStore.serviceState.canStop) {
-            SagerNet.reloadService()
+        if (before != auto && result.change == ServiceChange.NONE) {
+            reloadWhenConnected("simple modes: «Авто» set up, reload of the running service", verifiable = true)
         }
         true
     }
@@ -138,7 +152,7 @@ object TrafficModeApplier {
         if (target != before) DataStore.selectedProxy = target
         val state = DataStore.serviceState
         // A service stopping for a restart is watched too: it may have read the old choice already.
-        if ((target != before || rebuilt) && (state.canStop || state == BaseService.State.Stopping)) {
+        if ((target != before || rebuilt) && isRunning(state)) {
             // `:bg` drops a reload that reaches it while it is stopping, and a reload that reaches a start still
             // connecting stops the service altogether (a cancelled start counts as a stop there). So a reload is sent at
             // once only to a service that is connected and not restarting; otherwise [settle] sends it once it is.
@@ -173,12 +187,56 @@ object TrafficModeApplier {
     @Volatile
     private var pendingRebuild = 0L
 
+    /**
+     * A traffic mode (routing profile, per-app scope or managed selector) was applied while the service could not
+     * reload yet: the core that comes up may have read the settings before the change, so it reloads once when it is
+     * connected. Cleared by any reload sent from here, which rebuilds the whole config.
+     */
+    @Volatile
+    private var pendingApply = false
+
     /** Every reload of the running service from here, so the guard of [switchTo] and [settle] knows about it. */
     private fun reloadNow(message: String) {
         Logs.i(message)
         lastReloadAt = SystemClock.elapsedRealtime()
         pendingRebuild = 0L
+        pendingApply = false
         SagerNet.reloadService()
+    }
+
+    /**
+     * The reload a mode application asks for, by the rule of [switchTo]: sent at once only to a service that is
+     * connected and not restarting (a reload that reaches a start still connecting stops the service altogether);
+     * otherwise [settle] sends it once the service is connected. Nothing while the service is off.
+     *
+     * [verifiable]: the change is only the routing profile and the server, which [settle] can compare with what the
+     * connected core runs; a change it cannot see (the per-app scope, a profile rewritten under the same id) is marked
+     * pending and reloaded once.
+     */
+    private fun reloadWhenConnected(message: String, verifiable: Boolean = false) {
+        val state = DataStore.serviceState
+        if (!isRunning(state)) return
+        val quiet = state == BaseService.State.Connected && settleJob?.isActive != true &&
+            SystemClock.elapsedRealtime() - lastReloadAt >= RESTART_WAIT_MS
+        if (quiet) {
+            reloadNow(message)
+        } else {
+            Logs.i("$message — once the service is connected")
+            if (!verifiable) pendingApply = true
+        }
+        settle(DataStore.selectedProxy)
+    }
+
+    /**
+     * Whether the service runs or is between two cores: a restart in place passes Stopped (and the new core reads the
+     * settings right then), which the start time SimpleHooks keeps until a stop for good tells from a stop.
+     */
+    private fun isRunning(state: BaseService.State): Boolean =
+        state.canStop || state == BaseService.State.Stopping || restartPending()
+
+    private fun restartPending(): Boolean {
+        val since = DataStore.configurationStore.getLong(SimpleHooks.KEY_CONNECTED_SINCE) ?: 0L
+        return ConnectionClock.isValid(since, SystemClock.elapsedRealtime())
     }
 
     /**
@@ -198,20 +256,28 @@ object TrafficModeApplier {
                 try {
                     if (DataStore.selectedProxy != target) return@launch
                     val state = DataStore.serviceState
-                    if (!state.started && state != BaseService.State.Stopping) return@launch
+                    if (!isRunning(state)) {
+                        // Stopped for good: the next start reads the settings as they are now.
+                        pendingApply = false
+                        return@launch
+                    }
                     if (state != BaseService.State.Connected) {
                         restartSeen = true
                         continue
                     }
                     if (!restartSeen && SystemClock.elapsedRealtime() - lastReloadAt < RESTART_WAIT_MS) continue
-                    if (pendingRebuild != target && DataStore.currentProfile == target) return@launch
-                    if (reloads >= 2) return@launch
                     val running = DataStore.currentProfile
+                    val routeRuns = DataStore.runningRouteId.let { it == 0L || it == DataStore.currentRouteId }
+                    if (pendingRebuild != target && !pendingApply && running == target && routeRuns) return@launch
+                    if (reloads >= 2) return@launch
                     reloads++
                     restartSeen = false
                     reloadNow(
-                        if (running == target) "simple servers: selector $target was rebuilt; reload"
-                        else "simple servers: the service runs $running, not the chosen $target; reload"
+                        when {
+                            running != target -> "simple servers: the service runs $running, not the chosen $target; reload"
+                            pendingApply || !routeRuns -> "simple modes: the connected service missed the applied mode; reload"
+                            else -> "simple servers: selector $target was rebuilt; reload"
+                        }
                     )
                 } catch (e: Exception) {
                     Logs.w(e)
@@ -230,8 +296,57 @@ object TrafficModeApplier {
     private fun countrySelectorChanged(ensured: TrafficModes.Ensured): Boolean = ensured.countryGone ||
         ensured.countryChanged && ensured.ids.country > 0L && DataStore.selectedProxy == ensured.ids.country
 
-    /** The routing [mode] runs now; batch 6 adds the network check's result for «Авто». */
+    /** The routing [mode] runs now (TrafficModes.routingNow, the one place of the rule). */
     private fun routingOf(mode: TrafficMode): Routing = TrafficModes.routingNow(mode)
+
+    /**
+     * `:bg`, NetworkRegimeWatcher: a network check finished, or the physical network changed ([record] then has no
+     * regime yet). Decided and written in one database write transaction, which also excludes a mode change the user
+     * makes in the UI process meanwhile (design.md D6): [accept] judges from the stored mode (null = never chosen) and
+     * its revision whether [record] still counts. If so it is stored, and while «Авто» runs on one of the managed
+     * routing profiles, the routing and the managed auto-selector follow it. A routing profile chosen in the classic
+     * interface and a server chosen by hand stay as they are. Returns what the running service has to do; the
+     * watcher reloads it, and only once it is connected (a reload while it connects can stop it).
+     */
+    suspend fun applyRegime(
+        context: Context,
+        record: RegimeRecord,
+        /** Route «Авто» by the whitelist rules; false keeps [record] but routes like «Умный» (the VPN stopped). */
+        whitelist: Boolean = record.regime == Regime.WHITELIST,
+        accept: (TrafficMode?, Long) -> ProbeGate.Verdict,
+    ): Pair<ProbeGate.Verdict, ServiceChange> = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val managed = TrafficModes.managedIds()
+            var verdict = ProbeGate.Verdict.SUPERSEDED
+            var change = ServiceChange.NONE
+            SagerDatabase.instance.runInTransaction {
+                val mode = if (TrafficModes.isModeStored()) TrafficModes.mode() else null
+                verdict = accept(mode, TrafficModes.modeRevision())
+                if (verdict != ProbeGate.Verdict.ACCEPTED) return@runInTransaction
+                RegimeStore.write(record)
+                val route = DataStore.currentRouteId
+                val managedRoute = route > 0L && (route == managed.smartRoute || route == managed.whitelistRoute)
+                if (mode != TrafficMode.AUTO || !managedRoute) return@runInTransaction
+                // The rule of TrafficModes.routingNow, for the result being stored (routingNow reads it from DataStore
+                // once written; here it is decided inside the same transaction).
+                val routing = TrafficModePlan.routing(TrafficMode.AUTO, whitelist)
+                val scope = PerAppScope(DataStore.proxyApps, DataStore.bypass, TrafficModePlan.parseList(DataStore.individual))
+                val before = TrafficModePlan.Applied(route, scope, DataStore.selectedProxy)
+                val after = TrafficModePlan.Applied(
+                    routeId = when (routing) {
+                        Routing.SMART -> managed.smartRoute
+                        Routing.WHITELIST -> managed.whitelistRoute
+                    }.takeIf { it > 0L } ?: route,
+                    scope = scope,
+                    server = TrafficModePlan.server(before.server, managed.auto, managed.autoWhitelist, routing),
+                )
+                if (after.routeId != before.routeId) DataStore.currentRouteId = after.routeId
+                if (after.server != before.server) DataStore.selectedProxy = after.server
+                change = TrafficModePlan.change(before, after)
+            }
+            verdict to change
+        }
+    }
 
     /** A counter of service starts (SimpleHooks), to tell whether the service started during an app list edit. */
     fun serviceStarts(): Long = DataStore.configurationStore.getLong(SimpleHooks.KEY_SERVICE_STARTS) ?: 0L
@@ -280,10 +395,13 @@ object TrafficModeApplier {
             if (after.server != before.server) DataStore.selectedProxy = after.server
         }
         val change = TrafficModePlan.change(before, after, ensured.changedRoutes, stagedScopeMayRun)
-        if (change != ServiceChange.NONE && DataStore.serviceState.canStop) {
-            reloadNow("simple modes: «${mode.key}» applied, ${change.name.lowercase()} of the running service")
-        } else if (countrySelectorChanged(ensured) && DataStore.serviceState.canStop) {
-            reloadNow("simple servers: the chosen country's servers changed, reload of the running service")
+        if (change != ServiceChange.NONE) {
+            reloadWhenConnected(
+                "simple modes: «${mode.key}» applied, ${change.name.lowercase()} of the running service",
+                verifiable = change == ServiceChange.RELOAD && after.routeId !in ensured.changedRoutes,
+            )
+        } else if (countrySelectorChanged(ensured)) {
+            reloadWhenConnected("simple servers: the chosen country's servers changed, reload of the running service")
         }
         return Result(mode, change, fellBack)
     }

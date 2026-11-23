@@ -67,8 +67,9 @@ object TrafficModePlan {
         if (mode == TrafficMode.APPS && selectedApps.none { it.isNotBlank() }) TrafficMode.AUTO else mode
 
     /**
-     * The routing of [mode]. «Авто» follows the network check ([whitelistsDetected], from batch 6; until then it is
-     * always false and «Авто» routes like «Умный»); «Только выбранные приложения» uses the smart profile.
+     * The routing of [mode]. «Авто» follows the network check ([whitelistsDetected]: whitelists were found in the
+     * current physical network, design.md D6; otherwise it routes like «Умный»); «Только выбранные приложения» uses
+     * the smart profile.
      */
     fun routing(mode: TrafficMode, whitelistsDetected: Boolean): Routing = when (mode) {
         TrafficMode.WHITELIST -> Routing.WHITELIST

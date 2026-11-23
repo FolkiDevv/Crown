@@ -60,7 +60,7 @@
     <!-- Traffic modes: settings -->
     <string name="simple_settings_mode">Traffic mode</string>
     <string name="simple_mode_auto">Auto</string>
-    <string name="simple_mode_auto_summary">Picks the mode that suits the network. For now it works like Smart.</string>
+    <string name="simple_mode_auto_summary">Smart in an ordinary network, Whitelists where whitelists are found. Switches by itself.</string>
     <string name="simple_mode_smart_summary">Russian sites go directly, everything else through the VPN.</string>
     <string name="simple_mode_whitelist">Whitelists</string>
     <string name="simple_mode_whitelist_summary">Everything goes through the VPN except the local network and apps without VPN. For networks where only allowed sites open.</string>
@@ -271,4 +271,8 @@
     <string name="simple_hint_classic_text">The classic one is still here: Settings › Classic interface.</string>
     <string name="simple_hint_classic_open">Open settings</string>
     <string name="simple_hint_classic_close">Got it</string>
+    <!-- Home server card with whitelists in effect (batch 6) -->
+    <string name="simple_server_whitelist">Server for whitelists</string>
+    <!-- %1$d: servers of Auto that answer in this network, %2$d: all of them -->
+    <string name="simple_server_working">Working in this network: %1$d of %2$d servers</string>
 </resources>
