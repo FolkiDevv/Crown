@@ -21,6 +21,8 @@ import okhttp3.Response
 import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -186,6 +188,19 @@ object NetworkProber {
         private var closed = false
         private val sockets = mutableSetOf<DatagramSocket>()
 
+        /** The record types to ask for, from the addresses the network has (both when it cannot be told). */
+        private val families: IntArray by lazy {
+            val addresses = SagerNet.connectivity.getLinkProperties(network)?.linkAddresses?.map { it.address }
+            if (addresses == null) {
+                DnsMessage.families(hasIpv4 = true, hasGlobalIpv6 = true)
+            } else {
+                DnsMessage.families(
+                    hasIpv4 = addresses.any { it is Inet4Address },
+                    hasGlobalIpv6 = addresses.any { it is Inet6Address && DnsMessage.isGlobalIpv6(it.address) },
+                )
+            }
+        }
+
         fun close() {
             closed = true
             synchronized(sockets) {
@@ -206,9 +221,10 @@ object NetworkProber {
             }
             var gone: IOException? = null
             for (server in servers) {
-                // Both families: on a network with only one of them, the other's addresses are the ones that work.
+                // The families the network can reach (an IPv6-only network gets its AAAA answers; IPv6 that is only
+                // link- or site-local is no reason to try AAAA addresses, which would hang to the deadline).
                 val found = mutableListOf<InetAddress>()
-                for (type in intArrayOf(DnsMessage.TYPE_A, DnsMessage.TYPE_AAAA)) {
+                for (type in families) {
                     val left = deadline - SystemClock.elapsedRealtime()
                     if (closed || left <= 0L) break
                     try {

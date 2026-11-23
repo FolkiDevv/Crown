@@ -121,6 +121,20 @@ object DnsMessage {
         return if (ipv6) host to port else null
     }
 
+    /**
+     * The record types worth asking for on a network with these addresses, A first: AAAA only where IPv6 can reach
+     * the internet (a global address), A only where there is IPv4; both when neither is known.
+     */
+    fun families(hasIpv4: Boolean, hasGlobalIpv6: Boolean): IntArray = when {
+        hasIpv4 && hasGlobalIpv6 -> intArrayOf(TYPE_A, TYPE_AAAA)
+        hasGlobalIpv6 -> intArrayOf(TYPE_AAAA)
+        hasIpv4 -> intArrayOf(TYPE_A)
+        else -> intArrayOf(TYPE_A, TYPE_AAAA)
+    }
+
+    /** A 16-byte IPv6 address in the global unicast range 2000::/3 (not link-local, site-local, ULA or loopback). */
+    fun isGlobalIpv6(address: ByteArray): Boolean = address.size == 16 && (address[0].toInt() and 0xe0) == 0x20
+
     private fun ByteArrayOutputStream.short(value: Int) {
         write(value shr 8 and 0xff)
         write(value and 0xff)

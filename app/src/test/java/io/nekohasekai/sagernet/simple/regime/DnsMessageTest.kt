@@ -66,6 +66,28 @@ class DnsMessageTest {
     }
 
     @Test
+    fun familiesFollowTheNetwork() {
+        val a = DnsMessage.TYPE_A
+        val aaaa = DnsMessage.TYPE_AAAA
+        assertArrayEquals(intArrayOf(a), DnsMessage.families(hasIpv4 = true, hasGlobalIpv6 = false))
+        assertArrayEquals(intArrayOf(aaaa), DnsMessage.families(hasIpv4 = false, hasGlobalIpv6 = true))
+        assertArrayEquals(intArrayOf(a, aaaa), DnsMessage.families(hasIpv4 = true, hasGlobalIpv6 = true))
+        assertArrayEquals(intArrayOf(a, aaaa), DnsMessage.families(hasIpv4 = false, hasGlobalIpv6 = false))
+    }
+
+    @Test
+    fun globalIpv6Only() {
+        fun v6(vararg head: Int) = ByteArray(16).also { b -> head.forEachIndexed { i, v -> b[i] = v.toByte() } }
+        assertTrue(DnsMessage.isGlobalIpv6(v6(0x2a, 0x02, 0x06, 0xb8)))
+        assertTrue(DnsMessage.isGlobalIpv6(v6(0x20, 0x01)))
+        assertEquals(false, DnsMessage.isGlobalIpv6(v6(0xfe, 0x80))) // link-local
+        assertEquals(false, DnsMessage.isGlobalIpv6(v6(0xfe, 0xc0))) // site-local (the emulator's)
+        assertEquals(false, DnsMessage.isGlobalIpv6(v6(0xfd, 0x00))) // ULA
+        assertEquals(false, DnsMessage.isGlobalIpv6(v6())) // ::
+        assertEquals(false, DnsMessage.isGlobalIpv6(bytes(1, 2, 3, 4)))
+    }
+
+    @Test
     fun plainServersOnly() {
         assertEquals("77.88.8.8" to 53, DnsMessage.plainServer("77.88.8.8"))
         assertEquals("77.88.8.1" to 5353, DnsMessage.plainServer("udp://77.88.8.1:5353"))

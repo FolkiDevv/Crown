@@ -288,7 +288,7 @@ object NetworkRegimeWatcher {
         val (verdict, change) = TrafficModeApplier.applyRegime(app, RegimeRecord(null, ticket.network)) { _, _ ->
             if (gate.isLatest(ticket)) ProbeGate.Verdict.ACCEPTED else ProbeGate.Verdict.SUPERSEDED
         }
-        if (verdict == ProbeGate.Verdict.ACCEPTED) {
+        if (verdict == ProbeGate.Verdict.ACCEPTED && stored != null) {
             Logs.i(
                 "simple regime: physical network ${ticket.network}, the result of network ${stored?.network ?: "-"} " +
                     "(${stored?.regime?.key ?: "none"}) no longer applies (service change: ${change.name.lowercase()})"
