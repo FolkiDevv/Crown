@@ -133,7 +133,8 @@ object TrafficModeApplier {
         val before = DataStore.selectedProxy
         if (target != before) DataStore.selectedProxy = target
         val state = DataStore.serviceState
-        if ((target != before || rebuilt) && state.canStop) {
+        // A service stopping for a restart is watched too: it may have read the old choice already.
+        if ((target != before || rebuilt) && (state.canStop || state == BaseService.State.Stopping)) {
             // `:bg` drops a reload that reaches it while it is stopping, and a reload that reaches a start still
             // connecting stops the service altogether (a cancelled start counts as a stop there). So a reload is sent at
             // once only to a service that is connected and not restarting; otherwise [settle] sends it once it is.
@@ -191,10 +192,14 @@ object TrafficModeApplier {
                     if (!restartSeen && SystemClock.elapsedRealtime() - lastReloadAt < RESTART_WAIT_MS) continue
                     if (!pending && DataStore.currentProfile == target) return@launch
                     if (reloads >= 2) return@launch
+                    val running = DataStore.currentProfile
                     reloads++
                     pending = false
                     restartSeen = false
-                    reloadNow("simple servers: the service runs ${DataStore.currentProfile}, not the chosen $target; reload")
+                    reloadNow(
+                        if (running == target) "simple servers: selector $target was rebuilt; reload"
+                        else "simple servers: the service runs $running, not the chosen $target; reload"
+                    )
                 } catch (e: Exception) {
                     Logs.w(e)
                     return@launch
