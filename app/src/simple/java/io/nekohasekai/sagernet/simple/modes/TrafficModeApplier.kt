@@ -1,13 +1,21 @@
 package io.nekohasekai.sagernet.simple.modes
 
 import android.content.Context
+import android.os.SystemClock
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.servers.CountryChoice
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -127,9 +135,48 @@ object TrafficModeApplier {
         if ((target != before || rebuilt) && DataStore.serviceState.canStop) {
             Logs.i("simple servers: server $target chosen, reload of the running service")
             SagerNet.reloadService()
+            settle(target)
         }
         return target
     }
+
+    /** Watches that the running service ends up on [target]; one per choice, a newer one replaces it. */
+    @Volatile
+    private var settleJob: Job? = null
+    private val settleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * `:bg` drops a reload that arrives while the service is still stopping for the previous one, so two quick choices
+     * can leave the core on the earlier server. Once the service is connected again, the profile it started with is
+     * compared with the choice and the service reloads again if they differ (twice at most). A newer choice, a stopped
+     * service or the time limit ends the watch.
+     */
+    private fun settle(target: Long) {
+        settleJob?.cancel()
+        settleJob = settleScope.launch {
+            var reloads = 0
+            val deadline = SystemClock.elapsedRealtime() + SETTLE_MS
+            while (isActive && SystemClock.elapsedRealtime() < deadline) {
+                delay(SETTLE_STEP_MS)
+                try {
+                    if (DataStore.selectedProxy != target) return@launch
+                    val state = DataStore.serviceState
+                    if (!state.started && state != BaseService.State.Stopping) return@launch
+                    if (state != BaseService.State.Connected) continue
+                    if (DataStore.currentProfile == target || reloads >= 2) return@launch
+                    Logs.i("simple servers: the service runs ${DataStore.currentProfile}, not the chosen $target; reload again")
+                    reloads++
+                    SagerNet.reloadService()
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    return@launch
+                }
+            }
+        }
+    }
+
+    private const val SETTLE_MS = 20_000L
+    private const val SETTLE_STEP_MS = 1_000L
 
     private fun countrySelectorChanged(ensured: TrafficModes.Ensured): Boolean = ensured.countryGone ||
         ensured.countryChanged && ensured.ids.country > 0L && DataStore.selectedProxy == ensured.ids.country
