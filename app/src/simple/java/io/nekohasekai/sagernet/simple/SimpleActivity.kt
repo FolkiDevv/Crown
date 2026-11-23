@@ -428,7 +428,10 @@ class SimpleActivity : AppCompatActivity() {
             RepairAction.NETWORK_SETTINGS -> Intent(AndroidSettings.ACTION_WIRELESS_SETTINGS)
             RepairAction.VPN_SETTINGS -> Intent(AndroidSettings.ACTION_VPN_SETTINGS)
             RepairAction.WIFI_SETTINGS -> Intent(AndroidSettings.ACTION_WIFI_SETTINGS)
-            RepairAction.BACKGROUND -> if (BatteryOptimizations.isBackgroundRestricted(this)) {
+            // Android TV has no battery screens (the request does nothing there): its app info has the permissions.
+            RepairAction.BACKGROUND -> if (SagerNet.isTv) {
+                Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+            } else if (BatteryOptimizations.isBackgroundRestricted(this)) {
                 BatteryOptimizations.detailsIntent(this)
             } else {
                 BatteryOptimizations.requestIntent(this)

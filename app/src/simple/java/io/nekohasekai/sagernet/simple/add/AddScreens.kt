@@ -218,7 +218,8 @@ fun LinkDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
                     value = text,
                     onValueChange = { text = it },
                     label = { Text(stringResource(R.string.simple_add_link_field)) },
-                    maxLines = 4,
+                    // One line, so the keyboard's Done adds the link (a remote has no other way to the button).
+                    singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { if (text.isNotBlank()) onAdd(text) }),
                     modifier = Modifier

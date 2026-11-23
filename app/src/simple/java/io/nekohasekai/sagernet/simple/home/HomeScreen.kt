@@ -61,6 +61,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.simple.FocusShapes
 import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
+import io.nekohasekai.sagernet.simple.unavailable
 import io.nekohasekai.sagernet.simple.add.AddActions
 import io.nekohasekai.sagernet.simple.add.Welcome
 import io.nekohasekai.sagernet.simple.modes.ModeCard
@@ -200,9 +201,10 @@ private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit, focus: B
         if (busy) {
             CircularProgressIndicator(Modifier.fillMaxSize(), strokeWidth = 4.dp)
         }
+        // Not disabled while disconnecting: a remote's focus would leave it (Focus.kt unavailable).
+        val disconnecting = phase == ConnectionPhase.DISCONNECTING
         Surface(
-            onClick = onToggle,
-            enabled = phase != ConnectionPhase.DISCONNECTING,
+            onClick = { if (!disconnecting) onToggle() },
             shape = CircleShape,
             color = container,
             border = if (phase == ConnectionPhase.OFF) BorderStroke(2.dp, colors.outlineVariant) else null,
@@ -211,6 +213,7 @@ private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit, focus: B
                 .size(if (small) 124.dp else 160.dp)
                 .focusRing(CircleShape, outset = 4.dp)
                 .focusWhenShown(enabled = focus)
+                .unavailable(disconnecting)
                 .semantics {
                     role = Role.Button
                     contentDescription = action

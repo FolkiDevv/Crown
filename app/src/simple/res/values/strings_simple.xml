@@ -20,8 +20,8 @@
     <string name="simple_status_protected">Protected</string>
     <string name="simple_status_reconnecting">Reconnecting…</string>
     <string name="simple_status_disconnecting">Disconnecting…</string>
-    <string name="simple_hint_connect">Tap the button to connect</string>
-    <string name="simple_hint_cancel">Tap the button to cancel</string>
+    <string name="simple_hint_connect">Press the button to connect</string>
+    <string name="simple_hint_cancel">Press the button to cancel</string>
     <string name="simple_hint_reconnecting">Restoring the connection</string>
     <!-- %1$s: time since the connection started, e.g. 1:05 or 2:03:04 -->
     <string name="simple_connected_for">Connected for %1$s</string>
@@ -231,8 +231,8 @@
 
     <!-- Settings (batch 10) -->
     <string name="simple_settings_connection">Connection</string>
-    <string name="simple_settings_autostart">Connect when the phone starts</string>
-    <string name="simple_settings_autostart_summary">The VPN turns on by itself after the phone restarts</string>
+    <string name="simple_settings_autostart">Connect when the device starts</string>
+    <string name="simple_settings_autostart_summary">The VPN turns on by itself after the device restarts</string>
     <string name="simple_settings_auto_update">Update subscriptions automatically</string>
     <string name="simple_settings_auto_update_summary">As often as the provider asks, otherwise once a day</string>
     <string name="simple_settings_general">General</string>

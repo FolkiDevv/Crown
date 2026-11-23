@@ -46,6 +46,7 @@ import io.nekohasekai.sagernet.simple.FocusShapes
 import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
 import io.nekohasekai.sagernet.simple.rememberFocusWhenShown
+import io.nekohasekai.sagernet.simple.unavailable
 import io.nekohasekai.sagernet.simple.modes.AppList
 import io.nekohasekai.sagernet.simple.modes.ModeCard
 import io.nekohasekai.sagernet.simple.modes.ModesUiState
@@ -265,7 +266,10 @@ private fun ModeOption(mode: TrafficMode, selected: Boolean, enabled: Boolean, o
         headlineContent = { Text(stringResource(title)) },
         supportingContent = { Text(stringResource(summary)) },
         leadingContent = { RadioButton(selected = selected, onClick = null, enabled = enabled) },
-        modifier = Modifier.selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick),
+        // While a mode is applied the rows stay focusable, so a remote keeps its place (Focus.kt unavailable).
+        modifier = Modifier
+            .unavailable(!enabled)
+            .selectable(selected = selected, role = Role.RadioButton) { if (enabled) onClick() },
     )
 }
 
@@ -285,7 +289,9 @@ private fun NavigationItem(
         } else {
             null
         },
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
+        modifier = Modifier
+            .unavailable(!enabled)
+            .clickable { if (enabled) onClick() },
     )
 }
 

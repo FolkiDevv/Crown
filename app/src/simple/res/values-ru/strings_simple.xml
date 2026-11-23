@@ -219,8 +219,8 @@
     <string name="simple_server_auto_with">Авто · %1$s</string>
 
     <string name="simple_settings_connection">Подключение</string>
-    <string name="simple_settings_autostart">Подключаться при включении телефона</string>
-    <string name="simple_settings_autostart_summary">VPN включится сам после перезагрузки телефона</string>
+    <string name="simple_settings_autostart">Подключаться при включении устройства</string>
+    <string name="simple_settings_autostart_summary">VPN включится сам после перезагрузки устройства</string>
     <string name="simple_settings_auto_update">Автообновление подписок</string>
     <string name="simple_settings_auto_update_summary">Как просит провайдер, иначе раз в сутки</string>
     <string name="simple_settings_general">Общие</string>
