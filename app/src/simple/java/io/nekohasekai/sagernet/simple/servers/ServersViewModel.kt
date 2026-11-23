@@ -150,6 +150,9 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     /** The running pick as the list shows it: (profile id, (country, name)). */
     private var pickInfo: Pair<Long, Pair<String?, String>>? = null
 
+    /** The pick lookup under way; a newer one cancels it, so an older result never overwrites a fresher one. */
+    private var pickJob: Job? = null
+
     init {
         ProfileManager.addListener(this)
         viewModelScope.launch {
@@ -566,7 +569,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             mutableState.update { it.copy(pick = RunningPick(status.selectorId, name, known.first)) }
             return
         }
-        viewModelScope.launch {
+        pickJob?.cancel()
+        pickJob = viewModelScope.launch {
             val info = withContext(Dispatchers.IO) {
                 try {
                     ProfileManager.getProfile(status.selectedId)?.let {

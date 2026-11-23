@@ -361,7 +361,9 @@ object TrafficModes {
             // another country, or none at all, the choice goes back to «Авто».
             Logs.i("simple servers: no server of the chosen country is left, back to Auto")
             setCountryChoice(null)
-            val auto = store.getLong(KEY_MANAGED_AUTO) ?: 0L
+            // The «Авто» of the routing in effect, as a choice of «Авто» in «Серверы» would select it.
+            val managed = managedIds()
+            val auto = TrafficModePlan.server(managed.auto, managed.auto, managed.autoWhitelist, routingNow(mode()))
             if (DataStore.selectedProxy == id && auto > 0L) {
                 DataStore.selectedProxy = auto
                 return CountrySync.GONE
@@ -371,6 +373,9 @@ object TrafficModes {
         val changed = updateCountrySelector(id, choice.groupId, exactNames(members)) ?: false
         return if (changed) CountrySync.CHANGED else CountrySync.NONE
     }
+
+    /** The routing [mode] runs now; batch 6 adds the network check's result for «Авто». */
+    fun routingNow(mode: TrafficMode): Routing = TrafficModePlan.routing(mode, whitelistsDetected = false)
 
     /** What [syncCountrySelector] did to the chosen country. */
     enum class CountrySync { NONE, CHANGED, GONE }

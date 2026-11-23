@@ -367,12 +367,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
 
     private var pick: Pick? = null
 
+    /** Counts the pick lookups started; only the newest one may publish (a forced one may overtake an older one). */
+    private var pickLookups = 0L
+
     /** The selected plain server's name as the list shows it (never its address). */
     private var selectedName: String = ""
 
     /** Looks the running pick [id] up in the catalog; [force] reads it again (it may have been renamed or re-tested). */
     private fun lookUpPickCountry(id: Long, force: Boolean = false) {
         if (id <= 0L || !force && pick?.id == id) return
+        val lookup = ++pickLookups
         viewModelScope.launch {
             val found = withContext(Dispatchers.IO) {
                 try {
@@ -385,7 +389,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 }
             }
             // A lookup for a pick that is no longer running is dropped (a newer one is under way or done).
-            if (autoStatus.selectedId != id) return@launch
+            if (lookup != pickLookups || autoStatus.selectedId != id) return@launch
             pick = found ?: Pick(id, null, "")
             publish()
         }

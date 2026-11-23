@@ -135,7 +135,7 @@ object TrafficModeApplier {
         ensured.countryChanged && ensured.ids.country > 0L && DataStore.selectedProxy == ensured.ids.country
 
     /** The routing [mode] runs now; batch 6 adds the network check's result for «Авто». */
-    private fun routingOf(mode: TrafficMode): Routing = TrafficModePlan.routing(mode, whitelistsDetected = false)
+    private fun routingOf(mode: TrafficMode): Routing = TrafficModes.routingNow(mode)
 
     /** A counter of service starts (SimpleHooks), to tell whether the service started during an app list edit. */
     fun serviceStarts(): Long = DataStore.configurationStore.getLong(SimpleHooks.KEY_SERVICE_STARTS) ?: 0L
