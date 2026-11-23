@@ -132,10 +132,20 @@ object TrafficModeApplier {
     private fun switchTo(target: Long, rebuilt: Boolean): Long {
         val before = DataStore.selectedProxy
         if (target != before) DataStore.selectedProxy = target
-        if ((target != before || rebuilt) && DataStore.serviceState.canStop) {
-            Logs.i("simple servers: server $target chosen, reload of the running service")
-            SagerNet.reloadService()
-            settle(target)
+        val state = DataStore.serviceState
+        if ((target != before || rebuilt) && state.canStop) {
+            // `:bg` drops a reload that reaches it while it is stopping, and a reload that reaches a start still
+            // connecting stops the service altogether (a cancelled start counts as a stop there). So a reload is sent at
+            // once only to a service that is connected and not restarting; otherwise [settle] sends it once it is.
+            val quiet = state == BaseService.State.Connected && settleJob?.isActive != true &&
+                SystemClock.elapsedRealtime() - lastReloadAt >= RESTART_WAIT_MS
+            if (quiet) {
+                reloadNow("simple servers: server $target chosen, reload of the running service")
+                settle(target, mustReload = false)
+            } else {
+                Logs.i("simple servers: server $target chosen, applied once the service is connected")
+                settle(target, mustReload = rebuilt)
+            }
         }
         return target
     }
@@ -145,16 +155,28 @@ object TrafficModeApplier {
     private var settleJob: Job? = null
     private val settleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** `SystemClock.elapsedRealtime()` of the last reload sent from here. */
+    @Volatile
+    private var lastReloadAt = 0L
+
+    private fun reloadNow(message: String) {
+        Logs.i(message)
+        lastReloadAt = SystemClock.elapsedRealtime()
+        SagerNet.reloadService()
+    }
+
     /**
-     * `:bg` drops a reload that arrives while the service is still stopping for the previous one, so two quick choices
-     * can leave the core on the earlier server. Once the service is connected again, the profile it started with is
-     * compared with the choice and the service reloads again if they differ (twice at most). A newer choice, a stopped
-     * service or the time limit ends the watch.
+     * Makes the running service end up on [target]: whenever it is connected (and not just asked to reload — a reload
+     * sent moments ago may not have reached `:bg` yet), the profile it started with is compared with the choice and it
+     * reloads if they differ, or once anyway with [mustReload] (the country selector was rebuilt under the same id).
+     * Twice at most. A newer choice, a stopped service or the time limit ends the watch.
      */
-    private fun settle(target: Long) {
+    private fun settle(target: Long, mustReload: Boolean) {
         settleJob?.cancel()
         settleJob = settleScope.launch {
+            var pending = mustReload
             var reloads = 0
+            var restartSeen = false
             val deadline = SystemClock.elapsedRealtime() + SETTLE_MS
             while (isActive && SystemClock.elapsedRealtime() < deadline) {
                 delay(SETTLE_STEP_MS)
@@ -162,11 +184,17 @@ object TrafficModeApplier {
                     if (DataStore.selectedProxy != target) return@launch
                     val state = DataStore.serviceState
                     if (!state.started && state != BaseService.State.Stopping) return@launch
-                    if (state != BaseService.State.Connected) continue
-                    if (DataStore.currentProfile == target || reloads >= 2) return@launch
-                    Logs.i("simple servers: the service runs ${DataStore.currentProfile}, not the chosen $target; reload again")
+                    if (state != BaseService.State.Connected) {
+                        restartSeen = true
+                        continue
+                    }
+                    if (!restartSeen && SystemClock.elapsedRealtime() - lastReloadAt < RESTART_WAIT_MS) continue
+                    if (!pending && DataStore.currentProfile == target) return@launch
+                    if (reloads >= 2) return@launch
                     reloads++
-                    SagerNet.reloadService()
+                    pending = false
+                    restartSeen = false
+                    reloadNow("simple servers: the service runs ${DataStore.currentProfile}, not the chosen $target; reload")
                 } catch (e: Exception) {
                     Logs.w(e)
                     return@launch
@@ -175,8 +203,11 @@ object TrafficModeApplier {
         }
     }
 
-    private const val SETTLE_MS = 20_000L
+    private const val SETTLE_MS = 30_000L
     private const val SETTLE_STEP_MS = 1_000L
+
+    /** How long a reload sent from here may take to reach `:bg` and show as a state change. */
+    private const val RESTART_WAIT_MS = 5_000L
 
     private fun countrySelectorChanged(ensured: TrafficModes.Ensured): Boolean = ensured.countryGone ||
         ensured.countryChanged && ensured.ids.country > 0L && DataStore.selectedProxy == ensured.ids.country
