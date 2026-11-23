@@ -547,6 +547,16 @@ class ReportRedactorTest {
     }
 
     @Test
+    fun aServerSwitchKeepsItsIdsAndADnsChangeHidesTheAddresses() {
+        // Batch 8: the fixes in report.txt name the setting before and after; a server is named by its id only.
+        val r = ReportRedactor(listOf(serverIp), emptyList())
+        val switched = r.redact("   fixed: switched to a working server (server was 67, now 21)")
+        assertTrue(switched, switched.contains("server was 67, now 21"))
+        val dns = r.redact("   fixed: direct DNS changed to a whitelisted one (direct DNS was $serverIp, now 77.88.8.8)")
+        assertFalse(dns, dns.contains(serverIp))
+    }
+
+    @Test
     fun serverNamesOfAProfile() {
         val names = ReportRedactor.serverNames(serverDomain, profile)
         assertEquals(setOf(serverDomain, sni), names)

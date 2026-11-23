@@ -74,7 +74,7 @@ class RepairReportTest {
         assertEquals("77.88.8.8, 77.88.8.1", stepChange.getString("after"))
         assertEquals("direct DNS", json.getJSONArray("fixes").getJSONObject(0).getJSONObject("change").getString("setting"))
         val text = RepairReport.text(fixed, RepairVerdict.of(fixed), device, 0L)
-        assertTrue(text, text.contains("fixed: direct DNS changed to a whitelisted one (direct DNS: 192.0.2.1 -> 77.88.8.8, 77.88.8.1)"))
+        assertTrue(text, text.contains("fixed: direct DNS changed to a whitelisted one (direct DNS was 192.0.2.1, now 77.88.8.8, 77.88.8.1)"))
 
         // Stopped after the fix: the check is back to its failure, the fix is listed as undone, not as made.
         val undone = results + (RepairStep.DNS_DIRECT to StepResult(
