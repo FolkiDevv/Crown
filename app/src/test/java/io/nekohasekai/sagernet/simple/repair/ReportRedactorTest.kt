@@ -24,6 +24,8 @@ class ReportRedactorTest {
     private val subscriptionHost = "sub.provider-panel.io"
     private val subscriptionToken = "AbCdEf0123456789xyzTOKENqwerty"
     private val subscription = "https://$subscriptionHost/api/sub/$subscriptionToken"
+    private val shortId = "6ba85179e30d4fc2"
+    private val seed = "kcp-seed-Batch9"
 
     private val profile = """
         {"type":"vless","name":"NL 1","server":"$serverDomain","server_port":443,"uuid":"$uuid",
@@ -57,11 +59,13 @@ class ReportRedactorTest {
         "[Warn] wireguard private key $privateKey",
         """{"outbounds":[{"type":"vless","server":"$serverDomain","uuid":"$uuid","tls":{"server_name":"$sni","reality":{"public_key":"$publicKey"}}}],"route":{"rule_set":[{"url":"https:\/\/$subscriptionHost\/api\/sub\/$subscriptionToken"}]}}""",
         """{"remote":"https:\/\/$serverDomain\/dns-query"}""",
+        // Xray's own spelling of the Reality settings and the mKCP seed.
+        """[Info] Start Xray: {"realitySettings":{"serverName":"$sni","publicKey":"$publicKey","shortId":"$shortId","shortIds":["$shortId"]},"kcpSettings":{"seed":"$seed"}}""",
     )
 
     private val secrets = listOf(
         password, uuid, publicKey, privateKey, serverDomain, sni, serverIp, privateServerIp, subscriptionHost,
-        subscriptionToken, subscription, "example-provider", "provider-panel",
+        subscriptionToken, subscription, "example-provider", "provider-panel", shortId, seed,
     )
 
     @Test
@@ -91,6 +95,16 @@ class ReportRedactorTest {
         assertEquals(gstatic, r.redact(report[11]))
         // Loopback stays readable.
         assertTrue(r.redact(report[12]).contains("http://127.0.0.1:9090/<redacted>"))
+    }
+
+    @Test
+    fun xrayCamelCaseSecrets() {
+        val json = JSONObject(redactor().redact(report[17]).substringAfter("Start Xray: "))
+        val reality = json.getJSONObject("realitySettings")
+        assertEquals("<redacted>", reality.getString("shortId"))
+        assertEquals("<redacted>", reality.getJSONArray("shortIds").getString(0))
+        assertEquals("<redacted>", reality.getString("serverName"))
+        assertEquals("<redacted>", json.getJSONObject("kcpSettings").getString("seed"))
     }
 
     @Test

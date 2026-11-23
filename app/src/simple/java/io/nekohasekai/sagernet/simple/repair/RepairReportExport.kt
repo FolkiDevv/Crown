@@ -35,7 +35,8 @@ object RepairReportExport {
     const val MIME = "application/zip"
     private const val DIR = "diagnostics"
     private const val PREFIX = "throne-repair-"
-    private const val MAX_AGE_MS = 24 * 60 * 60 * 1000L
+    /** Older reports go at the next export: by then the app they were shared with has its copy. */
+    private const val MAX_AGE_MS = 60 * 60 * 1000L
 
     /** The last part of core.log: the minutes of «Починка» and a little before it. */
     private const val CORE_LOG_BYTES = 512 * 1024L

@@ -51,6 +51,10 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
         var s = line.replace("\\/", "/")
         for ((link, label) in links) s = s.replace(link, label)
         s = log.redact(s)
+        s = SECRET.replace(s) { m ->
+            val (_, quote, key, separator, value) = m.groupValues
+            "$quote$key$quote$separator" + if (value.startsWith("[")) "[\"<redacted>\"]" else "\"<redacted>\""
+        }
         val cleaned = s
         s = URL.replace(cleaned) { m ->
             val host = m.groups[HOST]!!
@@ -71,6 +75,14 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
 
     companion object {
         private const val HOST = 3
+
+        /**
+         * Secrets under the keys LogRedactor does not know: Xray writes them in camelCase (`shortId`, `serverName`), and
+         * the mKCP `seed` and the ML-DSA-65 verify key have no "key" / "password" in their names.
+         */
+        private val SECRET = Regex(
+            """(?i)("?)(short[_\-]?ids?|server[_\-]?names?|seed|mldsa65[_\-]?verify)\1(\s*[:=]\s*)("(?:[^"\\]|\\.)*"|\[(?:[^\[\]"]|"(?:[^"\\]|\\.)*")*\]|[^\s,;&}\]]+)"""
+        )
 
         /**
          * A URL's host (group 3): LogRedactor leaves `scheme://<redacted>@host/<redacted>`, so the credentials may hold
