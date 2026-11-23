@@ -225,18 +225,33 @@ fun Modifier.leaveWithDpad(): Modifier {
 fun Modifier.focusWhenShown(key: Any? = Unit, enabled: Boolean = true): Modifier =
     focusRequester(rememberFocusWhenShown(key, enabled))
 
-/** The requester [focusWhenShown] asks when the caller appears and each time [key] changes (keyboard input mode). */
+/**
+ * The requester [focusWhenShown] asks when the caller appears and each time [key] changes (keyboard input mode).
+ * [bringIntoComposition]: for an item of a lazy list, scrolls the list to it when it is not composed (a recreated
+ * activity, after a theme change, restores the list scrolled away from it); the focus is asked again then.
+ */
 @Composable
-fun rememberFocusWhenShown(key: Any? = Unit, enabled: Boolean = true): FocusRequester {
+fun rememberFocusWhenShown(
+    key: Any? = Unit,
+    enabled: Boolean = true,
+    bringIntoComposition: (suspend () -> Unit)? = null,
+): FocusRequester {
     val requester = remember { FocusRequester() }
     val inputMode = LocalInputModeManager.current
     LaunchedEffect(key, enabled) {
         if (enabled && inputMode.inputMode == InputMode.Keyboard) {
             // After a layout has placed the element: the first frame after a recreated activity (a theme change)
             // comes before its first layout, and an item of a lazy list exists only after the list's measure.
-            repeat(FOCUS_TRIES) {
-                withFrameNanos { }
-                if (runCatching { requester.requestFocus() }.isSuccess) return@LaunchedEffect
+            suspend fun tryFocus(): Boolean {
+                repeat(FOCUS_TRIES) {
+                    withFrameNanos { }
+                    if (runCatching { requester.requestFocus() }.isSuccess) return true
+                }
+                return false
+            }
+            if (!tryFocus() && bringIntoComposition != null) {
+                bringIntoComposition()
+                tryFocus()
             }
         }
     }
