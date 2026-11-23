@@ -137,6 +137,8 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val progress = engine.run { progress -> publish { it.copy(progress = progress) } }
                 val verdict = RepairVerdict.of(progress.results)
+                // Every check, the skipped ones too (those never reach the device checks, which log the rest).
+                Logs.i("simple repair: results ${summary(progress.results)}")
                 Logs.i("simple repair: finished, verdict ${describe(verdict)}")
                 publish { it.copy(running = false, progress = progress, verdict = verdict) }
             } catch (e: CancellationException) {
@@ -273,6 +275,15 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
     fun close() {
         stop()
         mutableState.update { it.copy(open = false) }
+    }
+
+    private fun summary(results: Map<RepairStep, StepResult>): String = RepairPlan.ORDER.joinToString { step ->
+        val result = results[step] ?: return@joinToString "${step.name.lowercase()} -"
+        buildString {
+            append(step.name.lowercase()).append(' ').append(result.status.name.lowercase())
+            result.skip?.let { append('(').append(it.name.lowercase()).append(')') }
+            result.fix?.let { append('(').append(it.name.lowercase()).append(')') }
+        }
     }
 
     private fun describe(verdict: RepairVerdict): String = when (verdict) {

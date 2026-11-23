@@ -199,7 +199,7 @@ class RepairEngine(
         fun defaultTimeout(step: RepairStep): Long = when (step) {
             RepairStep.SERVERS -> 150_000L
             RepairStep.DNS_VPN -> 150_000L
-            RepairStep.SITES_VPN -> 120_000L
+            RepairStep.SITES_VPN -> 150_000L
             else -> 30_000L
         }
     }

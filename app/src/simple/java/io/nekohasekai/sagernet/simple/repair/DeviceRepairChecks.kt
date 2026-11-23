@@ -112,16 +112,33 @@ class DeviceRepairChecks(
             RepairStep.WHITELISTS -> whitelists()
             RepairStep.CLOCK -> clock()
             RepairStep.PRIVATE_DNS_VPN -> privateDnsAndVpn()
-            RepairStep.DNS_DIRECT -> directDns()
+            RepairStep.DNS_DIRECT -> secondLook(step, tries = 2) { directDns() }
             RepairStep.SUBSCRIPTION -> subscription()
             RepairStep.SERVERS -> servers(done)
-            RepairStep.DNS_VPN -> ensureVpn(step, done)?.let { StepResult.skipped(it) } ?: vpnDns()
-            RepairStep.SITES_VPN -> ensureVpn(step, done)?.let { StepResult.skipped(it) } ?: vpnSites()
+            RepairStep.DNS_VPN -> ensureVpn(step, done)?.let { StepResult.skipped(it) } ?: secondLook(step, tries = 2) { vpnDns() }
+            // An auto-selector that has just started may test through a member it is about to leave: a few looks.
+            RepairStep.SITES_VPN -> ensureVpn(step, done)?.let { StepResult.skipped(it) } ?: secondLook(step, tries = 3) { vpnSites() }
             RepairStep.RU_DIRECT -> russianSites()
             RepairStep.BACKGROUND -> background()
         }
         Logs.i("simple repair: ${step.name.lowercase()} -> ${describe(result)}")
         result
+    }
+
+    /**
+     * A failure of a check that a single miss can fake (a DNS answer lost, a VPN that has just started or reloaded) is
+     * looked at again a moment later before it counts, so no setting is changed over a fluke: up to [tries] looks.
+     */
+    private suspend fun secondLook(step: RepairStep, tries: Int, check: suspend () -> StepResult): StepResult {
+        var result = check()
+        var look = 1
+        while (result.status == StepStatus.FAIL && look < tries) {
+            Logs.i("simple repair: ${step.name.lowercase()} failed (${describe(result)}), looking again")
+            delay(SECOND_LOOK_MS)
+            result = check()
+            look++
+        }
+        return result
     }
 
     private fun describe(result: StepResult): String = buildString {
@@ -546,6 +563,9 @@ class DeviceRepairChecks(
 
     private companion object {
         const val RECHECK_DELAY_MS = 3_000L
+
+        /** The pause before a failed check is looked at again ([secondLook]). */
+        const val SECOND_LOOK_MS = 4_000L
 
         /** connection-repair "Проверка времени на устройстве": more than 60 s off is a problem. */
         const val CLOCK_TOLERANCE_MS = 60_000L
