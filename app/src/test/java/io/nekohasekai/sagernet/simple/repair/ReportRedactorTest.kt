@@ -133,6 +133,52 @@ class ReportRedactorTest {
         assertTrue(out.lines().size > 10)
     }
 
+    /** Free text at the end of a JSON string ("…auth: xyz") must not take the closing quote with it (review #10). */
+    @Test
+    fun freeTextInJsonStringsKeepsTheJsonValid() {
+        val r = redactor()
+        val report = JSONObject()
+            .put("note", "IOException: invalid auth: $password")
+            .put("error", "connect failed, address: $serverDomain")
+            .put("values", JSONObject().put("latency_ms", 120))
+        val out = r.redactJson(report.toString())
+        val json = JSONObject(out)
+        assertFalse(out, out.contains(password))
+        assertFalse(out, out.contains(serverDomain))
+        assertTrue(json.getString("note").startsWith("IOException: invalid auth: "))
+        assertEquals(120, json.getJSONObject("values").getInt("latency_ms"))
+        // The error object of config(): the message alone is cleaned, the JSON is built around it.
+        val error = JSONObject().put("error", r.redact("IllegalStateException: bad password: $password")).toString(2)
+        assertFalse(error, error.contains(password))
+        JSONObject(error)
+    }
+
+    /** Xray's gRPC `serviceName` (camelCase) like the sing-box `service_name`, in the config and in a log line. */
+    @Test
+    fun grpcServiceName() {
+        val r = redactor()
+        val serviceName = "grpc-Svc-b9secret"
+        val config = """{"sing_box":{"outbounds":[{"type":"vless","transport":{"type":"grpc","service_name":"$serviceName"}}]},""" +
+            """"xray":[{"outbounds":[{"streamSettings":{"network":"grpc","grpcSettings":{"serviceName":"$serviceName","multiMode":true}}}]}]}"""
+        val out = r.redactJson(config)
+        assertFalse(out, out.contains(serviceName))
+        val grpc = JSONObject(out).getJSONArray("xray").getJSONObject(0).getJSONArray("outbounds").getJSONObject(0)
+            .getJSONObject("streamSettings").getJSONObject("grpcSettings")
+        assertEquals("<redacted>", grpc.getString("serviceName"))
+        assertTrue(grpc.getBoolean("multiMode"))
+        val line = r.redact("""[Info] Start Xray: {"grpcSettings":{"serviceName":"$serviceName"}}""")
+        assertFalse(line, line.contains(serviceName))
+    }
+
+    /** A key that names a server (DNS hosts) is cleaned like a value; the document stays JSON. */
+    @Test
+    fun hostKeysAreCleaned() {
+        val out = redactor().redactJson("""{"dns":{"hosts":{"$serverDomain":["$serverIp"],"$sni":"$privateServerIp"}}}""")
+        for (secret in listOf(serverDomain, sni, serverIp, privateServerIp)) assertFalse(out, out.contains(secret))
+        val hosts = JSONObject(out).getJSONObject("dns").getJSONObject("hosts")
+        assertTrue(hosts.toString(), hosts.has("<server-1>") && hosts.has("<server-2>"))
+    }
+
     @Test
     fun escapedJsonIsCleanedAndStillParses() {
         val line = redactor().redact(report[16])

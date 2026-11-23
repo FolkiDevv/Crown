@@ -118,7 +118,8 @@ object RepairReportExport {
         redactor.redactJson(root.toString()) + "\n"
     } catch (e: Exception) {
         // The message names no server: the generator's errors are about settings; it is cleaned all the same.
-        redactor.redact("{\"error\": ${JSONObject.quote("${e.javaClass.simpleName}: ${e.message}")}}") + "\n"
+        // Only the message string is cleaned, then put in a JSON object: the patterns never see JSON syntax.
+        JSONObject().put("error", redactor.redact("${e.javaClass.simpleName}: ${e.message}")).toString(2) + "\n"
     }
 
     private fun device(coreLog: String): ReportDevice {

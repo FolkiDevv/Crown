@@ -57,6 +57,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -560,21 +561,26 @@ fun SimpleApp(
     val openRepair = remember(repair, repairEnvironment) { { repair.open(repairEnvironment) } }
     val repairState by repair.state.collectAsStateWithLifecycle()
     // The report archive (batch 9): the share sheet opens only for the user's own press of «Экспортировать отчёт».
-    LaunchedEffect(repair) {
-        repair.exportEvents.collect { event ->
-            val message = when (event) {
-                is RepairExport.Ready -> try {
-                    context.startActivity(
-                        RepairReportExport.shareIntent(context, event.file, context.getString(R.string.simple_repair_export_share))
-                    )
-                    null
-                } catch (_: ActivityNotFoundException) {
-                    R.string.simple_repair_export_no_target
-                }
+    // Only while the activity is started: an archive finished in the background waits in the view model's channel and
+    // opens the share sheet when the user comes back (Android may block an activity start from the background).
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(repair, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            repair.exportEvents.collect { event ->
+                val message = when (event) {
+                    is RepairExport.Ready -> try {
+                        context.startActivity(
+                            RepairReportExport.shareIntent(context, event.file, context.getString(R.string.simple_repair_export_share))
+                        )
+                        null
+                    } catch (_: ActivityNotFoundException) {
+                        R.string.simple_repair_export_no_target
+                    }
 
-                RepairExport.Failed -> R.string.simple_repair_export_failed
+                    RepairExport.Failed -> R.string.simple_repair_export_failed
+                }
+                if (message != null) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             }
-            if (message != null) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
     if (repairState.open) {

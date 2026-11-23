@@ -68,26 +68,41 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
     fun redactText(text: String): String = text.lineSequence().joinToString("\n") { redact(it) }
 
     /**
-     * A JSON config (the final configuration): first the values under every key the line patterns would clean become
-     * the string "<redacted>" in the parsed tree — the log export's patterns, written for log lines, cut a JSON array
-     * of addresses in the middle and leave a number or `true` unquoted, which is no longer JSON — then the whole text
-     * goes through [redact] on one line and is pretty-printed if it still parses. Not JSON: [redactText].
+     * A JSON document (the final configuration, report.json), always returned as valid pretty JSON: in the parsed tree
+     * the values under every key the line patterns would clean become the string "<redacted>", then every other string
+     * — values and keys — goes through [redact] on its own, and the tree is written out. The patterns never see the
+     * JSON syntax around a string, so they cannot take a closing quote or cut an array. Not JSON: [redactText].
      */
     fun redactJson(text: String): String {
         val tree = runCatching { JSONObject(text) }.getOrNull() ?: return redactText(text)
-        blankSecrets(tree)
-        val line = redact(tree.toString())
-        return runCatching { JSONObject(line).toString(2).replace("\\/", "/") }.getOrDefault(line)
+        redactTree(tree)
+        return tree.toString(2).replace("\\/", "/")
     }
 
-    private fun blankSecrets(node: Any?) {
-        when (node) {
-            is JSONObject -> node.keys().asSequence().toList().forEach { key ->
-                if (isSecretKey(key)) node.put(key, "<redacted>") else blankSecrets(node.opt(key))
+    private fun redactTree(node: JSONObject) {
+        for (key in node.keys().asSequence().toList()) {
+            val value = node.opt(key)
+            val cleaned = if (isSecretKey(key)) "<redacted>" else redactValue(value)
+            // A key may name a host (DNS "hosts", a rule keyed by domain): it is cleaned like a value; two keys that
+            // clean to the same label keep both values.
+            val newKey = redact(key)
+            if (newKey == key) {
+                node.put(key, cleaned)
+            } else {
+                node.remove(key)
+                var unique = newKey
+                var n = 2
+                while (node.has(unique)) unique = "$newKey#${n++}"
+                node.put(unique, cleaned)
             }
-
-            is JSONArray -> for (i in 0 until node.length()) blankSecrets(node.opt(i))
         }
+    }
+
+    private fun redactValue(value: Any?): Any? = when (value) {
+        is String -> redact(value)
+        is JSONObject -> value.also(::redactTree)
+        is JSONArray -> value.also { array -> for (i in 0 until array.length()) array.put(i, redactValue(array.opt(i))) }
+        else -> value
     }
 
     private fun labelFor(host: String): String {
@@ -100,11 +115,11 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
         private const val HOST = 3
 
         /**
-         * Secrets under the keys LogRedactor does not know: Xray writes them in camelCase (`shortId`, `serverName`), and
-         * the mKCP `seed` and the ML-DSA-65 verify key have no "key" / "password" in their names.
+         * Secrets under the keys LogRedactor does not know: Xray writes them in camelCase (`shortId`, `serverName`, the
+         * gRPC `serviceName`), and the mKCP `seed` and the ML-DSA-65 verify key have no "key" / "password" in their names.
          */
         private val SECRET = Regex(
-            """(?i)("?)(short[_\-]?ids?|server[_\-]?names?|seed|mldsa65[_\-]?verify)\1(\s*[:=]\s*)("(?:[^"\\]|\\.)*"|\[(?:[^\[\]"]|"(?:[^"\\]|\\.)*")*\]|[^\s,;&}\]]+)"""
+            """(?i)("?)(short[_\-]?ids?|server[_\-]?names?|service[_\-]?names?|seed|mldsa65[_\-]?verify)\1(\s*[:=]\s*)("(?:[^"\\]|\\.)*"|\[(?:[^\[\]"]|"(?:[^"\\]|\\.)*")*\]|[^\s,;&}\]]+)"""
         )
 
         /**
@@ -115,7 +130,7 @@ class ReportRedactor(servers: Collection<String>, subscriptions: Collection<Stri
 
         /** The keys whose values the line patterns clean (LogRedactor's SECRET, SERVER and Wi-Fi keys, and [SECRET]). */
         private val SECRET_KEY = Regex(
-            """(?i)[\w\-]*(?:password|passwd|pass|secret|token|key|uuid|auth|psk|short_id)[\w\-]*|server|server_name|sni|host|address|path|service_name|(?:wifi_)?b?ssid|short[_\-]?ids?|server[_\-]?names?|seed|mldsa65[_\-]?verify"""
+            """(?i)[\w\-]*(?:password|passwd|pass|secret|token|key|uuid|auth|psk|short_id)[\w\-]*|server|server_name|sni|host|address|path|service[_\-]?names?|(?:wifi_)?b?ssid|short[_\-]?ids?|server[_\-]?names?|seed|mldsa65[_\-]?verify"""
         )
 
         fun isSecretKey(key: String): Boolean = SECRET_KEY.matches(key)
