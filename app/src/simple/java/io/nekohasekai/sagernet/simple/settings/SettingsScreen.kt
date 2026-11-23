@@ -36,11 +36,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.simple.FocusShapes
+import io.nekohasekai.sagernet.simple.focusRing
+import io.nekohasekai.sagernet.simple.focusWhenShown
+import io.nekohasekai.sagernet.simple.rememberFocusWhenShown
 import io.nekohasekai.sagernet.simple.modes.AppList
 import io.nekohasekai.sagernet.simple.modes.ModeCard
 import io.nekohasekai.sagernet.simple.modes.ModesUiState
@@ -78,8 +83,10 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     var themeDialog by rememberSaveable { mutableStateOf(false) }
+    // A remote (D-pad) starts on «Починка»; asked here, not in the item, which appears again as it scrolls into view.
+    val repairFocus = rememberFocusWhenShown()
     LazyColumn(modifier.fillMaxSize()) {
-        item { RepairEntry(actions.openRepair) }
+        item { RepairEntry(actions.openRepair, Modifier.focusRequester(repairFocus)) }
         modeItems(state, actions)
 
         item { SectionDivider() }
@@ -150,12 +157,13 @@ fun SettingsScreen(
 
 /** The accent «Починка» button at the top of the section. */
 @Composable
-private fun RepairEntry(onClick: () -> Unit) {
+private fun RepairEntry(onClick: () -> Unit, modifier: Modifier) {
     Card(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)
+            .focusRing(FocusShapes.Card),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -307,6 +315,7 @@ private fun ThemeDialog(current: NightMode, onSelect: (NightMode) -> Unit, onDis
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .then(if (mode == current) Modifier.focusWhenShown() else Modifier)
                             .selectable(selected = mode == current, role = Role.RadioButton) { onSelect(mode) }
                             .padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -322,7 +331,9 @@ private fun ThemeDialog(current: NightMode, onSelect: (NightMode) -> Unit, onDis
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.simple_cancel)) } },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_cancel)) }
+        },
     )
 }
 
@@ -355,7 +366,7 @@ private fun FallbackNotice(onDismiss: () -> Unit) {
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.simple_ok)) }
+            TextButton(onClick = onDismiss, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_ok)) }
         }
     }
 }
@@ -397,8 +408,8 @@ fun ClassicHintCard(onOpenSettings: () -> Unit, onClose: () -> Unit, modifier: M
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.simple_hint_classic_open)) }
-            TextButton(onClick = onClose) { Text(stringResource(R.string.simple_hint_classic_close)) }
+            TextButton(onClick = onOpenSettings, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_hint_classic_open)) }
+            TextButton(onClick = onClose, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_hint_classic_close)) }
         }
     }
 }

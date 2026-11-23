@@ -44,6 +44,8 @@
     <string name="simple_problem_dismiss">Скрыть</string>
     <string name="simple_repair_title">Починка</string>
     <string name="simple_repair_details">Подробности: %1$s</string>
+    <string name="simple_details_more">Показать полностью</string>
+    <string name="simple_details_less">Свернуть</string>
 
     <!-- Режимы трафика: настройки -->
     <string name="simple_settings_mode">Режим трафика</string>

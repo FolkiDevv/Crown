@@ -52,9 +52,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.simple.FocusShapes
+import io.nekohasekai.sagernet.simple.ServiceDetail
+import io.nekohasekai.sagernet.simple.focusRing
+import io.nekohasekai.sagernet.simple.focusWhenShown
 import io.nekohasekai.sagernet.simple.trafficSize
 import java.text.DateFormat
 import java.util.Date
+
+/** A dialog button with the focus ring of a remote. */
+private val DialogButton = Modifier.focusRing(FocusShapes.Pill)
 
 /** The four ways to add a server (simple-ui "Универсальное добавление серверов"). */
 class AddActions(
@@ -73,9 +80,17 @@ private val methods = listOf(
     AddMethod(R.drawable.simple_ic_file, R.string.simple_add_file, R.string.simple_add_file_summary) { it.file() },
 )
 
-/** The ways to add, one row each; [highlightFirst]: the clipboard row stands out (the welcome screen). */
+/**
+ * The ways to add, one row each; [highlightFirst]: the clipboard row stands out (the welcome screen); [focusFirst]: a
+ * remote (D-pad) starts on the first row.
+ */
 @Composable
-fun AddMethods(actions: AddActions, modifier: Modifier = Modifier, highlightFirst: Boolean = false) {
+fun AddMethods(
+    actions: AddActions,
+    modifier: Modifier = Modifier,
+    highlightFirst: Boolean = false,
+    focusFirst: Boolean = true,
+) {
     Column(modifier) {
         methods.forEachIndexed { index, method ->
             val first = highlightFirst && index == 0
@@ -83,7 +98,9 @@ fun AddMethods(actions: AddActions, modifier: Modifier = Modifier, highlightFirs
                 onClick = { method.action(actions) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 4.dp)
+                    .focusRing(FocusShapes.Card)
+                    .then(if (index == 0) Modifier.focusWhenShown(enabled = focusFirst) else Modifier),
                 colors = if (first) {
                     CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -111,7 +128,7 @@ fun AddMethods(actions: AddActions, modifier: Modifier = Modifier, highlightFirs
 
 /** The first start without servers (simple-ui "Первый запуск без серверов"): the ways to add and where to get a link. */
 @Composable
-fun Welcome(actions: AddActions, low: Boolean, modifier: Modifier = Modifier) {
+fun Welcome(actions: AddActions, low: Boolean, modifier: Modifier = Modifier, focus: Boolean = true) {
     Column(modifier.padding(top = if (low) 4.dp else 16.dp)) {
         Text(
             stringResource(R.string.simple_welcome_title),
@@ -128,7 +145,7 @@ fun Welcome(actions: AddActions, low: Boolean, modifier: Modifier = Modifier) {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(if (low) 8.dp else 20.dp))
-        AddMethods(actions, highlightFirst = true)
+        AddMethods(actions, highlightFirst = true, focusFirst = focus)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.Top) {
             Icon(
@@ -208,9 +225,9 @@ fun LinkDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = { onAdd(text) }, enabled = text.isNotBlank()) { Text(stringResource(R.string.simple_add_action)) }
+            TextButton(onClick = { onAdd(text) }, enabled = text.isNotBlank(), modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_add_action)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.simple_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = DialogButton) { Text(stringResource(R.string.simple_cancel)) } },
     )
 }
 
@@ -275,15 +292,13 @@ private fun MessageDialog(title: Int, text: String, onDismiss: () -> Unit, detai
                 Text(text)
                 if (!detail.isNullOrBlank()) {
                     Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(R.string.simple_repair_details, detail.take(600)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    ServiceDetail(detail)
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.simple_ok)) } },
+        confirmButton = {
+            TextButton(onClick = onDismiss, modifier = DialogButton.focusWhenShown()) { Text(stringResource(R.string.simple_ok)) }
+        },
     )
 }
 
@@ -363,13 +378,13 @@ private fun SummaryDialog(summary: ImportSummary, canConnect: Boolean, onConnect
         },
         confirmButton = {
             if (canConnect) {
-                TextButton(onClick = onConnect) { Text(stringResource(R.string.simple_action_connect)) }
+                TextButton(onClick = onConnect, modifier = DialogButton.focusWhenShown()) { Text(stringResource(R.string.simple_action_connect)) }
             } else {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.simple_ok)) }
+                TextButton(onClick = onDismiss, modifier = DialogButton.focusWhenShown()) { Text(stringResource(R.string.simple_ok)) }
             }
         },
         dismissButton = if (canConnect) {
-            { TextButton(onClick = onDismiss) { Text(stringResource(R.string.simple_summary_done)) } }
+            { TextButton(onClick = onDismiss, modifier = DialogButton) { Text(stringResource(R.string.simple_summary_done)) } }
         } else {
             null
         },
@@ -392,7 +407,7 @@ fun ClipboardOfferDialog(offer: ClipboardOffer, onAccept: () -> Unit, onDecline:
                 }
             )
         },
-        confirmButton = { TextButton(onClick = onAccept) { Text(stringResource(R.string.simple_add_action)) } },
-        dismissButton = { TextButton(onClick = onDecline) { Text(stringResource(R.string.simple_offer_later)) } },
+        confirmButton = { TextButton(onClick = onAccept, modifier = DialogButton.focusWhenShown()) { Text(stringResource(R.string.simple_add_action)) } },
+        dismissButton = { TextButton(onClick = onDecline, modifier = DialogButton) { Text(stringResource(R.string.simple_offer_later)) } },
     )
 }

@@ -58,6 +58,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.simple.FocusShapes
+import io.nekohasekai.sagernet.simple.focusRing
+import io.nekohasekai.sagernet.simple.focusWhenShown
 import io.nekohasekai.sagernet.simple.add.AddActions
 import io.nekohasekai.sagernet.simple.add.Welcome
 import io.nekohasekai.sagernet.simple.modes.ModeCard
@@ -89,6 +92,8 @@ fun HomeScreen(
     onToggle: () -> Unit,
     onDismissProblem: () -> Unit,
     modifier: Modifier = Modifier,
+    /** A remote (D-pad) starts on the connect button, or the first way to add, as the section opens. */
+    focus: Boolean = true,
 ) {
     val banner: @Composable (Modifier, Dp) -> Unit = { bannerModifier, gap ->
         state.problem?.let { problem ->
@@ -116,7 +121,7 @@ fun HomeScreen(
                         .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    ConnectButton(state.phase, onToggle)
+                    ConnectButton(state.phase, onToggle, focus = focus)
                     Spacer(Modifier.height(16.dp))
                     Status(state)
                 }
@@ -145,11 +150,13 @@ fun HomeScreen(
                 banner(cardWidth, 16.dp)
                 when (content) {
                     HomeContent.LOADING -> Unit
-                    HomeContent.NO_SERVERS -> Welcome(actions.add, low = low, modifier = cardWidth)
+                    HomeContent.NO_SERVERS -> Welcome(actions.add, low = low, modifier = cardWidth, focus = focus)
                     HomeContent.CONTROLS -> {
-                        Spacer(Modifier.height(16.dp))
-                        ConnectButton(state.phase, onToggle)
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(if (low) 8.dp else 16.dp))
+                        // A low pane (a TV, the home pane beside the server list) takes a smaller button, so the status
+                        // and the cards come into view sooner.
+                        ConnectButton(state.phase, onToggle, focus = focus, small = low)
+                        Spacer(Modifier.height(if (low) 12.dp else 20.dp))
                         Status(state)
                         Spacer(Modifier.height(28.dp))
                         ServerCardView(state, modeCard?.whitelists == true, actions.openServers, cardWidth)
@@ -164,7 +171,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit) {
+private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit, focus: Boolean, small: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val container by animateColorAsState(
         when (phase) {
@@ -189,7 +196,7 @@ private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit) {
     val status = stringResource(phase.label())
     val busy = phase == ConnectionPhase.CONNECTING || phase == ConnectionPhase.RECONNECTING ||
         phase == ConnectionPhase.DISCONNECTING
-    Box(Modifier.size(184.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(if (small) 144.dp else 184.dp), contentAlignment = Alignment.Center) {
         if (busy) {
             CircularProgressIndicator(Modifier.fillMaxSize(), strokeWidth = 4.dp)
         }
@@ -201,7 +208,9 @@ private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit) {
             border = if (phase == ConnectionPhase.OFF) BorderStroke(2.dp, colors.outlineVariant) else null,
             shadowElevation = if (phase == ConnectionPhase.PROTECTED) 6.dp else 0.dp,
             modifier = Modifier
-                .size(160.dp)
+                .size(if (small) 124.dp else 160.dp)
+                .focusRing(CircleShape, outset = 4.dp)
+                .focusWhenShown(enabled = focus)
                 .semantics {
                     role = Role.Button
                     contentDescription = action
@@ -213,7 +222,7 @@ private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit) {
                     painterResource(R.drawable.simple_ic_power),
                     contentDescription = null,
                     tint = iconColor,
-                    modifier = Modifier.size(64.dp),
+                    modifier = Modifier.size(if (small) 52.dp else 64.dp),
                 )
             }
         }
@@ -407,7 +416,7 @@ private fun HomeCard(
     val secondary = if (warning) content else MaterialTheme.colorScheme.onSurfaceVariant
     OutlinedCard(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.focusRing(FocusShapes.Card),
         colors = CardDefaults.outlinedCardColors(containerColor = container, contentColor = content),
     ) {
         Row(
@@ -494,7 +503,7 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
                 Spacer(Modifier.height(2.dp))
                 Text(stringResource(text), style = MaterialTheme.typography.bodyMedium)
             }
-            IconButton(onClick = onDismiss) {
+            IconButton(onClick = onDismiss, modifier = Modifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
                 Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.simple_problem_dismiss))
             }
         }
@@ -504,7 +513,7 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
                 .padding(start = 16.dp, end = 16.dp, bottom = 12.dp, top = 4.dp),
             horizontalArrangement = Arrangement.End,
         ) {
-            Button(onClick = onRepair) { Text(stringResource(R.string.simple_problem_repair)) }
+            Button(onClick = onRepair, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_problem_repair)) }
         }
     }
 }

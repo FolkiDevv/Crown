@@ -55,6 +55,8 @@
     <string name="simple_repair_title">Repair</string>
     <!-- %1$s: the error message of the service -->
     <string name="simple_repair_details">Details: %1$s</string>
+    <string name="simple_details_more">Show all</string>
+    <string name="simple_details_less">Show less</string>
 
     <!-- Traffic modes: settings -->
     <string name="simple_settings_mode">Traffic mode</string>
