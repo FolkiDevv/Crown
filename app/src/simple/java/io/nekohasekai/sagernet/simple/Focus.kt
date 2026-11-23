@@ -280,7 +280,10 @@ fun rememberFocusWhenShown(
             suspend fun tryFocus(): Boolean {
                 repeat(FOCUS_TRIES) {
                     withFrameNanos { }
-                    if (runCatching { requester.requestFocus() }.isSuccess) return true
+                    // Granted, not only asked: an element not attached yet (a lazy item still out of composition) may
+                    // throw or answer false, and both go on to the next try and the scrolling below.
+                    val granted: Boolean = runCatching { requester.requestFocus() }.getOrDefault(false)
+                    if (granted) return true
                 }
                 return false
             }
