@@ -14,6 +14,7 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.Lifecycle
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleActivity
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.ui.MainActivity
@@ -170,7 +171,19 @@ object ClassicVisit {
             if (drawer.isDrawerOpen(GravityCompat.START)) drawer.closeDrawers() else leave()
         }
 
-        /** MainActivity's first start: before its fragments start, so their back callbacks rank above [back]. */
+        /**
+         * Right after MainActivity.onCreate (Android 10+): the classic home it has just queued is only created, not
+         * yet given its view, which its first start would build on the main thread (the profile list with its
+         * toolbar and search) only to be replaced — on a cold first visit that alone ran past the input timeout.
+         */
+        override fun onActivityPostCreated(activity: Activity, savedInstanceState: Bundle?) {
+            if (activity === main) start()
+        }
+
+        /**
+         * Older Android: MainActivity's first start, before its fragments start, so their back callbacks still rank
+         * above [back]. Also the fallback if the post-created callback did not come.
+         */
         override fun onActivityStarted(activity: Activity) {
             if (activity === main) start()
         }
@@ -179,7 +192,20 @@ object ClassicVisit {
             if (started) return
             started = true
             main.onBackPressedDispatcher.addCallback(back)
-            if (show) show(screen)
+            if (!show) return
+            // The classic home MainActivity queued goes in now, while the activity is only created, and the screen
+            // replaces it at once: the home never reaches its view.
+            flush()
+            show(screen)
+            flush()
+        }
+
+        private fun flush() {
+            try {
+                main.supportFragmentManager.executePendingTransactions()
+            } catch (e: IllegalStateException) {
+                Logs.w(e)
+            }
         }
 
         fun show(screen: ClassicScreen) {
