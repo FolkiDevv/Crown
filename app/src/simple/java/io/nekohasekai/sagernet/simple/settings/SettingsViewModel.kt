@@ -44,14 +44,23 @@ object SettingsValues {
 
     /**
      * `sub_auto_update` after the switch: sign-encoded minutes, the magnitude kept while off (as the classic
-     * Settings › Subscriptions does); a magnitude below the scheduler's minimum becomes a day, the interval the
-     * simple UI gives a subscription.
+     * Settings › Subscriptions does). Switching on uses a day — the interval the simple UI gives a subscription, as
+     * the first import does (design.md D3) — unless the user set an interval of their own in the classic settings:
+     * a magnitude below the scheduler's minimum or the untouched classic default (30 min) becomes a day.
      */
     fun autoUpdate(subAutoUpdate: Int, on: Boolean): Int {
-        val minutes = abs(subAutoUpdate).takeIf { it >= SubscriptionScheduler.MIN_INTERVAL_MINUTES }
-            ?: SimpleImport.DAILY_MINUTES
+        if (on && autoUpdateOn(subAutoUpdate)) return subAutoUpdate
+        val kept = abs(subAutoUpdate).takeIf { it >= SubscriptionScheduler.MIN_INTERVAL_MINUTES }
+        val minutes = when {
+            kept == null -> SimpleImport.DAILY_MINUTES
+            on && kept == CLASSIC_DEFAULT_MINUTES -> SimpleImport.DAILY_MINUTES
+            else -> kept
+        }
         return if (on) minutes else -minutes
     }
+
+    /** The magnitude of the classic default `sub_auto_update` (-30: off, 30 minutes). */
+    private const val CLASSIC_DEFAULT_MINUTES = 30
 
     /** The theme choices: the three plain ones, and the classic battery-saver mode only while it is in effect. */
     fun nightModes(current: NightMode): List<NightMode> =

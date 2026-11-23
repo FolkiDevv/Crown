@@ -22,8 +22,16 @@ class SettingsValuesTest {
         assertEquals(-120, SettingsValues.autoUpdate(120, on = false))
         assertEquals(120, SettingsValues.autoUpdate(-120, on = true))
         assertEquals(1440, SettingsValues.autoUpdate(1440, on = true))
-        // the classic default keeps its 30 minutes
-        assertEquals(30, SettingsValues.autoUpdate(-30, on = true))
+        // already on: nothing changes, also at the scheduler's minimum
+        assertEquals(30, SettingsValues.autoUpdate(30, on = true))
+        assertEquals(-30, SettingsValues.autoUpdate(30, on = false))
+    }
+
+    @Test
+    fun theClassicDefaultSwitchesOnOnceADay() {
+        // a fresh install keeps -30 (off, 30 min): the simple UI's switch means daily updates, as the first import
+        assertEquals(1440, SettingsValues.autoUpdate(-30, on = true))
+        assertEquals(-30, SettingsValues.autoUpdate(-30, on = false))
     }
 
     @Test
