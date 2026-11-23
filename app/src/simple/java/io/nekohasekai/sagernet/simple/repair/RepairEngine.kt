@@ -153,7 +153,12 @@ class RepairEngine(
                 null
             }
             if (recheck != null && recheck.status.passed) {
-                return failed.copy(status = StepStatus.FIXED, fix = fix.kind, values = failed.values + recheck.values)
+                return failed.copy(
+                    status = StepStatus.FIXED,
+                    fix = fix.kind,
+                    fixChange = fix.change,
+                    values = failed.values + recheck.values,
+                )
             }
             // connection-repair "Откат неудачного исправления": the setting goes back before anything else is tried.
             if (journal.restore(entry)) settle(wait = true)

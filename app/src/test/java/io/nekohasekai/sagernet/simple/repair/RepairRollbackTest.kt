@@ -34,6 +34,8 @@ class RepairRollbackTest {
     ) : RepairFix {
         private val before = settings.values.getValue(key)
 
+        override val change get() = FixChange(key, before, value)
+
         override suspend fun apply() {
             settings.values[key] = value
             settings.log += "apply $key=$value"
@@ -99,6 +101,8 @@ class RepairRollbackTest {
         val dns = results.getValue(RepairStep.DNS_DIRECT)
         assertEquals(StepStatus.FIXED, dns.status)
         assertEquals(FixKind.DIRECT_DNS_WHITELISTED, dns.fix)
+        // The report shows the setting before and after.
+        assertEquals(FixChange("dns", "local", "77.88.8.8"), dns.fixChange)
         // The problem found stays in the result: the explanation says what was wrong and what was done.
         assertTrue(dns.has(Finding.DNS_NO_ANSWER))
         assertEquals("77.88.8.8", settings.values["dns"])
