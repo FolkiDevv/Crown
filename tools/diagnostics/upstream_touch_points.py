@@ -1,8 +1,9 @@
 """Upstream touch-point check for the simple UI (openspec change simple-ui-redesign, design.md D2) and the Crown fork
 identity (openspec/specs/repository-governance, requirement "Идентичность форка Crown").
 
-Read-only: compares the working tree (committed, staged, unstaged and untracked files) with a base ref and lists every
-changed file outside the allowed set:
+Read-only: compares the working tree (committed, staged, unstaged and untracked files) with the merge base of a base
+ref and HEAD (`git merge-base <base> HEAD`, the three-dot view: only the fork's own changes, not commits the base
+gained after it) and lists every changed file outside the allowed set:
   - the touch-point table of design.md D2 (TOUCH_POINTS below) and the fork identity points (FORK_IDENTITY_POINTS);
   - the fork-only directories and files (FORK_DIRS): app/src/simple/, openspec/, tools/diagnostics/ and the fork
     identity files;
@@ -109,7 +110,9 @@ def main() -> int:
 
     try:
         git("rev-parse", "--verify", "--quiet", f"{args.base}^{{commit}}")
-        changes = changed_files(args.base)
+        # Upstream moves on after the last merge; its own new commits are not the fork's changes.
+        merge_base = git("merge-base", args.base, "HEAD").strip()
+        changes = changed_files(merge_base)
     except RuntimeError as exc:
         print(f"FATAL: {exc}")
         if args.base.startswith("upstream/"):
@@ -128,7 +131,7 @@ def main() -> int:
         elif args.all and not path.startswith(FORK_DIRS):
             touched.append(f"{status} {path}: {reason}")
 
-    print(f"base: {args.base}, changed files: {len(changes)}")
+    print(f"base: {args.base} (merge base {merge_base[:8]}), changed files: {len(changes)}")
     print(f"allowed changes outside the fork directories ({len(touched)}):")
     for line in touched:
         print(f"  {line}")
