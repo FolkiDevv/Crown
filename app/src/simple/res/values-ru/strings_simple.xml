@@ -260,8 +260,8 @@
     <string name="simple_server_working">Работают в этой сети: %1$d из %2$d</string>
 
     <!-- Починка (батч 7) -->
-    <string name="simple_repair_entry">Починка</string>
-    <string name="simple_repair_entry_summary">Узнать, почему не работает VPN, и исправить</string>
+    <string name="simple_repair_entry">Что-то не работает?</string>
+    <string name="simple_repair_entry_summary">«Починка» найдёт причину и исправит, что сможет</string>
     <string name="simple_repair_back">Назад</string>
     <string name="simple_repair_stop">Остановить</string>
     <string name="simple_repair_again">Проверить снова</string>
@@ -285,8 +285,8 @@
     <string name="simple_repair_whitelists_found">В этой сети открываются только разрешённые сайты (белые списки)</string>
     <string name="simple_repair_whitelists_none">Белых списков нет: сеть пропускает любые сайты</string>
     <string name="simple_repair_clock_ok">Время верное</string>
-    <string name="simple_repair_clock_ahead">Часы спешат на %1$s. С неверным временем VPN не подключается</string>
-    <string name="simple_repair_clock_behind">Часы отстают на %1$s. С неверным временем VPN не подключается</string>
+    <string name="simple_repair_clock_ahead">Часы спешат на %1$s. С неверным временем VPN может не подключаться</string>
+    <string name="simple_repair_clock_behind">Часы отстают на %1$s. С неверным временем VPN может не подключаться</string>
     <plurals name="simple_repair_minutes">
         <item quantity="one">%d минуту</item>
         <item quantity="few">%d минуты</item>
@@ -373,6 +373,8 @@
     <string name="simple_repair_cause_sub_ended_steps">Продлите подписку у VPN-сервиса и обновите её в разделе «Серверы».</string>
     <string name="simple_repair_cause_sub_empty">В подписке нет серверов</string>
     <string name="simple_repair_cause_sub_empty_steps">Обновите подписку в разделе «Серверы». Если она осталась пустой, обратитесь в VPN-сервис.</string>
+    <string name="simple_repair_cause_no_servers">Серверы не добавлены</string>
+    <string name="simple_repair_cause_no_servers_steps">Добавьте ссылку на подписку или серверы, которые дал VPN-сервис.</string>
     <string name="simple_repair_cause_wl_no_servers">В сети белые списки, а в подписке нет серверов для них</string>
     <string name="simple_repair_cause_wl_no_servers_steps">Попросите у VPN-сервиса сервер, который работает при белых списках, или подключитесь к Wi‑Fi.</string>
     <string name="simple_repair_cause_wl_down">Серверы для белых списков сейчас не отвечают</string>

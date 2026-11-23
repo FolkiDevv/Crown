@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
 import kotlin.math.abs
@@ -219,7 +220,13 @@ private fun StatusIcon(state: StepState) {
             StepStatus.WARN -> Icon(Icons.Filled.Warning, contentDescription = null, tint = warningColor())
             StepStatus.FAIL -> Icon(Icons.Filled.Close, contentDescription = null, tint = colors.error)
             StepStatus.FIXED -> Icon(Icons.Filled.Build, contentDescription = null, tint = colors.primary)
-            StepStatus.SKIPPED -> Text("—", color = colors.onSurfaceVariant, style = MaterialTheme.typography.titleMedium)
+            // The explanation says «Не проверено»; a screen reader need not read the dash.
+            StepStatus.SKIPPED -> Text(
+                "—",
+                color = colors.onSurfaceVariant,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.clearAndSetSemantics { },
+            )
         }
     }
 }
@@ -302,6 +309,7 @@ private val RepairVerdict.Cause.texts: Pair<Int, Int>
         RepairVerdict.Cause.PRIVATE_DNS -> R.string.simple_repair_cause_private_dns to R.string.simple_repair_cause_private_dns_steps
         RepairVerdict.Cause.SUBSCRIPTION_ENDED -> R.string.simple_repair_cause_sub_ended to R.string.simple_repair_cause_sub_ended_steps
         RepairVerdict.Cause.SUBSCRIPTION_EMPTY -> R.string.simple_repair_cause_sub_empty to R.string.simple_repair_cause_sub_empty_steps
+        RepairVerdict.Cause.NO_SERVERS -> R.string.simple_repair_cause_no_servers to R.string.simple_repair_cause_no_servers_steps
         RepairVerdict.Cause.WHITELISTS_NO_SERVERS ->
             R.string.simple_repair_cause_wl_no_servers to R.string.simple_repair_cause_wl_no_servers_steps
 
@@ -317,7 +325,7 @@ private fun RepairVerdict.Cause.action(results: Map<RepairStep, StepResult>): Re
     RepairVerdict.Cause.CLOCK -> RepairAction.DATE_SETTINGS
     RepairVerdict.Cause.OTHER_VPN -> RepairAction.VPN_SETTINGS
     RepairVerdict.Cause.PRIVATE_DNS -> RepairAction.NETWORK_SETTINGS
-    RepairVerdict.Cause.SUBSCRIPTION_ENDED, RepairVerdict.Cause.SUBSCRIPTION_EMPTY,
+    RepairVerdict.Cause.SUBSCRIPTION_ENDED, RepairVerdict.Cause.SUBSCRIPTION_EMPTY, RepairVerdict.Cause.NO_SERVERS,
     RepairVerdict.Cause.ALL_SERVERS_DOWN, RepairVerdict.Cause.CURRENT_SERVER_DOWN -> RepairAction.SERVERS
 
     RepairVerdict.Cause.WHITELISTS_NO_SERVERS, RepairVerdict.Cause.WHITELISTS_SERVERS_DOWN -> RepairAction.WIFI_SETTINGS

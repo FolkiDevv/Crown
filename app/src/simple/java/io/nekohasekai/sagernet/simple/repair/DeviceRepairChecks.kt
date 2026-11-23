@@ -125,6 +125,11 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
             result = NetworkProber.probe(physicalNetwork() ?: physical, config)
             Logs.i("simple repair: internet (second look): ${result.summary()} -> ${result.regime.key}")
         }
+        // Another app's VPN that takes this app in forbids requests over the physical network: nothing answering then
+        // says nothing about the internet (the check «Частный DNS и другие VPN» names the cause).
+        if ((result.regime == Regime.NO_INTERNET || result.inconclusive) && otherVpnActive()) {
+            return StepResult.skipped(SkipReason.OTHER_VPN, note = result.summary())
+        }
         probe = result
         val reached = (result.allowed + result.blocked).count { it.reachable }.toLong()
         val values = mapOf(RepairValues.REACHED to reached, RepairValues.ASKED to (result.allowed.size + result.blocked.size).toLong())
@@ -204,14 +209,18 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
             }
             if (hostname != null || mode == PRIVATE_DNS_MODE_HOSTNAME) findings += Finding.PRIVATE_DNS
         }
-        if (env.serviceOff()) {
-            @Suppress("DEPRECATION")
-            val vpn = connectivity.allNetworks.any {
-                connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-            }
-            if (vpn) findings += Finding.OTHER_VPN
-        }
+        if (otherVpnActive()) findings += Finding.OTHER_VPN
         return if (findings.isEmpty()) StepResult.ok() else StepResult(StepStatus.FAIL, findings)
+    }
+
+    /** A VPN network among the networks while this app's service is off: another app's VPN. */
+    private fun otherVpnActive(): Boolean {
+        if (!env.serviceOff()) return false
+        val connectivity = SagerNet.connectivity
+        @Suppress("DEPRECATION")
+        return connectivity.allNetworks.any {
+            connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        }
     }
 
     /** The direct DNS server of the app (`direct_dns`) for a trusted name, through the physical network. */

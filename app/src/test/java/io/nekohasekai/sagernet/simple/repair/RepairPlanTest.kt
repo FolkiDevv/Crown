@@ -83,6 +83,16 @@ class RepairPlanTest {
     }
 
     @Test
+    fun anInternetCheckKeptFromRunningByAnotherVpnPassesThatReasonOn() {
+        val done = mutableMapOf(RepairStep.INTERNET to StepResult.skipped(SkipReason.OTHER_VPN))
+        for (step in RepairPlan.ORDER.drop(1)) {
+            val expected = if (RepairPlan.REQUIRES.getValue(step).isEmpty()) null else SkipReason.OTHER_VPN
+            assertEquals(step.name, expected, RepairPlan.skipReason(step, done))
+            done[step] = expected?.let { StepResult.skipped(it) } ?: ok
+        }
+    }
+
+    @Test
     fun theChecksWithoutDependenciesRunWithoutInternet() {
         val done = mapOf(RepairStep.INTERNET to StepResult.fail(Finding.NOTHING_ANSWERS))
         assertNull(RepairPlan.skipReason(RepairStep.PRIVATE_DNS_VPN, done))

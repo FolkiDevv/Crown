@@ -266,9 +266,12 @@ object RepairPlan {
             }
         }
         if (RepairStep.INTERNET in requires || RepairStep.SERVERS in requires) {
-            // The root first: without internet nothing that needs it says anything.
+            // The root first: without internet nothing that needs it says anything. An internet check that could not
+            // run (another app's VPN takes this app in) passes its own reason on.
             val internet = done[RepairStep.INTERNET]
-            if (internet != null && !internet.status.passed && step != RepairStep.INTERNET) return SkipReason.NO_INTERNET
+            if (internet != null && !internet.status.passed && step != RepairStep.INTERNET) {
+                return if (internet.status == StepStatus.SKIPPED) internet.skip ?: SkipReason.ERROR else SkipReason.NO_INTERNET
+            }
         }
         if (step in THROUGH_VPN && done[RepairStep.PRIVATE_DNS_VPN]?.has(Finding.OTHER_VPN) == true) {
             return SkipReason.OTHER_VPN

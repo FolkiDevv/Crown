@@ -44,6 +44,9 @@ sealed interface RepairVerdict {
         /** No server answers and a subscription has no servers at all. */
         SUBSCRIPTION_EMPTY,
 
+        /** No server added at all (no subscription either). */
+        NO_SERVERS,
+
         /** Whitelists in the network, no server answers and none is recognized as a server for whitelists. */
         WHITELISTS_NO_SERVERS,
 
@@ -90,6 +93,7 @@ sealed interface RepairVerdict {
                     found(RepairStep.SUBSCRIPTION, Finding.TRAFFIC_EXHAUSTED) -> Cause.SUBSCRIPTION_ENDED
 
                 noneAnswers && found(RepairStep.SUBSCRIPTION, Finding.SUBSCRIPTION_EMPTY) -> Cause.SUBSCRIPTION_EMPTY
+                found(RepairStep.SERVERS, Finding.NO_SERVERS) -> Cause.NO_SERVERS
                 noneAnswers && whitelists && whitelistServers == 0 -> Cause.WHITELISTS_NO_SERVERS
                 noneAnswers && whitelists -> Cause.WHITELISTS_SERVERS_DOWN
                 noneAnswers -> Cause.ALL_SERVERS_DOWN

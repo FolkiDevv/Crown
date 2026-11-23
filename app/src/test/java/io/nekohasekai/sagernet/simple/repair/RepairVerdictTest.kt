@@ -141,13 +141,27 @@ class RepairVerdictTest {
     }
 
     @Test
-    fun allServersDownWhenNoServerAtAllAndNoSubscription() {
+    fun noServersAddedWithoutAnySubscription() {
         val results = run(
             RepairStep.SUBSCRIPTION to StepResult.skipped(SkipReason.NO_SUBSCRIPTION),
             RepairStep.SERVERS to servers(total = 0, answering = 0),
             *vpnChecksSkipped,
         )
-        assertEquals(Cause.ALL_SERVERS_DOWN, cause(results))
+        assertEquals(Cause.NO_SERVERS, cause(results))
+    }
+
+    @Test
+    fun otherVpnWhenItKeptTheInternetCheckFromRunning() {
+        // Another app's VPN takes this app in: the requests over the physical network fail, which is no proof of
+        // a missing internet; the checks that need it are «не проверено: активно VPN другого приложения».
+        val skipped = RepairPlan.ORDER.filter { RepairPlan.REQUIRES.getValue(it).isNotEmpty() }
+            .map { it to StepResult.skipped(SkipReason.OTHER_VPN) }.toTypedArray()
+        val results = run(
+            RepairStep.INTERNET to StepResult.skipped(SkipReason.OTHER_VPN),
+            RepairStep.PRIVATE_DNS_VPN to StepResult.fail(Finding.OTHER_VPN),
+            *skipped,
+        )
+        assertEquals(Cause.OTHER_VPN, cause(results))
     }
 
     @Test

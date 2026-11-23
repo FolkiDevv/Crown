@@ -276,8 +276,8 @@
     <string name="simple_server_working">Working in this network: %1$d of %2$d servers</string>
 
     <!-- Repair (batch 7): the entry in Settings -->
-    <string name="simple_repair_entry">Repair</string>
-    <string name="simple_repair_entry_summary">Find out why the VPN does not work and fix it</string>
+    <string name="simple_repair_entry">Something not working?</string>
+    <string name="simple_repair_entry_summary">Repair finds out why and fixes what it can</string>
     <!-- Repair: the screen -->
     <string name="simple_repair_back">Back</string>
     <string name="simple_repair_stop">Stop</string>
@@ -305,8 +305,8 @@
     <string name="simple_repair_whitelists_none">No whitelists: the network lets any website through</string>
     <string name="simple_repair_clock_ok">The time is right</string>
     <!-- %1$s: how far off, e.g. «7 minutes» -->
-    <string name="simple_repair_clock_ahead">The clock is %1$s fast. With a wrong time the VPN cannot connect</string>
-    <string name="simple_repair_clock_behind">The clock is %1$s slow. With a wrong time the VPN cannot connect</string>
+    <string name="simple_repair_clock_ahead">The clock is %1$s fast. With a wrong time the VPN may fail to connect</string>
+    <string name="simple_repair_clock_behind">The clock is %1$s slow. With a wrong time the VPN may fail to connect</string>
     <plurals name="simple_repair_minutes">
         <item quantity="one">%d minute</item>
         <item quantity="other">%d minutes</item>
@@ -393,6 +393,8 @@
     <string name="simple_repair_cause_sub_ended_steps">Renew it with your VPN service, then update it in Servers.</string>
     <string name="simple_repair_cause_sub_empty">The subscription has no servers</string>
     <string name="simple_repair_cause_sub_empty_steps">Update the subscription in Servers. If it stays empty, contact your VPN service.</string>
+    <string name="simple_repair_cause_no_servers">No servers added</string>
+    <string name="simple_repair_cause_no_servers_steps">Add the subscription link or the servers your VPN service gave you.</string>
     <string name="simple_repair_cause_wl_no_servers">The network has whitelists, and the subscription has no servers for them</string>
     <string name="simple_repair_cause_wl_no_servers_steps">Ask your VPN service for a server that works with whitelists, or connect to Wi‑Fi.</string>
     <string name="simple_repair_cause_wl_down">Servers for whitelists do not answer now</string>
