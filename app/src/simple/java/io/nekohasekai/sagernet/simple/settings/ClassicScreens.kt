@@ -83,7 +83,7 @@ enum class ClassicScreen(
  *   handling (a nested settings screen, search, selection) keep it: their callbacks are added at their start, above
  *   this one, which is added before the first fragment starts.
  * - A settings sub-screen sits on the classic settings root ([SettingsFragment.forScreen]); leaving the sub-screen it
- *   opened (back or the toolbar arrow) finishes the visit as well rather than stopping on the root.
+ *   opened (back or the toolbar arrow) finishes the visit straight away; the root is never shown on the way out.
  * - The drawer stays: the visit may go on to any classic screen, and back from there also returns.
  */
 object ClassicVisit {
@@ -136,24 +136,38 @@ object ClassicVisit {
         var expectSettings = false
 
         private val back = object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                val drawer = main.binding.drawerLayout
-                if (drawer.isDrawerOpen(GravityCompat.START)) drawer.closeDrawers() else leave()
-            }
+            override fun handleOnBackPressed() = closeDrawerOrLeave()
         }
 
+        /**
+         * The settings sub-screen this visit opened: back and the toolbar arrow there leave the visit at once, so the
+         * settings root below it never shows. Deeper screens (DNS › advanced) go back to it as usual.
+         */
         val settingsWatch = object : FragmentManager.FragmentLifecycleCallbacks() {
             override fun onFragmentViewCreated(fm: FragmentManager, f: Fragment, v: View, savedInstanceState: Bundle?) {
                 if (f !is SettingsFragment || !expectSettings) return
                 expectSettings = false
                 val children = f.childFragmentManager
-                var depth = children.backStackEntryCount
-                children.addOnBackStackChangedListener {
-                    val now = children.backStackEntryCount
-                    if (now == 0 && depth > 0 && !main.isFinishing) leave()
-                    depth = now
+                val leaveSubScreen = object : OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() = closeDrawerOrLeave()
                 }
+                // Registered after SettingsFragment's own callback (its onViewCreated) for the same view lifecycle,
+                // so it is added to the dispatcher after it on every start and ranks above it.
+                main.onBackPressedDispatcher.addCallback(f.viewLifecycleOwner, leaveSubScreen)
+                fun sync() {
+                    val depth = children.backStackEntryCount
+                    leaveSubScreen.isEnabled = depth <= 1
+                    // Runs after SettingsFragment's own listener, which has just set the arrow to pop the stack.
+                    if (depth == 1) f.toolbar?.setNavigationOnClickListener { leave() }
+                }
+                children.addOnBackStackChangedListener { sync() }
+                sync()
             }
+        }
+
+        private fun closeDrawerOrLeave() {
+            val drawer = main.binding.drawerLayout
+            if (drawer.isDrawerOpen(GravityCompat.START)) drawer.closeDrawers() else leave()
         }
 
         /** MainActivity's first start: before its fragments start, so their back callbacks rank above [back]. */
@@ -180,6 +194,7 @@ object ClassicVisit {
 
         /** Back to the simple interface, which is below in the task (or comes up, if this is the task's root). */
         private fun leave() {
+            if (main.isFinishing) return
             if (main.isTaskRoot) main.startActivity(Intent(main, SimpleActivity::class.java))
             main.finish()
         }
