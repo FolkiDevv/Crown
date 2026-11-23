@@ -250,6 +250,29 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         mutableMessages.tryEmit(text)
     }
 
+    /** Whether this app's VPN is connected now («Починка» checks through it only then). */
+    val vpnConnected: Boolean get() = serviceState == BaseService.State.Connected
+
+    /** Whether the service is off altogether: a VPN network seen now belongs to another app. */
+    val serviceOff: Boolean get() = !serviceState.started && serviceState != BaseService.State.Stopping
+
+    /**
+     * One URL test of the running connection, as the server checks of this screen do («Починка»'s «Сайты через VPN»):
+     * the delay (> 0), [FAILED], [VPN_EXIT_UNKNOWN], or null when the service cannot be asked.
+     */
+    suspend fun testConnection(): Int? {
+        val service = connection.service ?: return null
+        if (serviceState != BaseService.State.Connected) return null
+        return withContext(Dispatchers.IO) {
+            try {
+                service.urlTest()
+            } catch (e: Exception) {
+                Logs.d("simple home: url test failed: ${e.message}")
+                FAILED
+            }
+        }
+    }
+
     /** Hides the banner; a loss is forgotten like a swiped error of the classic UI. */
     fun dismissProblem() {
         if (lost != null) {

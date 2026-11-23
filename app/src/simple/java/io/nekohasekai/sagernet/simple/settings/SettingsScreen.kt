@@ -16,6 +16,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -57,6 +58,8 @@ class SettingsActions(
     /** A classic screen: the backup («Перенос на другое устройство») or a screen of the advanced mode. */
     val openClassicScreen: (ClassicScreen) -> Unit,
     val openClassic: () -> Unit,
+    /** «Починка» (batch 7). */
+    val openRepair: () -> Unit,
 )
 
 /**
@@ -65,8 +68,7 @@ class SettingsActions(
  * (the classic backup), the classic interface and the advanced mode with its links to the classic screens. Nothing
  * technical shows while the advanced mode is off.
  *
- * The first item of the list is reserved for the accent «Починка» button (simple-ui "Вход в «Починку» в настройках"),
- * which comes with the repair screen in batch 7: it goes in [SettingsScreen] before the traffic mode.
+ * The first item of the list is the accent «Починка» button (simple-ui "Вход в «Починку» в настройках", batch 7).
  */
 @Composable
 fun SettingsScreen(
@@ -77,6 +79,7 @@ fun SettingsScreen(
 ) {
     var themeDialog by rememberSaveable { mutableStateOf(false) }
     LazyColumn(modifier.fillMaxSize()) {
+        item { RepairEntry(actions.openRepair) }
         modeItems(state, actions)
 
         item { SectionDivider() }
@@ -142,6 +145,34 @@ fun SettingsScreen(
             },
             onDismiss = { themeDialog = false },
         )
+    }
+}
+
+/** The accent «Починка» button at the top of the section. */
+@Composable
+private fun RepairEntry(onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ),
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Build, contentDescription = null)
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(start = 16.dp),
+            ) {
+                Text(stringResource(R.string.simple_repair_entry), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.simple_repair_entry_summary), style = MaterialTheme.typography.bodyMedium)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+        }
     }
 }
 

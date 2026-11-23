@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -75,9 +76,15 @@ import io.nekohasekai.sagernet.simple.add.Notice
 import io.nekohasekai.sagernet.simple.home.ConnectionPhase
 import io.nekohasekai.sagernet.simple.home.HomeActions
 import io.nekohasekai.sagernet.simple.home.HomeScreen
+import io.nekohasekai.sagernet.simple.home.HomeProblem
 import io.nekohasekai.sagernet.simple.home.HomeViewModel
 import io.nekohasekai.sagernet.simple.modes.AppList
 import io.nekohasekai.sagernet.simple.modes.ModesViewModel
+import io.nekohasekai.sagernet.simple.repair.RepairAction
+import io.nekohasekai.sagernet.simple.repair.RepairActions
+import io.nekohasekai.sagernet.simple.repair.RepairEnvironment
+import io.nekohasekai.sagernet.simple.repair.RepairScreen
+import io.nekohasekai.sagernet.simple.repair.RepairViewModel
 import io.nekohasekai.sagernet.simple.servers.ServersActions
 import io.nekohasekai.sagernet.simple.servers.ServersEvent
 import io.nekohasekai.sagernet.simple.servers.ServersScreen
@@ -92,6 +99,7 @@ import io.nekohasekai.sagernet.ui.AppManagerActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.ScannerActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
+import io.nekohasekai.sagernet.utils.BatteryOptimizations
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -105,6 +113,7 @@ import kotlinx.coroutines.withContext
  * clipboard offer when the interface opens.
  * Batch 10: the whole settings section with the advanced mode (classic screens through [ClassicVisit]) and the
  * once-only hint after an upgrade on the way back to the classic interface.
+ * Batch 7: «Починка» (RepairScreen) over the sections, from the settings' top button and the home banner.
  */
 class SimpleActivity : AppCompatActivity() {
 
@@ -113,6 +122,7 @@ class SimpleActivity : AppCompatActivity() {
     private val add: AddViewModel by viewModels()
     private val servers: ServersViewModel by viewModels()
     private val settings: SettingsViewModel by viewModels()
+    private val repair: RepairViewModel by viewModels()
 
     /** The classic app list (AppManagerActivity) editing one of the simple UI's two app lists. */
     private val appList = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -148,6 +158,8 @@ class SimpleActivity : AppCompatActivity() {
                     add = add,
                     servers = servers,
                     settings = settings,
+                    repair = repair,
+                    openRepairTarget = ::openRepairTarget,
                     launchers = AddLaunchers(::pasteClipboard, ::openScanner, ::chooseFile),
                     openAppList = ::openAppList,
                     requestStart = ::requestStart,
@@ -374,6 +386,36 @@ class SimpleActivity : AppCompatActivity() {
         overridePendingTransition(0, 0)
     }
 
+    /**
+     * A system settings screen «Починка» points to (connection-repair "Системные настройки только по действию
+     * пользователя"); the general settings when the device has no such screen.
+     */
+    private fun openRepairTarget(target: RepairAction) {
+        val intent = when (target) {
+            RepairAction.DATE_SETTINGS -> Intent(AndroidSettings.ACTION_DATE_SETTINGS)
+            RepairAction.NETWORK_SETTINGS -> Intent(AndroidSettings.ACTION_WIRELESS_SETTINGS)
+            RepairAction.VPN_SETTINGS -> Intent(AndroidSettings.ACTION_VPN_SETTINGS)
+            RepairAction.WIFI_SETTINGS -> Intent(AndroidSettings.ACTION_WIFI_SETTINGS)
+            RepairAction.BACKGROUND -> if (BatteryOptimizations.isBackgroundRestricted(this)) {
+                BatteryOptimizations.detailsIntent(this)
+            } else {
+                BatteryOptimizations.requestIntent(this)
+            }
+
+            RepairAction.SERVERS -> null
+        } ?: Intent(AndroidSettings.ACTION_SETTINGS)
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Logs.w(e)
+            try {
+                startActivity(Intent(AndroidSettings.ACTION_SETTINGS))
+            } catch (e: ActivityNotFoundException) {
+                Logs.w(e)
+            }
+        }
+    }
+
     private fun requestStart() {
         try {
             connect.launch(null)
@@ -456,6 +498,9 @@ fun SimpleApp(
     add: AddViewModel,
     servers: ServersViewModel,
     settings: SettingsViewModel,
+    repair: RepairViewModel,
+    /** A system settings screen «Починка» leads to (only the user changes Android's settings). */
+    openRepairTarget: (RepairAction) -> Unit,
     launchers: AddLaunchers,
     openAppList: (AppList) -> Unit,
     requestStart: () -> Unit,
@@ -501,6 +546,38 @@ fun SimpleApp(
         add.notices.collect { notice -> snackbar.showSnackbar(notice.resolve(context)) }
     }
 
+    // «Починка» (batch 7): from the settings' top button and the home banner; a run starts as it opens.
+    val repairEnvironment = remember(home) {
+        RepairEnvironment(
+            vpnConnected = { home.vpnConnected },
+            serviceOff = { home.serviceOff },
+            testConnection = { home.testConnection() },
+        )
+    }
+    val openRepair = remember(repair, repairEnvironment) { { repair.open(repairEnvironment) } }
+    val repairState by repair.state.collectAsStateWithLifecycle()
+    if (repairState.open) {
+        val homeState by home.state.collectAsStateWithLifecycle()
+        RepairScreen(
+            state = repairState,
+            detail = (homeState.problem as? HomeProblem.ConnectionLost)?.detail,
+            actions = RepairActions(
+                stop = repair::stop,
+                again = { repair.start(repairEnvironment) },
+                close = repair::close,
+                open = { target ->
+                    if (target == RepairAction.SERVERS) {
+                        repair.close()
+                        section = SimpleSection.SERVERS
+                    } else {
+                        openRepairTarget(target)
+                    }
+                },
+            ),
+        )
+        return
+    }
+
     // Rail whenever the window is not narrow, by width only: the library default keeps the bottom bar on any window
     // of compact height, i.e. on every phone in landscape (simple-ui spec: bar on narrow, side panel on medium/wide)
     val adaptiveInfo = currentWindowAdaptiveInfo()
@@ -539,6 +616,7 @@ fun SimpleApp(
                         openServers = { section = SimpleSection.SERVERS },
                         add = addActions,
                         openMode = { section = SimpleSection.SETTINGS },
+                        openRepair = openRepair,
                     ),
                     snackbar,
                 )
@@ -550,6 +628,7 @@ fun SimpleApp(
                     openAppList,
                     onOpenClassic,
                     openClassicScreen,
+                    openRepair,
                     snackbar,
                 )
             }
@@ -698,6 +777,7 @@ private fun SettingsSection(
     openAppList: (AppList) -> Unit,
     onOpenClassic: () -> Unit,
     openClassicScreen: (ClassicScreen) -> Unit,
+    openRepair: () -> Unit,
     snackbar: SnackbarHostState,
 ) {
     val state by modes.state.collectAsStateWithLifecycle()
@@ -720,6 +800,7 @@ private fun SettingsSection(
                 setAdvanced = settings::setAdvanced,
                 openClassicScreen = openClassicScreen,
                 openClassic = onOpenClassic,
+                openRepair = openRepair,
             ),
             modifier = modifier,
         )

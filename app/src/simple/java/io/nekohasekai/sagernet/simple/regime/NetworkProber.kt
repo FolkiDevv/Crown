@@ -47,7 +47,8 @@ import kotlin.random.Random
  * is not taken for one without internet. A whitelisted network that also filters DNS answers is still told apart: the
  * blocked addresses then fail at their connection instead of at the lookup.
  *
- * Also meant for «Починка» (batch 7), which checks the same way in the UI process.
+ * «Починка» (batch 7) checks the same way in the UI process, and makes its other requests over the physical network
+ * with [client], [askPlain] and [lookupSystem].
  */
 object NetworkProber {
 
@@ -122,20 +123,12 @@ object NetworkProber {
 
     /** Checks [network] with the addresses of [config]; cancelling it aborts the requests. */
     suspend fun probe(network: Network, config: SimpleConfig): Result {
-        val servers = config.whitelistDns.mapNotNull { DnsMessage.plainServer(it) }.take(MAX_FALLBACK_SERVERS)
-        val dns = FallbackDns(network, servers)
-        // A dispatcher of its own: calls of a cancelled check never hold the threads of a later one.
-        val client = baseClient.newBuilder()
-            .dispatcher(Dispatcher())
-            .connectionPool(ConnectionPool())
-            .socketFactory(network.socketFactory)
-            .dns(dns)
-            .build()
+        val client = client(network, config)
         val start = System.nanoTime()
         try {
             return coroutineScope {
-                val allowed = config.probesAllowed.map { async { request(client, it) } }
-                val blocked = config.probesBlocked.map { async { request(client, it) } }
+                val allowed = config.probesAllowed.map { async { request(client.http, it) } }
+                val blocked = config.probesBlocked.map { async { request(client.http, it) } }
                 Result(
                     allowed.awaitAll(),
                     blocked.awaitAll(),
@@ -144,20 +137,42 @@ object NetworkProber {
                 )
             }
         } finally {
-            // Done or cancelled: lookups still running stop asking and their sockets close, calls are cancelled.
-            dns.close()
-            client.dispatcher.cancelAll()
-            client.connectionPool.evictAll()
-            client.dispatcher.executorService.shutdown()
+            client.close()
         }
     }
+
+    /** A client of one check or of one request of «Починка»; [close] it when done or cancelled. */
+    class NetworkClient internal constructor(val http: OkHttpClient, private val dns: FallbackDns) {
+        /** Lookups still running stop asking and their sockets close, calls are cancelled, threads end. */
+        fun close() {
+            dns.close()
+            http.dispatcher.cancelAll()
+            http.connectionPool.evictAll()
+            http.dispatcher.executorService.shutdown()
+        }
+    }
+
+    /** A client whose requests go through [network] only, with the lookup described above. */
+    fun client(network: Network, config: SimpleConfig): NetworkClient {
+        val servers = config.whitelistDns.mapNotNull { DnsMessage.plainServer(it) }.take(MAX_FALLBACK_SERVERS)
+        val dns = FallbackDns(network, servers)
+        // A dispatcher of its own: calls of a cancelled check never hold the threads of a later one.
+        val http = baseClient.newBuilder()
+            .dispatcher(Dispatcher())
+            .connectionPool(ConnectionPool())
+            .socketFactory(network.socketFactory)
+            .dns(dns)
+            .build()
+        return NetworkClient(http, dns)
+    }
+
+    /** A request without cookies or identifiers ("Приватность проверок"): [address] with the neutral User-Agent. */
+    fun head(address: String): Request = Request.Builder().url(address).head().header("User-Agent", USER_AGENT).build()
 
     private suspend fun request(client: OkHttpClient, address: String): ProbeOutcome =
         withTimeoutOrNull(DEADLINE_MS) {
             suspendCancellableCoroutine { continuation ->
-                val call = client.newCall(
-                    Request.Builder().url(address).head().header("User-Agent", USER_AGENT).build()
-                )
+                val call = client.newCall(head(address))
                 continuation.invokeOnCancellation { call.cancel() }
                 call.enqueue(object : Callback {
                     override fun onResponse(call: Call, response: Response) {
@@ -182,7 +197,7 @@ object NetworkProber {
      * most [LOOKUP_BUDGET_MS]; [close] (the check ended or was cancelled) stops every lookup still asking and closes
      * its socket.
      */
-    private class FallbackDns(private val network: Network, private val servers: List<Pair<String, Int>>) : Dns {
+    internal class FallbackDns(private val network: Network, private val servers: List<Pair<String, Int>>) : Dns {
 
         @Volatile
         private var closed = false
@@ -261,6 +276,42 @@ object NetworkProber {
                     synchronized(sockets) { sockets -= socket }
                 }
             }
+        }
+    }
+
+    /**
+     * One plain DNS question to [server] (host, port) through [network]: [hostname]'s records of [type]. Throws when
+     * no answer comes within [waitMs]; empty for an error answer. «Починка» asks the direct DNS server with it.
+     */
+    fun askPlain(
+        network: Network,
+        server: Pair<String, Int>,
+        hostname: String,
+        type: Int,
+        waitMs: Int = FALLBACK_DNS_WAIT_MS,
+    ): List<InetAddress> {
+        DatagramSocket().use { socket ->
+            network.bindSocket(socket)
+            socket.soTimeout = waitMs
+            val id = Random.nextInt(0x10000)
+            val query = DnsMessage.query(id, hostname, type)
+            val target = InetSocketAddress(InetAddress.getByName(server.first), server.second)
+            socket.send(DatagramPacket(query, query.size, target))
+            val buffer = ByteArray(1500)
+            val packet = DatagramPacket(buffer, buffer.size)
+            socket.receive(packet)
+            return DnsMessage.addresses(buffer, packet.length, id).map { InetAddress.getByAddress(hostname, it) }
+        }
+    }
+
+    /** [network]'s own DNS for [hostname] within [waitMs]; null when it gives no answer in time or fails. */
+    fun lookupSystem(network: Network, hostname: String, waitMs: Long): List<InetAddress>? {
+        val system = lookups.submit(Callable { network.getAllByName(hostname).toList() })
+        return try {
+            system.get(waitMs, TimeUnit.MILLISECONDS).takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            system.cancel(true)
+            null
         }
     }
 }

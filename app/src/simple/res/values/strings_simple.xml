@@ -53,7 +53,6 @@
     <string name="simple_problem_repair">Repair</string>
     <string name="simple_problem_dismiss">Hide</string>
     <string name="simple_repair_title">Repair</string>
-    <string name="simple_repair_coming">Automatic checks and fixes are coming in an upcoming update.</string>
     <!-- %1$s: the error message of the service -->
     <string name="simple_repair_details">Details: %1$s</string>
 
@@ -275,4 +274,133 @@
     <string name="simple_server_whitelist">Server for whitelists</string>
     <!-- %1$d: servers of Auto that answer in this network, %2$d: all of them -->
     <string name="simple_server_working">Working in this network: %1$d of %2$d servers</string>
+
+    <!-- Repair (batch 7): the entry in Settings -->
+    <string name="simple_repair_entry">Repair</string>
+    <string name="simple_repair_entry_summary">Find out why the VPN does not work and fix it</string>
+    <!-- Repair: the screen -->
+    <string name="simple_repair_back">Back</string>
+    <string name="simple_repair_stop">Stop</string>
+    <string name="simple_repair_again">Check again</string>
+    <string name="simple_repair_running">Checking everything the VPN depends on…</string>
+    <string name="simple_repair_stopped">Check stopped</string>
+    <string name="simple_repair_fixed">Fixed</string>
+    <!-- Repair: the checks in their order -->
+    <string name="simple_repair_step_internet">Internet without VPN</string>
+    <string name="simple_repair_step_whitelists">Whitelists in the network</string>
+    <string name="simple_repair_step_clock">Time on the device</string>
+    <string name="simple_repair_step_private_dns">Private DNS and other VPNs</string>
+    <string name="simple_repair_step_dns_direct">DNS directly</string>
+    <string name="simple_repair_step_subscription">Subscription</string>
+    <string name="simple_repair_step_servers">Server availability</string>
+    <string name="simple_repair_step_dns_vpn">DNS through VPN</string>
+    <string name="simple_repair_step_sites_vpn">Websites through VPN</string>
+    <string name="simple_repair_step_ru_direct">Russian websites directly</string>
+    <string name="simple_repair_step_background">Running in the background</string>
+    <!-- Repair: what a check found. %1$d: test addresses that answered, %2$d: all of them -->
+    <string name="simple_repair_internet_ok">The internet works: %1$d of %2$d test addresses answered</string>
+    <string name="simple_repair_internet_no_network">No network: Wi‑Fi and mobile data are off, or airplane mode is on</string>
+    <string name="simple_repair_internet_nothing">There is a network, but no website answers</string>
+    <string name="simple_repair_whitelists_found">Only allowed websites open in this network (whitelists)</string>
+    <string name="simple_repair_whitelists_none">No whitelists: the network lets any website through</string>
+    <string name="simple_repair_clock_ok">The time is right</string>
+    <!-- %1$s: how far off, e.g. «7 minutes» -->
+    <string name="simple_repair_clock_ahead">The clock is %1$s fast. With a wrong time the VPN cannot connect</string>
+    <string name="simple_repair_clock_behind">The clock is %1$s slow. With a wrong time the VPN cannot connect</string>
+    <plurals name="simple_repair_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="simple_repair_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <plurals name="simple_repair_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <string name="simple_repair_private_ok">Neither a private DNS nor another VPN gets in the way</string>
+    <string name="simple_repair_private_dns">A private DNS is set in the Android settings: it can block the VPN</string>
+    <string name="simple_repair_other_vpn">Another app\'s VPN is on: only one VPN can work at a time</string>
+    <string name="simple_repair_dns_ok">The DNS server answers</string>
+    <string name="simple_repair_dns_fail">The DNS server for the server addresses does not answer</string>
+    <string name="simple_repair_sub_ok">The subscription is active</string>
+    <string name="simple_repair_sub_expired">The subscription has ended</string>
+    <string name="simple_repair_sub_exhausted">The subscription traffic is used up</string>
+    <string name="simple_repair_sub_empty">The subscription has no servers</string>
+    <plurals name="simple_repair_sub_soon">
+        <item quantity="one">The subscription ends in %d day</item>
+        <item quantity="other">The subscription ends in %d days</item>
+    </plurals>
+    <string name="simple_repair_sub_today">The subscription ends today</string>
+    <string name="simple_repair_sub_low">Little subscription traffic is left</string>
+    <!-- %1$d: servers that answer, %2$d: all servers -->
+    <string name="simple_repair_servers_ok">%1$d of %2$d servers answer, the current one too</string>
+    <string name="simple_repair_servers_current_down">The current server does not answer; %1$d of %2$d servers do</string>
+    <!-- %1$d: all servers -->
+    <string name="simple_repair_servers_none">None of the %1$d servers answers</string>
+    <string name="simple_repair_servers_empty">No servers added</string>
+    <!-- %1$d of %2$d: servers for whitelists that answer -->
+    <string name="simple_repair_servers_whitelist">Servers for whitelists: %1$d of %2$d answer</string>
+    <string name="simple_repair_dns_vpn_ok">Website names are looked up through the VPN</string>
+    <string name="simple_repair_dns_vpn_fail">DNS through the VPN does not answer</string>
+    <!-- %1$d: the delay in milliseconds -->
+    <string name="simple_repair_sites_ok">Websites open through the VPN (%1$d ms)</string>
+    <string name="simple_repair_sites_fail">Websites do not open through the VPN</string>
+    <!-- %1$d of %2$d: Russian test addresses that answered -->
+    <string name="simple_repair_ru_ok">Russian websites open directly: %1$d of %2$d</string>
+    <string name="simple_repair_ru_fail">Russian websites do not open directly</string>
+    <string name="simple_repair_background_ok">Android lets the VPN run in the background</string>
+    <string name="simple_repair_background_optimized">Battery optimization may stop the VPN in the background</string>
+    <string name="simple_repair_background_restricted">Background activity is restricted: Android stops the VPN</string>
+    <!-- Repair: why a check was not done -->
+    <string name="simple_repair_skip_no_internet">Not checked: no internet</string>
+    <string name="simple_repair_skip_no_server">Not checked: no working server</string>
+    <string name="simple_repair_skip_other_vpn">Not checked: another app\'s VPN is active</string>
+    <string name="simple_repair_skip_vpn_off">Not checked: the VPN is off. Turn it on and run Repair again</string>
+    <string name="simple_repair_skip_no_permission">Not checked: no permission for the VPN</string>
+    <string name="simple_repair_skip_bypass">Not checked: this app is excluded from the VPN</string>
+    <string name="simple_repair_skip_no_subscription">Not checked: no subscription added</string>
+    <string name="simple_repair_skip_dns_kind">Not checked: the check does not support this kind of DNS server</string>
+    <string name="simple_repair_skip_android">Not checked: not available on this Android version</string>
+    <string name="simple_repair_skip_no_time">Not checked: could not get the exact time</string>
+    <string name="simple_repair_skip_busy">Not checked: another test is running</string>
+    <string name="simple_repair_skip_timeout">Not checked: the check took too long</string>
+    <string name="simple_repair_skip_error">Not checked: the check failed</string>
+    <string name="simple_repair_skip_stopped">Not checked: stopped</string>
+    <!-- Repair: buttons to the system settings -->
+    <string name="simple_repair_open_date">Date and time settings</string>
+    <string name="simple_repair_open_network">Network settings</string>
+    <string name="simple_repair_open_vpn">VPN settings</string>
+    <string name="simple_repair_open_wifi">Wi‑Fi settings</string>
+    <string name="simple_repair_allow_background">Allow running in the background</string>
+    <string name="simple_repair_open_servers">Open Servers</string>
+    <!-- Repair: the verdict -->
+    <string name="simple_repair_verdict_fixed">Fixed it ourselves</string>
+    <string name="simple_repair_verdict_found">Cause found</string>
+    <string name="simple_repair_verdict_unknown">Could not find the cause</string>
+    <string name="simple_repair_unknown_text">Some checks failed, but no known cause explains it. If the problem goes on, contact your VPN service\'s support.</string>
+    <string name="simple_repair_unknown_clean">All checks passed. If the problem goes on, contact your VPN service\'s support.</string>
+    <string name="simple_repair_cause_no_internet">The problem is not the VPN: the device has no internet</string>
+    <string name="simple_repair_cause_no_internet_steps">Turn off airplane mode and check Wi‑Fi or mobile data.</string>
+    <string name="simple_repair_cause_clock">The time on the device is wrong</string>
+    <string name="simple_repair_cause_clock_steps">Turn on automatic date and time in the Android settings.</string>
+    <string name="simple_repair_cause_other_vpn">Another app\'s VPN is on</string>
+    <string name="simple_repair_cause_other_vpn_steps">Turn it off in the Android VPN settings, then connect again.</string>
+    <string name="simple_repair_cause_private_dns">A private DNS gets in the way</string>
+    <string name="simple_repair_cause_private_dns_steps">In the Android network settings set Private DNS to Automatic or Off.</string>
+    <string name="simple_repair_cause_sub_ended">The subscription is over</string>
+    <string name="simple_repair_cause_sub_ended_steps">Renew it with your VPN service, then update it in Servers.</string>
+    <string name="simple_repair_cause_sub_empty">The subscription has no servers</string>
+    <string name="simple_repair_cause_sub_empty_steps">Update the subscription in Servers. If it stays empty, contact your VPN service.</string>
+    <string name="simple_repair_cause_wl_no_servers">The network has whitelists, and the subscription has no servers for them</string>
+    <string name="simple_repair_cause_wl_no_servers_steps">Ask your VPN service for a server that works with whitelists, or connect to Wi‑Fi.</string>
+    <string name="simple_repair_cause_wl_down">Servers for whitelists do not answer now</string>
+    <string name="simple_repair_cause_wl_down_steps">The problem is probably on the VPN service\'s side. Try again later or connect to Wi‑Fi.</string>
+    <string name="simple_repair_cause_servers_down">No server answers</string>
+    <string name="simple_repair_cause_servers_down_steps">The problem is probably on the VPN service\'s side, or the servers are blocked in this network. Update the subscription or try another network.</string>
+    <string name="simple_repair_cause_current_down">The current server does not answer</string>
+    <string name="simple_repair_cause_current_down_steps">Other servers work: choose one of them, or Auto, in Servers.</string>
+    <string name="simple_repair_cause_battery">Android may stop the VPN in the background</string>
+    <string name="simple_repair_cause_battery_steps">Let the app run in the background without battery restrictions.</string>
 </resources>

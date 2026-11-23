@@ -24,7 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,14 +34,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,6 +75,8 @@ class HomeActions(
     val add: AddActions,
     /** The traffic mode settings. */
     val openMode: () -> Unit,
+    /** «Починка», from the problem banner (batch 7). */
+    val openRepair: () -> Unit,
 )
 
 /** The home section: the connect button with its status, the problem banner and the server and mode cards. */
@@ -92,11 +90,9 @@ fun HomeScreen(
     onDismissProblem: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var repairDialog by rememberSaveable { mutableStateOf(false) }
-
     val banner: @Composable (Modifier, Dp) -> Unit = { bannerModifier, gap ->
         state.problem?.let { problem ->
-            ProblemBanner(problem, onRepair = { repairDialog = true }, onDismiss = onDismissProblem, modifier = bannerModifier)
+            ProblemBanner(problem, onRepair = actions.openRepair, onDismiss = onDismissProblem, modifier = bannerModifier)
             Spacer(Modifier.height(gap))
         }
     }
@@ -164,10 +160,6 @@ fun HomeScreen(
                 }
             }
         }
-    }
-
-    if (repairDialog) {
-        RepairStubDialog((state.problem as? HomeProblem.ConnectionLost)?.detail) { repairDialog = false }
     }
 }
 
@@ -515,27 +507,4 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
             Button(onClick = onRepair) { Text(stringResource(R.string.simple_problem_repair)) }
         }
     }
-}
-
-
-/** «Починка» arrives in batch 7; the banner and the settings already lead here. */
-@Composable
-fun RepairStubDialog(detail: String?, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.simple_repair_title)) },
-        text = {
-            Column {
-                Text(stringResource(R.string.simple_repair_coming))
-                if (!detail.isNullOrBlank()) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(R.string.simple_repair_details, detail),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.simple_ok)) } },
-    )
 }
