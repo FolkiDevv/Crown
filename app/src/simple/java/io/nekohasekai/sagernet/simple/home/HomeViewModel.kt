@@ -124,18 +124,28 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
      * «Работают в этой сети: N из M» of the running auto-selector, from its member table: only members that answered
      * since the session first saw the current physical network count (HomeStatus.working); null until known.
      */
-    private var workingCount: Pair<Int, Int>? = null
+    private var workingCount: WorkingRead? = null
     private var workingJob: Job? = null
+
+    /** A count read for one selector: it is shown only while that selector runs. */
+    private data class WorkingRead(val selectorId: Long, val alive: Int, val total: Int)
+
+    /** The selector changed while a member table was read: one more read follows that one. */
+    private var workingAgain = false
 
     /** Reads the running selector's member table again, a moment after its status changed (rounds end, picks change). */
     private fun refreshWorkingLater() {
-        if (workingJob?.isActive == true) return
+        if (workingJob?.isActive == true) {
+            workingAgain = true
+            return
+        }
+        workingAgain = false
         workingJob = viewModelScope.launch {
             delay(WORKING_DELAY_MS)
             val selectorId = selectedProfile?.takeIf { it.type == AutoSelectorProfiles.TYPE }?.id
             val status = autoStatus
             val service = connection.service
-            val count = if (
+            val read = if (
                 selectorId == null || service == null || serviceState != BaseService.State.Connected ||
                 !status.active || status.selectorId != selectorId || status.suspended
             ) {
@@ -144,21 +154,32 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 withContext(Dispatchers.IO) {
                     try {
                         val full = AutoSelectorStatus.parse(service.autoSelectorStatus(true))
+                        // The table must be the one of the selector this read is for.
+                        if (full.selectorId != selectorId) return@withContext null
                         HomeStatus.working(
                             members = full.members.map { HomeStatus.MemberHealth(it.isUsable, it.lastOkMs, it.lastProbeMs) },
                             since = RegimeStore.currentNetworkSince(),
                             lastRoundMs = full.lastRoundMs,
                             suspended = full.suspended,
-                        )
+                        )?.let { (alive, total) -> WorkingRead(selectorId, alive, total) }
                     } catch (e: Exception) {
                         Logs.d("simple home: no member table: ${e.message}")
                         null
                     }
                 }
             }
+            // The selector may have changed while the table was read: a count of another one is dropped and read again.
+            val stillRunning = autoStatus.selectorId == selectorId && autoStatus.active
+            val count = read?.takeIf { stillRunning }
             if (count != workingCount) {
                 workingCount = count
                 publish()
+            }
+            // Read again only for another selector that runs now (not after the service stopped: nothing to read).
+            if (autoStatus.active && autoStatus.selectorId != selectorId) workingAgain = true
+        }.also { job ->
+            job.invokeOnCompletion { cause ->
+                if (cause == null && workingAgain) viewModelScope.launch { refreshWorkingLater() }
             }
         }
     }
@@ -572,8 +593,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 },
                 countryChoice = choiceCountry,
                 whitelistServer = if (auto) currentPick?.whitelist == true else selectedWhitelist,
-                working = workingCount?.takeIf { running != null && !running.suspended }
-                    ?.let { (alive, total) -> ServerCard.Working(alive, total) },
+                working = workingCount?.takeIf { running != null && !running.suspended && it.selectorId == running.selectorId }
+                    ?.let { ServerCard.Working(it.alive, it.total) },
             )
         }
         val exhausted = running != null && running.exhaustedSinceMs > 0L

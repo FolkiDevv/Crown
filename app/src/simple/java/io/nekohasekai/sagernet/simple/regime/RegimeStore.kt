@@ -30,11 +30,15 @@ object RegimeStore {
     const val KEY_NETWORK_SINCE = "simple_network_since"
 
     /** Stores that the session saw [network] at [at] (unix ms); an older observation never replaces a newer one. */
-    fun writeNetworkSince(network: Long, at: Long) {
+    fun writeNetworkSince(network: Long, at: Long) = synchronized(sinceLock) {
+        // Only `:bg` (NetworkRegimeWatcher) writes it; the lock keeps two overlapping writes from reading the same old
+        // value, so an older observation can never land after a newer one.
         val stored = networkSince()
-        if (stored != null && stored.second > at) return
+        if (stored != null && stored.second > at) return@synchronized
         DataStore.configurationStore.putString(KEY_NETWORK_SINCE, "$network@$at")
     }
+
+    private val sinceLock = Any()
 
     /** The network and the time of [KEY_NETWORK_SINCE], null when missing or damaged. */
     fun networkSince(): Pair<Long, Long>? {
