@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
@@ -243,8 +244,9 @@ object SimpleImport {
      * the server's interval» is on — SimpleDefaults turns it on, the group follows the global switch), otherwise once a
      * day (its own interval). Only `sub_options_json` and the name are written, so the row's other columns, which
      * `:bg` writes, stay as they are. The global switch must be on too, or nothing is automatic; there is no per-group
-     * switch for that, so turning it on also lets the user's other subscriptions that do not skip automatic updates
-     * update (with the interval they follow). Returns the interval in effect, in hours, 0 when none.
+     * switch for that, so turning it on (only while never set, see below) also lets the user's other subscriptions
+     * that do not skip automatic updates update (with the interval they follow). Returns the interval in effect, in
+     * hours, 0 when none (also when the user switched automatic updates off).
      */
     suspend fun updateAutomatically(gid: Long, plan: Plan.Subscription): Int {
         val group = GroupRepo.get(gid) ?: return 0
@@ -257,7 +259,12 @@ object SimpleImport {
         if (plan.name.isBlank() && title.isNotEmpty() && title != group.name) {
             db.execSQL("UPDATE `groups` SET `name` = ? WHERE `id` = ?", arrayOf<Any>(title, gid))
         }
-        if (DataStore.subAutoUpdate < SubscriptionScheduler.MIN_INTERVAL_MINUTES) DataStore.subAutoUpdate = DAILY_MINUTES
+        // The global switch is the user's (Settings › «Автообновление подписок», classic Settings › Subscriptions): it is
+        // turned on here only while it was never set. An «off» the user chose stays off, and the interval below is then
+        // 0, so the summary does not promise updates.
+        if (DataStore.configurationStore.getInt(SettingsRegistry.SUB_AUTO_UPDATE.key) == null) {
+            DataStore.subAutoUpdate = DAILY_MINUTES
+        }
         GroupRepo.postUpdate(gid)
         SubscriptionScheduler.schedule()
         val seconds = GroupRepo.get(gid)?.let { SubscriptionScheduler.interval(it) } ?: 0L

@@ -169,6 +169,8 @@ class SimpleActivity : AppCompatActivity() {
                             modes.refresh()
                             // The new servers get their delay (and country by exit IP) without waiting for the next round.
                             servers.reload(thenTest = true)
+                            // The import may have switched automatic subscription updates on (never set before).
+                            settings.refresh()
                         }
 
                         is AddEvent.OpenClassic -> openClassicImport(event.text)
