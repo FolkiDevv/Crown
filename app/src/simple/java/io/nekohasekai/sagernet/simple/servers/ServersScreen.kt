@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -136,8 +137,9 @@ private fun ServerListView(state: ServersUiState, sections: ServerSections, acti
         expandedKeys = (if (key in expanded) expanded - key else expanded + key).joinToString("\n")
     }
     // Asked here, not in the item: «Авто» scrolling back into view must not take the focus again.
-    val autoFocus = rememberFocusWhenShown(enabled = focus)
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    val list = rememberLazyListState()
+    val autoFocus = rememberFocusWhenShown(enabled = focus, bringIntoComposition = { list.scrollToItem(0) })
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 24.dp)) {
         item(key = "auto") {
             val pick = state.pick?.takeIf { state.autoSelected }
             ChoiceRow(

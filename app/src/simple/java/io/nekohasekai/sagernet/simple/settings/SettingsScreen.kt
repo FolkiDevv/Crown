@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
@@ -85,8 +86,9 @@ fun SettingsScreen(
 ) {
     var themeDialog by rememberSaveable { mutableStateOf(false) }
     // A remote (D-pad) starts on «Починка»; asked here, not in the item, which appears again as it scrolls into view.
-    val repairFocus = rememberFocusWhenShown()
-    LazyColumn(modifier.fillMaxSize()) {
+    val list = rememberLazyListState()
+    val repairFocus = rememberFocusWhenShown(bringIntoComposition = { list.scrollToItem(0) })
+    LazyColumn(modifier.fillMaxSize(), state = list) {
         item { RepairEntry(actions.openRepair, Modifier.focusRequester(repairFocus)) }
         modeItems(state, actions)
 
