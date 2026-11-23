@@ -11,7 +11,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.add.SimpleImport
 import io.nekohasekai.sagernet.utils.Theme
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -89,27 +91,31 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     )
     val state: StateFlow<SettingsUiState> = mutableState.asStateFlow()
 
-    /**
-     * The settings writes, run one at a time in the order they were asked for: a quick on-off of a switch must end
-     * with "off" stored, never with an earlier write landing last.
-     */
-    private val writes = Channel<suspend () -> Unit>(Channel.UNLIMITED)
-
     init {
-        viewModelScope.launch(Dispatchers.IO) {
-            for (write in writes) {
-                try {
-                    write()
-                } catch (e: Exception) {
-                    Logs.w(e)
-                }
-            }
-        }
         refresh()
     }
 
     private fun write(block: suspend () -> Unit) {
         writes.trySend(block)
+    }
+
+    private companion object {
+        /**
+         * The settings writes, run one at a time in the order they were asked for: a quick on-off of a switch must
+         * end with "off" stored, never with an earlier write landing last. Process-wide, so a write asked just
+         * before the screen closes (opening a classic screen closes it) still lands.
+         */
+        val writes = Channel<suspend () -> Unit>(Channel.UNLIMITED).also { channel ->
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                for (write in channel) {
+                    try {
+                        write()
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                    }
+                }
+            }
+        }
     }
 
     fun refresh() {

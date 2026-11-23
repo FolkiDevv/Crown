@@ -16,6 +16,7 @@ import androidx.lifecycle.Lifecycle
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleActivity
+import io.nekohasekai.sagernet.simple.SimpleSection
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.SettingsFragment
@@ -79,8 +80,12 @@ enum class ClassicScreen(
  * MainActivity changes: it is driven through its public [MainActivity.displayFragmentWithId] and
  * [MainActivity.openSettingsScreen], and back goes through its own dispatcher.
  *
+ * - The simple interface closes when the visit opens ([SimpleActivity] finishes itself, as the switch to the classic
+ *   interface does): a window of it left below would wait for its focus to go while the shared main thread creates
+ *   MainActivity, and a slow classic cold start (its first-start prompts included) then ran into the input timeout.
+ *   Leaving the visit opens the simple interface again on its settings section ([SimpleActivity.EXTRA_SECTION]).
  * - Back where the classic screen itself would not handle it (MainActivity's own callback would show the classic home)
- *   finishes MainActivity, so the simple interface below it in the task comes back. Screens with their own back
+ *   leaves the visit. Screens with their own back
  *   handling (a nested settings screen, search, selection) keep it: their callbacks are added at their start, above
  *   this one, which is added before the first fragment starts.
  * - A settings sub-screen sits on the classic settings root ([SettingsFragment.forScreen]); leaving the sub-screen it
@@ -229,10 +234,13 @@ object ClassicVisit {
             }
         }
 
-        /** Back to the simple interface, which is below in the task (or comes up, if this is the task's root). */
+        /** Back to the simple interface, on its settings section where the visit started. */
         private fun leave() {
             if (main.isFinishing) return
-            if (main.isTaskRoot) main.startActivity(Intent(main, SimpleActivity::class.java))
+            main.startActivity(
+                Intent(main, SimpleActivity::class.java)
+                    .putExtra(SimpleActivity.EXTRA_SECTION, SimpleSection.SETTINGS.name)
+            )
             main.finish()
         }
 

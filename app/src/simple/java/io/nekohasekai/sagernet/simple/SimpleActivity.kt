@@ -139,6 +139,7 @@ class SimpleActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         // Subscription defaults of the simple UI (HWID, the provider's interval), once per install.
         lifecycleScope.launch(Dispatchers.IO) { SimpleDefaults.apply(applicationContext) }
+        if (savedInstanceState == null) requestedSection.value = sectionOf(intent)
         setContent {
             SimpleTheme {
                 SimpleApp(
@@ -152,6 +153,8 @@ class SimpleActivity : AppCompatActivity() {
                     requestStart = ::requestStart,
                     onOpenClassic = { SimpleUi.switchTo(this, simple = false) },
                     openClassicScreen = ::openClassicScreen,
+                    requestedSection = requestedSection.value,
+                    onSectionShown = { requestedSection.value = null },
                 )
             }
         }
@@ -198,8 +201,15 @@ class SimpleActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        sectionOf(intent)?.let { requestedSection.value = it }
         handleImportIntent(intent)
     }
+
+    /** A section to show, asked by [EXTRA_SECTION] (the end of a visit to a classic screen: settings). */
+    private val requestedSection = mutableStateOf<SimpleSection?>(null)
+
+    private fun sectionOf(intent: Intent?): SimpleSection? =
+        intent?.getStringExtra(EXTRA_SECTION)?.let { name -> SimpleSection.entries.firstOrNull { it.name == name } }
 
     override fun onStart() {
         super.onStart()
@@ -343,10 +353,15 @@ class SimpleActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------------------------------------ other
 
-    /** A classic screen for this visit (the choice of interface stays); back from it comes here again. */
+    /**
+     * A classic screen for this visit (the choice of interface stays). This interface closes meanwhile, as for the
+     * switch to the classic one: a window of it left below the classic start, which can be slow, would run into the
+     * input timeout waiting to lose its focus. Leaving the visit opens it again on the settings section.
+     */
     private fun openClassicScreen(screen: ClassicScreen) {
         try {
             startActivity(ClassicVisit.intent(this, screen))
+            finish()
         } catch (e: ActivityNotFoundException) {
             Logs.w(e)
         }
@@ -401,16 +416,19 @@ class SimpleActivity : AppCompatActivity() {
         }
     }
 
-    private companion object {
-        const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
+    companion object {
+        /** The section to open ([SimpleSection] name): the end of a visit to a classic screen asks for settings. */
+        const val EXTRA_SECTION = "io.nekohasekai.sagernet.simple.SECTION"
+
+        private const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
 
         /** FirstStartPrompts' own flag: the classic first start has asked for the permission. */
-        const val CLASSIC_FIRST_START_PREFS = "first_start"
-        const val CLASSIC_FIRST_START_SHOWN = "prompts_shown"
+        private const val CLASSIC_FIRST_START_PREFS = "first_start"
+        private const val CLASSIC_FIRST_START_SHOWN = "prompts_shown"
 
         /** The clip last read in this process (ClipDescription.getTimestamp), see [clipboardText]. */
         @Volatile
-        var lastClipStamp = 0L
+        private var lastClipStamp = 0L
     }
 }
 
@@ -436,8 +454,17 @@ fun SimpleApp(
     requestStart: () -> Unit,
     onOpenClassic: () -> Unit,
     openClassicScreen: (ClassicScreen) -> Unit,
+    /** A section asked for from outside (the end of a classic visit); [onSectionShown] once it is shown. */
+    requestedSection: SimpleSection? = null,
+    onSectionShown: () -> Unit = {},
 ) {
-    var section by rememberSaveable { mutableStateOf(SimpleSection.HOME) }
+    var section by rememberSaveable { mutableStateOf(requestedSection ?: SimpleSection.HOME) }
+    LaunchedEffect(requestedSection) {
+        if (requestedSection != null) {
+            section = requestedSection
+            onSectionShown()
+        }
+    }
     var addSheet by rememberSaveable { mutableStateOf(false) }
     var linkDialog by rememberSaveable { mutableStateOf(false) }
     val addActions = remember(launchers) {
