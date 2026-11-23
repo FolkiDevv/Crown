@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -39,9 +42,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalConfiguration
@@ -68,6 +73,7 @@ import io.nekohasekai.sagernet.simple.modes.ModeCard
 import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.simple.servers.CountryLabels
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** What the home screen opens; the screens behind the stubs arrive in later batches. */
 class HomeActions(
@@ -84,6 +90,7 @@ class HomeActions(
 )
 
 /** The home section: the connect button with its status, the problem banner and the server and mode cards. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     state: HomeUiState,
@@ -116,15 +123,22 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp, vertical = if (low) 0.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // A remote on the button also sees its status: the smaller button on a low window, and the status brought
+                // into view whenever the button takes the focus (the status itself takes none).
+                val statusInView = remember { BringIntoViewRequester() }
+                val scope = rememberCoroutineScope()
                 Column(
                     Modifier
                         .weight(1f)
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(rememberScrollState())
+                        .onFocusChanged { if (it.hasFocus) scope.launch { statusInView.bringIntoView() } },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    ConnectButton(state.phase, onToggle, focus = focus)
-                    Spacer(Modifier.height(16.dp))
-                    Status(state)
+                    ConnectButton(state.phase, onToggle, focus = focus, small = low)
+                    Spacer(Modifier.height(if (low) 12.dp else 16.dp))
+                    Column(Modifier.bringIntoViewRequester(statusInView), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Status(state)
+                    }
                 }
                 Spacer(Modifier.width(16.dp))
                 Column(

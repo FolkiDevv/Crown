@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,7 +40,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -125,20 +125,39 @@ fun RepairScreen(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (state.running) {
-                        // The stop may wait for work it cannot cut short (a subscription update) before it puts the
-                        // settings back: the button says so at once instead of seeming to do nothing.
-                        OutlinedButton(
-                            onClick = actions.stop,
-                            enabled = !state.stopping,
-                            modifier = Modifier.widthIn(min = 200.dp).focusRing(FocusShapes.Pill),
-                        ) {
-                            Text(stringResource(if (state.stopping) R.string.simple_repair_stopping else R.string.simple_repair_stop))
-                        }
-                    } else {
-                        Button(onClick = actions.again, modifier = Modifier.widthIn(min = 200.dp).focusRing(FocusShapes.Pill)) {
-                            Text(stringResource(R.string.simple_repair_again))
-                        }
+                    // One button that turns from «Остановить» (outlined) into «Проверить снова» (filled) and back: two
+                    // buttons would drop a remote's focus to the top each time a run starts or ends. The stop may wait
+                    // for work it cannot cut short (a subscription update) before it puts the settings back: the button
+                    // says «Останавливаем…» at once and ignores presses meanwhile, still focusable (Focus.kt unavailable).
+                    val running = state.running
+                    val stopping = running && state.stopping
+                    Button(
+                        onClick = { if (!running) actions.again() else if (!stopping) actions.stop() },
+                        colors = if (!running) {
+                            ButtonDefaults.buttonColors()
+                        } else if (stopping) {
+                            ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                            )
+                        } else {
+                            ButtonDefaults.outlinedButtonColors()
+                        },
+                        border = if (running) ButtonDefaults.outlinedButtonBorder(enabled = !stopping) else null,
+                        elevation = if (running) null else ButtonDefaults.buttonElevation(),
+                        modifier = Modifier
+                            .widthIn(min = 200.dp)
+                            .focusRing(FocusShapes.Pill)
+                            .unavailable(stopping),
+                    ) {
+                        Text(
+                            stringResource(
+                                when {
+                                    !running -> R.string.simple_repair_again
+                                    stopping -> R.string.simple_repair_stopping
+                                    else -> R.string.simple_repair_stop
+                                }
+                            )
+                        )
                     }
                 }
             }
