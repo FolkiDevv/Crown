@@ -332,10 +332,10 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
         val latency = rows.filterValues { it != null }.mapValues { it.value!! }
         val answering = latency.keys
         val current = DataStore.selectedProxy
-        // An auto-selector (the managed «Авто», its whitelist twin, a country) answers when one of its own members
-        // does: the members as its planner picks them (groups, name and country filters), not the whole list.
+        // An auto-selector (the managed «Авто», its whitelist twin, a country) answers when one of the members it runs
+        // does — its build, capped by its build limit — not any server of the list.
         val members = selectorMembers(current)
-        val currentAnswers = if (members != null) answering.any { it in members } else current in answering
+        val currentAnswers = if (members != null) SelectorRunSet.answers(members, answering) else current in answering
         val whitelists = done[RepairStep.WHITELISTS]?.has(Finding.WHITELISTS_FOUND) == true
         val chosen = when {
             currentAnswers -> current
@@ -359,11 +359,17 @@ class DeviceRepairChecks(private val context: Context, private val env: RepairEn
         return StepResult(status, findings, servers = summary)
     }
 
-    /** The members [id] runs when it is an auto-selector (AutoSelectorPlanner.rankingCandidates), else null. */
+    /**
+     * The members [id] runs when it is an auto-selector, else null: its running build while this app's VPN is on
+     * (the capped `lastBuilt` the runtime keeps), otherwise the build its planner would make now — after the URL test
+     * just stored, so it orders by these delays ([SelectorRunSet]).
+     */
     private fun selectorMembers(id: Long): Set<Long>? {
         val selector = ProfileManager.getProfile(id)?.outbound as? AutoSelector ?: return null
         return try {
-            AutoSelectorPlanner(SettingsMapper.selectorStore()).rankingCandidates(id, selector).toSet()
+            SelectorRunSet.of(env.vpnConnected(), selector.lastBuilt) {
+                AutoSelectorPlanner(SettingsMapper.selectorStore()).plan(id, selector).let { if (it.ok) it.build else emptyList() }
+            }
         } catch (e: Exception) {
             Logs.w(e)
             null
