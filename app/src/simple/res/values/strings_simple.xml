@@ -285,6 +285,13 @@
     <string name="simple_repair_running">Checking everything the VPN depends on…</string>
     <string name="simple_repair_stopped">Check stopped</string>
     <string name="simple_repair_fixed">Fixed</string>
+    <string name="simple_repair_undoing">Stopping: putting back the settings Repair changed…</string>
+    <string name="simple_repair_fix_server">Fixed: switched to a server that answers</string>
+    <string name="simple_repair_fix_direct_dns">Fixed: the direct DNS now uses servers from the whitelist</string>
+    <string name="simple_repair_fix_vpn_dns">Fixed: the DNS through the VPN now uses another server</string>
+    <string name="simple_repair_fix_subscription">Fixed: the subscription was updated</string>
+    <string name="simple_repair_fix_routes">Fixed: the routing profiles were updated</string>
+    <string name="simple_repair_fix_mtu">Fixed: the VPN\'s MTU was lowered to 1280</string>
     <!-- Repair: the checks in their order -->
     <string name="simple_repair_step_internet">Internet without VPN</string>
     <string name="simple_repair_step_whitelists">Whitelists in the network</string>
@@ -359,6 +366,7 @@
     <string name="simple_repair_skip_other_vpn">Not checked: another app\'s VPN is active</string>
     <string name="simple_repair_skip_vpn_off">Not checked: the VPN is off. Turn it on and run Repair again</string>
     <string name="simple_repair_skip_no_permission">Not checked: no permission for the VPN</string>
+    <string name="simple_repair_skip_vpn_start">Not checked: the VPN did not turn on</string>
     <string name="simple_repair_skip_bypass">Not checked: this app is excluded from the VPN</string>
     <string name="simple_repair_skip_no_subscription">Not checked: no subscription added</string>
     <string name="simple_repair_skip_dns_kind">Not checked: the check does not support this kind of DNS server</string>

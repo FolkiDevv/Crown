@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -105,6 +106,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     val messages: SharedFlow<Int> = mutableMessages.asSharedFlow()
 
     private var serviceState = BaseService.State.Idle
+
+    /** How many times the service has become connected since this screen model exists (each start and reload). */
+    private val mutableConnects = MutableStateFlow(0)
     private var userStopping = false
     private var lost: HomeProblem.ConnectionLost? = null
     private var urlTestFailures = 0
@@ -231,11 +235,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     fun toggle(requestStart: () -> Unit) {
         val phase = mutableState.value.phase
         when {
-            HomeStatus.buttonStops(phase) -> {
-                userStopping = true
-                publish()
-                SagerNet.stopService()
-            }
+            HomeStatus.buttonStops(phase) -> stop()
 
             phase == ConnectionPhase.DISCONNECTING -> Unit
             else -> viewModelScope.launch {
@@ -251,6 +251,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     fun message(@StringRes text: Int) {
         mutableMessages.tryEmit(text)
     }
+
+    /** Stops the service as the main button does: no «Соединение потеряно» follows. */
+    fun stop() {
+        userStopping = true
+        publish()
+        SagerNet.stopService()
+    }
+
+    /** The current count of connects; «Починка» waits for the next one after it starts or reloads the VPN. */
+    val connects: Int get() = mutableConnects.value
+
+    /**
+     * Waits until the service has connected more than [after] times and is still connected; false after [timeoutMs]
+     * («Починка»: a start or reload of the VPN it asked for).
+     */
+    suspend fun awaitConnected(after: Int, timeoutMs: Long): Boolean = withTimeoutOrNull(timeoutMs) {
+        mutableConnects.first { it > after }
+        serviceState == BaseService.State.Connected
+    } ?: false
 
     /** Whether this app's VPN is connected now («Починка» checks through it only then). */
     val vpnConnected: Boolean get() = serviceState == BaseService.State.Connected
@@ -367,6 +386,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         serviceState = state
         val connected = state == BaseService.State.Connected
         if (connected && !wasConnected) {
+            mutableConnects.update { it + 1 }
             urlTestFailures = 0
             serverProblemHidden = false
             if (foreground) restartChecks(FIRST_CHECK_MS)

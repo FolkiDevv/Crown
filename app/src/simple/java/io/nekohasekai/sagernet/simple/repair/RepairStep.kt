@@ -50,7 +50,7 @@ enum class StepStatus {
     /** «Не проверено» with a [SkipReason]: never an error (connection-repair "Зависимые проверки"). */
     SKIPPED,
 
-    /** A problem the app fixed by itself (batch 8). */
+    /** A problem the app fixed by itself; [StepResult.fix] says how. */
     FIXED;
 
     /** Whether the checks that depend on this one can run. */
@@ -68,11 +68,14 @@ enum class SkipReason {
     /** The VPN of another app is active: this app does not raise its own (the system would revoke the other's). */
     OTHER_VPN,
 
-    /** The VPN of this app is off; this version checks through the VPN only while it is on. */
+    /** The VPN of this app is off and could not be started for the checks (it was starting or stopping meanwhile). */
     VPN_OFF,
 
-    /** The user refused the VPN consent (batch 8 asks for it). */
+    /** The user refused the VPN consent «Починка» asked for. */
     NO_VPN_PERMISSION,
+
+    /** «Починка» started the VPN on the chosen server for the checks through it, but it did not connect. */
+    VPN_START_FAILED,
 
     /** This app's own requests do not go through the VPN (per-app proxy without this app). */
     APP_BYPASSES_VPN,
@@ -146,7 +149,7 @@ enum class Finding {
     BACKGROUND_RESTRICTED,
 }
 
-/** The reversible fixes of batch 8 (connection-repair "Безопасные автоматические исправления"). */
+/** The reversible fixes (connection-repair "Безопасные автоматические исправления"). */
 enum class FixKind {
     SWITCHED_SERVER,
     DIRECT_DNS_WHITELISTED,
