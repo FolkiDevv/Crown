@@ -192,6 +192,7 @@ class DeviceRepairFixes(
     private fun <T> setting(fixKind: FixKind, name: String, before: T, after: T, write: (T) -> Unit): RepairFix =
         object : RepairFix {
             override val kind = fixKind
+            override val change = FixChange(name, before.toString(), after.toString())
 
             override suspend fun apply() {
                 Logs.i("simple repair: fix ${kind.name.lowercase()}: $name ${describe(before)} -> ${describe(after)}")

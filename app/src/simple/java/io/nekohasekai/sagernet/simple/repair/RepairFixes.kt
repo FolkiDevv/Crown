@@ -11,6 +11,9 @@ package io.nekohasekai.sagernet.simple.repair
 interface RepairFix {
     val kind: FixKind
 
+    /** The setting the fix changes, with its value before and after (for the report); null when it changes none. */
+    val change: FixChange? get() = null
+
     /** Makes the change and lets the running VPN take it up (a reload, waited for). */
     suspend fun apply()
 
@@ -23,6 +26,12 @@ interface RepairFix {
     /** A check of the fix lighter than the whole step again; null runs the step again. */
     suspend fun recheck(): StepResult? = null
 }
+
+/**
+ * A setting an automatic fix changed: its name and the values before and after, as the report shows them (DNS servers
+ * and MTU as they are, a server by its id, never its address).
+ */
+data class FixChange(val setting: String, val before: String, val after: String)
 
 /**
  * What «Починка» changed so far in this run, in order, with how to put each change back (design.md D8: every fix
