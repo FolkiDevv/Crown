@@ -92,7 +92,7 @@ class DnsMessageTest {
     fun anotherFailureEndsTheServer() {
         val failures = mutableListOf<java.io.IOException>()
         val asked = mutableListOf<Int>()
-        val found = DnsMessage.askFamilies(
+        val found = DnsMessage.askFamilies<String>(
             intArrayOf(DnsMessage.TYPE_A, DnsMessage.TYPE_AAAA),
             left = { 1000L },
             ask = { type, _ ->
