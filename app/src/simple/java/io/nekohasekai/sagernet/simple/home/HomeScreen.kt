@@ -102,6 +102,10 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     /** A remote (D-pad) starts on the connect button, or the first way to add, as the section opens. */
     focus: Boolean = true,
+    /** It moves to the connect button again each time this changes (the hint above it closed). */
+    focusKey: Any? = null,
+    /** A notice at the top of the scrolling content (the hint after an upgrade), given the width of the cards. */
+    hint: (@Composable (Modifier) -> Unit)? = null,
 ) {
     val banner: @Composable (Modifier, Dp) -> Unit = { bannerModifier, gap ->
         state.problem?.let { problem ->
@@ -134,7 +138,7 @@ fun HomeScreen(
                         .onFocusChanged { if (it.hasFocus) scope.launch { statusInView.bringIntoView() } },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    ConnectButton(state.phase, onToggle, focus = focus, small = low)
+                    ConnectButton(state.phase, onToggle, focus = focus, focusKey = focusKey, small = low)
                     Spacer(Modifier.height(if (low) 12.dp else 16.dp))
                     Column(Modifier.bringIntoViewRequester(statusInView), horizontalAlignment = Alignment.CenterHorizontally) {
                         Status(state)
@@ -144,9 +148,12 @@ fun HomeScreen(
                 Column(
                     Modifier
                         .weight(1f)
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(rememberScrollState())
+                        // Room for the focus ring of the first and last card, which the scrolling clips.
+                        .padding(vertical = 6.dp),
                 ) {
                     val cardWidth = Modifier.fillMaxWidth()
+                    hint?.invoke(cardWidth)
                     banner(cardWidth, if (low) 8.dp else 16.dp)
                     ServerCardView(state, modeCard?.whitelists == true, actions.openServers, cardWidth)
                     Spacer(Modifier.height(if (low) 8.dp else 12.dp))
@@ -162,6 +169,7 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 val cardWidth = Modifier.widthIn(max = 560.dp).fillMaxWidth()
+                hint?.invoke(cardWidth)
                 banner(cardWidth, 16.dp)
                 when (content) {
                     HomeContent.LOADING -> Unit
@@ -170,7 +178,7 @@ fun HomeScreen(
                         Spacer(Modifier.height(if (low) 8.dp else 16.dp))
                         // A low pane (a TV, the home pane beside the server list) takes a smaller button, so the status
                         // and the cards come into view sooner.
-                        ConnectButton(state.phase, onToggle, focus = focus, small = low)
+                        ConnectButton(state.phase, onToggle, focus = focus, focusKey = focusKey, small = low)
                         Spacer(Modifier.height(if (low) 12.dp else 20.dp))
                         Status(state)
                         Spacer(Modifier.height(28.dp))
@@ -186,7 +194,13 @@ fun HomeScreen(
 }
 
 @Composable
-private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit, focus: Boolean, small: Boolean = false) {
+private fun ConnectButton(
+    phase: ConnectionPhase,
+    onToggle: () -> Unit,
+    focus: Boolean,
+    focusKey: Any?,
+    small: Boolean = false,
+) {
     val colors = MaterialTheme.colorScheme
     val container by animateColorAsState(
         when (phase) {
@@ -226,7 +240,7 @@ private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit, focus: B
             modifier = Modifier
                 .size(if (small) 124.dp else 160.dp)
                 .focusRing(CircleShape, outset = 4.dp)
-                .focusWhenShown(enabled = focus)
+                .focusWhenShown(key = focusKey, enabled = focus)
                 .unavailable(disconnecting)
                 .semantics {
                     role = Role.Button

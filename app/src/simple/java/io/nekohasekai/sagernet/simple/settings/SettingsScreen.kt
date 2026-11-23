@@ -381,14 +381,14 @@ private fun FallbackNotice(onDismiss: () -> Unit) {
 
 /**
  * The once-only hint after an upgrade (simple-ui "Подсказка после обновления"): where the classic interface went.
- * Shown on the home section until closed with either button.
+ * Shown on the home section until closed with either button; the home section gives it the width of its cards.
  */
 @Composable
 fun ClassicHintCard(onOpenSettings: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(bottom = 8.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer,
             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
