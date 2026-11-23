@@ -27,6 +27,7 @@ import io.nekohasekai.sagernet.simple.modes.Managed
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.simple.modes.WhitelistKeywords
+import io.nekohasekai.sagernet.simple.regime.RegimeStore
 import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.Dispatchers
@@ -119,6 +120,49 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     /** The delay the last check of the running connection measured (through the auto-selector's pick, if any). */
     private var liveLatency: Int? = null
 
+    /**
+     * «Работают в этой сети: N из M» of the running auto-selector, from its member table: only members that answered
+     * since the session first saw the current physical network count (HomeStatus.working); null until known.
+     */
+    private var workingCount: Pair<Int, Int>? = null
+    private var workingJob: Job? = null
+
+    /** Reads the running selector's member table again, a moment after its status changed (rounds end, picks change). */
+    private fun refreshWorkingLater() {
+        if (workingJob?.isActive == true) return
+        workingJob = viewModelScope.launch {
+            delay(WORKING_DELAY_MS)
+            val selectorId = selectedProfile?.takeIf { it.type == AutoSelectorProfiles.TYPE }?.id
+            val status = autoStatus
+            val service = connection.service
+            val count = if (
+                selectorId == null || service == null || serviceState != BaseService.State.Connected ||
+                !status.active || status.selectorId != selectorId || status.suspended
+            ) {
+                null
+            } else {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val full = AutoSelectorStatus.parse(service.autoSelectorStatus(true))
+                        HomeStatus.working(
+                            members = full.members.map { HomeStatus.MemberHealth(it.isUsable, it.lastOkMs, it.lastProbeMs) },
+                            since = RegimeStore.currentNetworkSince(),
+                            lastRoundMs = full.lastRoundMs,
+                            suspended = full.suspended,
+                        )
+                    } catch (e: Exception) {
+                        Logs.d("simple home: no member table: ${e.message}")
+                        null
+                    }
+                }
+            }
+            if (count != workingCount) {
+                workingCount = count
+                publish()
+            }
+        }
+    }
+
     init {
         lost = DataStore.serviceError.takeIf { it.isNotBlank() }?.let { HomeProblem.ConnectionLost(it) }
         connection.connect(application, this)
@@ -132,6 +176,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     if (foreground && serviceState == BaseService.State.Connected) restartChecks(SOON_MS)
                     lookUpPickCountry(status.selectedId)
                 }
+                refreshWorkingLater()
                 publish()
             }
         }
@@ -276,6 +321,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             urlTestFailures = 0
             serverProblemHidden = false
             liveLatency = null
+            workingCount = null
         }
         mutableState.update {
             it.copy(
@@ -338,6 +384,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                         liveLatency = null
                     }
                 }
+                refreshWorkingLater()
                 publish()
                 delay(if (urlTestFailures > 0) RETRY_MS else INTERVAL_MS)
             }
@@ -525,8 +572,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 },
                 countryChoice = choiceCountry,
                 whitelistServer = if (auto) currentPick?.whitelist == true else selectedWhitelist,
-                working = running?.takeIf { r -> !r.suspended && r.membersProbed > 0 && r.membersTotal > 0 }
-                    ?.let { r -> ServerCard.Working(r.membersAlive, r.membersTotal) },
+                working = workingCount?.takeIf { running != null && !running.suspended }
+                    ?.let { (alive, total) -> ServerCard.Working(alive, total) },
             )
         }
         val exhausted = running != null && running.exhaustedSinceMs > 0L
@@ -560,6 +607,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         const val SOON_MS = 1_000L
         const val INTERVAL_MS = 30_000L
         const val RETRY_MS = 10_000L
+        const val WORKING_DELAY_MS = 500L
         const val FAILED = -1
         const val VPN_EXIT_UNKNOWN = -2
     }

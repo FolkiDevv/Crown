@@ -195,6 +195,12 @@ object NetworkRegimeWatcher {
         }
         val reason = if (owner.sawNetwork) "network changed" else "VPN connected"
         owner.sawNetwork = true
+        // For the home screen's count of working servers: only health from after this moment is about this network.
+        val handle = network.networkHandle
+        val seenAt = System.currentTimeMillis()
+        owner.scope.launch(Dispatchers.IO) {
+            runCatching { RegimeStore.writeNetworkSince(handle, seenAt) }.onFailure { Logs.w(it) }
+        }
         start(owner, network, reason)
     }
 
