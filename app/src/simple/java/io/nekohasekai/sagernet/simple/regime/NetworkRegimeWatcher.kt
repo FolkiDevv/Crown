@@ -183,13 +183,13 @@ object NetworkRegimeWatcher {
         }
         val reason = if (owner.sawNetwork) "network changed" else "VPN connected"
         owner.sawNetwork = true
-        start(owner, network, reason, networkChanged = true)
+        start(owner, network, reason)
     }
 
     private fun onCheckRequested(owner: Session) = synchronized(lock) {
         if (session !== owner) return@synchronized
         val network = owner.network ?: return@synchronized Logs.i("simple regime: «Авто» chosen, no physical network to check")
-        start(owner, network, "«Авто» chosen", networkChanged = false)
+        start(owner, network, "«Авто» chosen")
     }
 
     private fun onTimer(owner: Session) = synchronized(lock) {
@@ -197,13 +197,13 @@ object NetworkRegimeWatcher {
         val network = owner.network ?: return@synchronized
         val cellular = SagerNet.connectivity.getNetworkCapabilities(network)
             ?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
-        if (cellular) start(owner, network, "15-minute timer, mobile network", networkChanged = false)
+        if (cellular) start(owner, network, "15-minute timer, mobile network")
     }
 
     // ------------------------------------------------------------------------------------------------ checks
 
     /** Under [lock]: cancels the check in flight and starts the next one on [network]. */
-    private fun start(owner: Session, network: Network, reason: String, networkChanged: Boolean) {
+    private fun start(owner: Session, network: Network, reason: String) {
         val revision = try {
             TrafficModes.modeRevision()
         } catch (e: Exception) {
@@ -212,7 +212,7 @@ object NetworkRegimeWatcher {
         }
         val ticket = gate.begin(network.networkHandle, revision)
         owner.check?.cancel()
-        owner.check = owner.scope.launch { run(owner, network, ticket, reason, networkChanged) }
+        owner.check = owner.scope.launch { run(owner, network, ticket, reason) }
     }
 
     private suspend fun run(
@@ -220,11 +220,13 @@ object NetworkRegimeWatcher {
         network: Network,
         ticket: ProbeGate.Ticket<Long>,
         reason: String,
-        networkChanged: Boolean,
     ) {
         val tag = "check #${ticket.generation} on network ${ticket.network}"
         try {
-            if (networkChanged) forgetOtherNetwork(owner, ticket)
+            // Every check, not only the one of a network change: a check asked for (or timed) right after a change can
+            // replace the change's own check before it ran, and the old network's result must not outlive it. A result
+            // of this very network is kept.
+            forgetOtherNetwork(owner, ticket)
             val mode = if (TrafficModes.isModeStored()) TrafficModes.mode() else null
             if (mode != TrafficMode.AUTO) {
                 Logs.i("simple regime: $tag ($reason) skipped: the mode is «${mode?.key ?: "not chosen"}», not «Авто»")

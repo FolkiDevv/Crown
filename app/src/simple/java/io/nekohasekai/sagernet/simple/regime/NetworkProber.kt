@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.simple.regime
 
 import android.net.Network
+import android.os.SystemClock
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
@@ -12,6 +13,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -77,9 +79,17 @@ object NetworkProber {
             .writeTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .followRedirects(false)
             .followSslRedirects(false)
-            .retryOnConnectionFailure(false)
+            // Lets a request go on to the next address of a name when one refuses; each request still ends at
+            // [DEADLINE_MS] (its call is cancelled then), and redirects stay off.
+            .retryOnConnectionFailure(true)
             .build()
     }
+
+    /** The name lookup of one request takes at most this, so the connection keeps time within [DEADLINE_MS]. */
+    const val LOOKUP_BUDGET_MS = 4_000L
+
+    /** At most this many plain `whitelistDns` servers are asked by one lookup. */
+    const val MAX_FALLBACK_SERVERS = 4
 
     data class Result(
         val allowed: List<ProbeOutcome>,
@@ -110,11 +120,14 @@ object NetworkProber {
 
     /** Checks [network] with the addresses of [config]; cancelling it aborts the requests. */
     suspend fun probe(network: Network, config: SimpleConfig): Result {
-        val servers = config.whitelistDns.mapNotNull { DnsMessage.plainServer(it) }
+        val servers = config.whitelistDns.mapNotNull { DnsMessage.plainServer(it) }.take(MAX_FALLBACK_SERVERS)
+        val dns = FallbackDns(network, servers)
+        // A dispatcher of its own: calls of a cancelled check never hold the threads of a later one.
         val client = baseClient.newBuilder()
+            .dispatcher(Dispatcher())
             .connectionPool(ConnectionPool())
             .socketFactory(network.socketFactory)
-            .dns(FallbackDns(network, servers))
+            .dns(dns)
             .build()
         val start = System.nanoTime()
         try {
@@ -129,7 +142,11 @@ object NetworkProber {
                 )
             }
         } finally {
+            // Done or cancelled: lookups still running stop asking and their sockets close, calls are cancelled.
+            dns.close()
+            client.dispatcher.cancelAll()
             client.connectionPool.evictAll()
+            client.dispatcher.executorService.shutdown()
         }
     }
 
@@ -158,10 +175,27 @@ object NetworkProber {
             }
         } ?: ProbeOutcome.TIMEOUT
 
-    /** The network's own DNS first, then the whitelisted plain DNS servers, all through [network]. */
+    /**
+     * The network's own DNS first, then the whitelisted plain DNS servers, all through [network]. One lookup takes at
+     * most [LOOKUP_BUDGET_MS]; [close] (the check ended or was cancelled) stops every lookup still asking and closes
+     * its socket.
+     */
     private class FallbackDns(private val network: Network, private val servers: List<Pair<String, Int>>) : Dns {
 
+        @Volatile
+        private var closed = false
+        private val sockets = mutableSetOf<DatagramSocket>()
+
+        fun close() {
+            closed = true
+            synchronized(sockets) {
+                sockets.forEach { it.close() }
+                sockets.clear()
+            }
+        }
+
         override fun lookup(hostname: String): List<InetAddress> {
+            val deadline = SystemClock.elapsedRealtime() + LOOKUP_BUDGET_MS
             val system = lookups.submit(Callable { network.getAllByName(hostname).toList() })
             try {
                 val found = system.get(SYSTEM_DNS_WAIT_MS, TimeUnit.MILLISECONDS)
@@ -172,33 +206,46 @@ object NetworkProber {
             }
             var gone: IOException? = null
             for (server in servers) {
+                // Both families: on a network with only one of them, the other's addresses are the ones that work.
+                val found = mutableListOf<InetAddress>()
                 for (type in intArrayOf(DnsMessage.TYPE_A, DnsMessage.TYPE_AAAA)) {
-                    val found = try {
-                        ask(server, hostname, type)
+                    val left = deadline - SystemClock.elapsedRealtime()
+                    if (closed || left <= 0L) break
+                    try {
+                        found += ask(server, hostname, type, left)
                     } catch (e: IOException) {
                         if (ProbeFailures.isNetworkGone(e)) gone = e
                         Logs.d("simple regime: DNS ${server.first} gave no answer for $hostname: ${e.javaClass.simpleName}")
                         break
                     }
-                    if (found.isNotEmpty()) return found
                 }
+                if (found.isNotEmpty()) return found
+                if (closed || SystemClock.elapsedRealtime() >= deadline) break
             }
             // Carries the reason, so the request tells a network that went away from a name that is not found.
             throw UnknownHostException(hostname).apply { gone?.let { initCause(it) } }
         }
 
-        private fun ask(server: Pair<String, Int>, hostname: String, type: Int): List<InetAddress> {
+        private fun ask(server: Pair<String, Int>, hostname: String, type: Int, left: Long): List<InetAddress> {
             DatagramSocket().use { socket ->
-                network.bindSocket(socket)
-                socket.soTimeout = FALLBACK_DNS_WAIT_MS
-                val id = Random.nextInt(0x10000)
-                val query = DnsMessage.query(id, hostname, type)
-                val target = InetSocketAddress(InetAddress.getByName(server.first), server.second)
-                socket.send(DatagramPacket(query, query.size, target))
-                val buffer = ByteArray(1500)
-                val packet = DatagramPacket(buffer, buffer.size)
-                socket.receive(packet)
-                return DnsMessage.addresses(buffer, packet.length, id).map { InetAddress.getByAddress(hostname, it) }
+                synchronized(sockets) {
+                    if (closed) throw IOException("the check ended")
+                    sockets += socket
+                }
+                try {
+                    network.bindSocket(socket)
+                    socket.soTimeout = left.coerceIn(1L, FALLBACK_DNS_WAIT_MS.toLong()).toInt()
+                    val id = Random.nextInt(0x10000)
+                    val query = DnsMessage.query(id, hostname, type)
+                    val target = InetSocketAddress(InetAddress.getByName(server.first), server.second)
+                    socket.send(DatagramPacket(query, query.size, target))
+                    val buffer = ByteArray(1500)
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    socket.receive(packet)
+                    return DnsMessage.addresses(buffer, packet.length, id).map { InetAddress.getByAddress(hostname, it) }
+                } finally {
+                    synchronized(sockets) { sockets -= socket }
+                }
             }
         }
     }

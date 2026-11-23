@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.Callable
 
 /**
  * Puts the chosen traffic mode into effect (design.md D5): `currentRouteId` (the managed smart or whitelist route),
@@ -361,39 +362,47 @@ object TrafficModeApplier {
     private suspend fun applyLocked(context: Context, stagedScopeMayRun: Boolean = false): Result {
         val ensured = TrafficModes.ensureManaged(context)
         val managed = ensured.ids
-        var mode = TrafficModes.mode()
-        val selected = TrafficModes.selectedApps()
-        val applicable = TrafficModePlan.applicable(mode, selected)
-        val fellBack = applicable != mode
-        if (fellBack) {
-            Logs.i("simple modes: no app selected, «${mode.key}» falls back to «${applicable.key}»")
-            TrafficModes.setMode(applicable)
-            TrafficModes.setFallbackNotice(true)
-            mode = applicable
-        }
-        val routing = routingOf(mode)
-        val routeId = when (routing) {
-            Routing.SMART -> managed.smartRoute
-            Routing.WHITELIST -> managed.whitelistRoute
-        }.takeIf { it > 0L } ?: DataStore.currentRouteId
-        val scope = TrafficModePlan.scope(mode, selected, TrafficModes.bypassApps(), context.packageName)
-        val before = TrafficModePlan.Applied(
-            routeId = DataStore.currentRouteId,
-            scope = PerAppScope(DataStore.proxyApps, DataStore.bypass, TrafficModePlan.parseList(DataStore.individual)),
-            server = DataStore.selectedProxy,
-        )
-        val after = TrafficModePlan.Applied(
-            routeId = routeId,
-            scope = scope,
-            server = TrafficModePlan.server(before.server, managed.auto, managed.autoWhitelist, routing),
-        )
-        SagerDatabase.instance.runInTransaction {
+        // Everything the plan is made of (the mode, the network check's result, the route and server in effect) is
+        // read in the same write transaction that stores the plan: `:bg` stores a network result (applyRegime) in a
+        // transaction of its own, so it lands either wholly before this one — and the plan follows it — or after it.
+        val plan = SagerDatabase.instance.runInTransaction(Callable {
+            var mode = TrafficModes.mode()
+            val selected = TrafficModes.selectedApps()
+            val applicable = TrafficModePlan.applicable(mode, selected)
+            val fellBack = applicable != mode
+            if (fellBack) {
+                Logs.i("simple modes: no app selected, «${mode.key}» falls back to «${applicable.key}»")
+                TrafficModes.setMode(applicable)
+                TrafficModes.setFallbackNotice(true)
+                mode = applicable
+            }
+            val routing = routingOf(mode)
+            val routeId = when (routing) {
+                Routing.SMART -> managed.smartRoute
+                Routing.WHITELIST -> managed.whitelistRoute
+            }.takeIf { it > 0L } ?: DataStore.currentRouteId
+            val scope = TrafficModePlan.scope(mode, selected, TrafficModes.bypassApps(), context.packageName)
+            val before = TrafficModePlan.Applied(
+                routeId = DataStore.currentRouteId,
+                scope = PerAppScope(DataStore.proxyApps, DataStore.bypass, TrafficModePlan.parseList(DataStore.individual)),
+                server = DataStore.selectedProxy,
+            )
+            val after = TrafficModePlan.Applied(
+                routeId = routeId,
+                scope = scope,
+                server = TrafficModePlan.server(before.server, managed.auto, managed.autoWhitelist, routing),
+            )
             if (after.routeId != before.routeId) DataStore.currentRouteId = after.routeId
             DataStore.proxyApps = scope.enabled
             DataStore.bypass = scope.bypass
             DataStore.individual = scope.individual
             if (after.server != before.server) DataStore.selectedProxy = after.server
-        }
+            Plan(mode, fellBack, before, after)
+        })
+        val mode = plan.mode
+        val fellBack = plan.fellBack
+        val before = plan.before
+        val after = plan.after
         val change = TrafficModePlan.change(before, after, ensured.changedRoutes, stagedScopeMayRun)
         if (change != ServiceChange.NONE) {
             reloadWhenConnected(
@@ -405,4 +414,12 @@ object TrafficModeApplier {
         }
         return Result(mode, change, fellBack)
     }
+
+    /** What [applyLocked] decided and wrote in its transaction. */
+    private class Plan(
+        val mode: TrafficMode,
+        val fellBack: Boolean,
+        val before: TrafficModePlan.Applied,
+        val after: TrafficModePlan.Applied,
+    )
 }

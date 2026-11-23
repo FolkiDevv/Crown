@@ -525,7 +525,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 },
                 countryChoice = choiceCountry,
                 whitelistServer = if (auto) currentPick?.whitelist == true else selectedWhitelist,
-                working = running?.takeIf { r -> r.membersProbed > 0 && r.membersTotal > 0 }
+                working = running?.takeIf { r -> !r.suspended && r.membersProbed > 0 && r.membersTotal > 0 }
                     ?.let { r -> ServerCard.Working(r.membersAlive, r.membersTotal) },
             )
         }
