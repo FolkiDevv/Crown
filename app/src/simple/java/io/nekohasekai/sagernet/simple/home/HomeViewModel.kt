@@ -270,7 +270,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         val call = viewModelScope.async(Dispatchers.IO) {
             try {
                 service.urlTest()
+            } catch (e: RemoteException) {
+                // The binder call itself broke (`:bg` died): no answer, not a failed test.
+                Logs.d("simple home: url test not answered: ${e.message}")
+                null
             } catch (e: Exception) {
+                // A failed test comes back as the service's IllegalStateException (urlTestCurrent): the sites failed.
                 Logs.d("simple home: url test failed: ${e.message}")
                 FAILED
             }
