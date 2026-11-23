@@ -1,6 +1,8 @@
 package io.nekohasekai.sagernet.simple.regime
 
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.net.SocketTimeoutException
 
 /**
  * The plain DNS messages of the probe's fallback lookup (NetworkProber): one question, the A or AAAA records of the
@@ -130,6 +132,33 @@ object DnsMessage {
         hasGlobalIpv6 -> intArrayOf(TYPE_AAAA)
         hasIpv4 -> intArrayOf(TYPE_A)
         else -> intArrayOf(TYPE_A, TYPE_AAAA)
+    }
+
+    /**
+     * Asks one server for [families] in order, each with the time [left] gives (0 or less: stop). A question that timed
+     * out says nothing about the other family, so the next one is still asked; any other failure (the server or the
+     * network refuses) ends the server and goes to [failed].
+     */
+    fun <T> askFamilies(
+        families: IntArray,
+        left: () -> Long,
+        ask: (type: Int, left: Long) -> List<T>,
+        failed: (IOException) -> Unit = {},
+    ): List<T> {
+        val found = mutableListOf<T>()
+        for (type in families) {
+            val time = left()
+            if (time <= 0L) break
+            try {
+                found += ask(type, time)
+            } catch (e: SocketTimeoutException) {
+                continue
+            } catch (e: IOException) {
+                failed(e)
+                break
+            }
+        }
+        return found
     }
 
     /** A 16-byte IPv6 address in the global unicast range 2000::/3 (not link-local, site-local, ULA or loopback). */

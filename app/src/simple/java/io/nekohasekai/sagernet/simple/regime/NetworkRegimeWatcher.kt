@@ -38,9 +38,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  * with the VPN off nothing is checked. A check runs when the VPN connects, when the physical network changes, when the
  * user chooses «Авто» ([requestCheck]) and every 15 minutes in a mobile network.
  *
- * The physical network comes from DefaultNetworkListener under a key of its own (the source BaseService fills
- * `SagerNet.underlyingNetwork` from). Checks run one at a time through [ProbeGate]: a new one cancels the one in
- * flight, and a result is stored (`simple_regime`) and applied only when it is the latest check, its network is still
+ * The physical network comes from a ConnectivityManager callback of its own on its own thread (PhysicalNetworkMonitor,
+ * the request DefaultNetworkListener makes; DefaultNetworkListener itself only if the system refuses it), so the
+ * upstream listeners queued on DefaultNetworkListener's thread never delay it. Checks run one at a time through
+ * [ProbeGate]: a new one cancels the one in flight, and a result is stored (`simple_regime`) and applied only when it is the latest check, its network is still
  * the physical network and the user did not change the mode meanwhile (TrafficModeApplier.applyRegime decides that in
  * one database transaction with the mode's own writes). No notification is shown; the home screen's mode card tells.
  */
@@ -72,6 +73,9 @@ object NetworkRegimeWatcher {
     private class Session(val scope: CoroutineScope) {
         /** The listener's key: a stop of an earlier run never removes the listener of this one. */
         val key = Any()
+
+        /** The physical network's own callback; null when the system refused it and DefaultNetworkListener is used. */
+        var monitor: PhysicalNetworkMonitor? = null
         var listener: Job? = null
         var receiver: BroadcastReceiver? = null
 
@@ -96,9 +100,14 @@ object NetworkRegimeWatcher {
         started.receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) = onCheckRequested(started)
         }.also { register(it) }
-        // Not in the session's scope: a stop must still find out whether the start reached the listener.
-        started.listener = GlobalScope.launch(Dispatchers.Default) {
-            DefaultNetworkListener.start(started.key) { onNetwork(started, it) }
+        val monitor = PhysicalNetworkMonitor { onNetwork(started, it) }
+        if (monitor.start()) {
+            started.monitor = monitor
+        } else {
+            // Not in the session's scope: a stop must still find out whether the start reached the listener.
+            started.listener = GlobalScope.launch(Dispatchers.Default) {
+                DefaultNetworkListener.start(started.key) { onNetwork(started, it) }
+            }
         }
         started.scope.launch {
             while (isActive) {
@@ -121,10 +130,13 @@ object NetworkRegimeWatcher {
         if (stopped.check?.isActive == true) Logs.i("simple regime: the VPN stopped, the check in flight is cancelled")
         stopped.scope.cancel()
         stopped.receiver?.let { runCatching { app.unregisterReceiver(it) }.onFailure { Logs.w(it) } }
+        stopped.monitor?.stop()
         val listener = stopped.listener
-        GlobalScope.launch(Dispatchers.Default) {
-            listener?.join()
-            DefaultNetworkListener.stop(stopped.key)
+        if (listener != null) {
+            GlobalScope.launch(Dispatchers.Default) {
+                listener.join()
+                DefaultNetworkListener.stop(stopped.key)
+            }
         }
         Logs.i("simple regime: watcher stopped with the VPN, no checks until it connects again")
         true
@@ -168,7 +180,7 @@ object NetworkRegimeWatcher {
 
     // ------------------------------------------------------------------------------------------------ events
 
-    /** DefaultNetworkListener's thread: a new physical network, the same one again (capabilities), or none. */
+    /** The monitor's (or DefaultNetworkListener's) thread: a new physical network, the same one again, or none. */
     private fun onNetwork(owner: Session, network: Network?) = synchronized(lock) {
         if (session !== owner) return@synchronized
         val previous = owner.network

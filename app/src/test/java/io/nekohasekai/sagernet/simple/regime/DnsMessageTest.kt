@@ -76,6 +76,51 @@ class DnsMessageTest {
     }
 
     @Test
+    fun aTimedOutFamilyDoesNotStopTheOther() {
+        val a = DnsMessage.TYPE_A
+        val aaaa = DnsMessage.TYPE_AAAA
+        val asked = mutableListOf<Int>()
+        val found = DnsMessage.askFamilies(intArrayOf(a, aaaa), left = { 1000L }, ask = { type, _ ->
+            asked += type
+            if (type == a) throw java.net.SocketTimeoutException("no answer") else listOf("2a02::1")
+        })
+        assertEquals(listOf(a, aaaa), asked)
+        assertEquals(listOf("2a02::1"), found)
+    }
+
+    @Test
+    fun anotherFailureEndsTheServer() {
+        val failures = mutableListOf<java.io.IOException>()
+        val asked = mutableListOf<Int>()
+        val found = DnsMessage.askFamilies(
+            intArrayOf(DnsMessage.TYPE_A, DnsMessage.TYPE_AAAA),
+            left = { 1000L },
+            ask = { type, _ ->
+                asked += type
+                throw java.net.SocketException("Network is unreachable")
+            },
+            failed = { failures += it },
+        )
+        assertEquals(listOf(DnsMessage.TYPE_A), asked)
+        assertTrue(found.isEmpty())
+        assertEquals(1, failures.size)
+    }
+
+    @Test
+    fun noTimeLeftAsksNothingMore() {
+        var time = 1000L
+        val asked = mutableListOf<Int>()
+        val found = DnsMessage.askFamilies(intArrayOf(DnsMessage.TYPE_A, DnsMessage.TYPE_AAAA), left = { time }, ask = { type, left ->
+            asked += type
+            assertTrue(left > 0L)
+            time = 0L
+            listOf(type)
+        })
+        assertEquals(listOf(DnsMessage.TYPE_A), asked)
+        assertEquals(listOf(DnsMessage.TYPE_A), found)
+    }
+
+    @Test
     fun globalIpv6Only() {
         fun v6(vararg head: Int) = ByteArray(16).also { b -> head.forEachIndexed { i, v -> b[i] = v.toByte() } }
         assertTrue(DnsMessage.isGlobalIpv6(v6(0x2a, 0x02, 0x06, 0xb8)))

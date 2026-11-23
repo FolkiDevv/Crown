@@ -223,18 +223,16 @@ object NetworkProber {
             for (server in servers) {
                 // The families the network can reach (an IPv6-only network gets its AAAA answers; IPv6 that is only
                 // link- or site-local is no reason to try AAAA addresses, which would hang to the deadline).
-                val found = mutableListOf<InetAddress>()
-                for (type in families) {
-                    val left = deadline - SystemClock.elapsedRealtime()
-                    if (closed || left <= 0L) break
-                    try {
-                        found += ask(server, hostname, type, left)
-                    } catch (e: IOException) {
+                // A timed-out A question does not keep the AAAA one from being asked (DnsMessage.askFamilies).
+                val found = DnsMessage.askFamilies(
+                    families,
+                    left = { if (closed) 0L else deadline - SystemClock.elapsedRealtime() },
+                    ask = { type, left -> ask(server, hostname, type, left) },
+                    failed = { e ->
                         if (ProbeFailures.isNetworkGone(e)) gone = e
                         Logs.d("simple regime: DNS ${server.first} gave no answer for $hostname: ${e.javaClass.simpleName}")
-                        break
-                    }
-                }
+                    },
+                )
                 if (found.isNotEmpty()) return found
                 if (closed || SystemClock.elapsedRealtime() >= deadline) break
             }
