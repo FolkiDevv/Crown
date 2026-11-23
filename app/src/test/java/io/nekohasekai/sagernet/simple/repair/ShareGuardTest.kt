@@ -39,6 +39,24 @@ class ShareGuardTest {
         assertTrue(guard.cameBack(ok = false))
     }
 
+    /** The emulators' slow case: the app stopped 1.2 s after the blocked start. */
+    @Test
+    fun slowStopAfterABlockedStartIsOfferedAgain() {
+        guard.launched()
+        clock += 1_215
+        guard.stopped()
+        assertFalse(guard.cameBack(ok = false))
+    }
+
+    /** Home with the sheet up: Android closes it and the result comes before the app stops — it was seen. */
+    @Test
+    fun resultBeforeTheStopIsDone() {
+        guard.launched()
+        clock += 500
+        assertTrue(guard.cameBack(ok = false))
+        guard.stopped()
+    }
+
     /** The sheet was up for a while, then the user left: Android closes it; that sheet was seen. */
     @Test
     fun leftLaterIsDone() {

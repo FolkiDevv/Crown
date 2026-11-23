@@ -46,9 +46,10 @@ data class RepairUiState(
 /**
  * Whether a share sheet that came back was ever shown. Android silently blocks an activity start from the background:
  * when the user presses Home just before the app starts the sheet, the sheet is created hidden and finished, cancelled,
- * when the user returns. Nothing tells that apart from a sheet the user dismissed except the timing: the app went to the
- * background within [BLOCKED_WINDOW_MS] of the start — before anyone could have looked at a sheet — so it was not seen.
- * Pure Kotlin over [now] (elapsed ms), covered by a JVM unit test.
+ * when the user returns — so its result comes after the app stopped. A sheet that was up and is closed by Back or Home
+ * comes back before the app stops; one that started a target comes back after it, but only once the user picked the
+ * target. So a cancelled result after a stop that came within [BLOCKED_WINDOW_MS] of the start — sooner than anyone picks
+ * a target — is a sheet that was never seen. Pure Kotlin over [now] (elapsed ms), covered by a JVM unit test.
  */
 class ShareGuard(private val now: () -> Long) {
     private var launchedAt = -1L
@@ -73,8 +74,8 @@ class ShareGuard(private val now: () -> Long) {
     }
 
     companion object {
-        /** Seen on the emulator: the app stops 0.3–0.5 s after a blocked start; nobody picks a target that fast. */
-        const val BLOCKED_WINDOW_MS = 1_000L
+        /** Seen on the emulators: the app stops 0.3–1.25 s after a blocked start, under load later; with a margin. */
+        const val BLOCKED_WINDOW_MS = 2_500L
     }
 }
 
