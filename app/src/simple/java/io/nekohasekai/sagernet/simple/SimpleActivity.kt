@@ -833,20 +833,28 @@ private fun HomeSection(
     LaunchedEffect(modesState.applied) { if (modesState.applied > 0) home.refreshServer() }
     SectionScaffold(SimpleSection.HOME, snackbar.takeIf { showSnackbar }) { modifier ->
         Column(modifier) {
-            // After an upgrade, once: the classic interface is in the settings (simple-ui "Подсказка после обновления").
-            if (settingsState.classicHint) {
-                ClassicHintCard(
-                    onOpenSettings = {
-                        settings.closeClassicHint()
-                        openSettings()
-                    },
-                    onClose = settings::closeClassicHint,
-                )
-            }
             HomeScreen(
                 state = state,
                 modeCard = modesState.card,
                 actions = actions,
+                // After an upgrade, once: the classic interface is in the settings (simple-ui "Подсказка после обновления").
+                // Shown in the scrolling content, so on a low window it does not take the room of the button.
+                hint = if (settingsState.classicHint) {
+                    { hintModifier ->
+                        ClassicHintCard(
+                            onOpenSettings = {
+                                settings.closeClassicHint()
+                                openSettings()
+                            },
+                            onClose = settings::closeClassicHint,
+                            modifier = hintModifier,
+                        )
+                    }
+                } else {
+                    null
+                },
+                // Closing the hint takes its focused button away: a remote goes back to the connect button.
+                focusKey = settingsState.classicHint,
                 onToggle = { home.toggle(actions.requestStart) },
                 onDismissProblem = home::dismissProblem,
                 modifier = Modifier.weight(1f),
