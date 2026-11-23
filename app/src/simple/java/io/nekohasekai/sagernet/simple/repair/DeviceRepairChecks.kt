@@ -127,14 +127,19 @@ class DeviceRepairChecks(
 
     /**
      * A failure of a check that a single miss can fake (a DNS answer lost, a VPN that has just started or reloaded) is
-     * looked at again a moment later before it counts, so no setting is changed over a fluke: up to [tries] looks.
+     * looked at again a moment later before it counts, so no setting is changed over a fluke: up to [tries] looks. Only
+     * a quick failure is looked at again; one that waited out its whole time limit had no answer to miss.
      */
     private suspend fun secondLook(step: RepairStep, tries: Int, check: suspend () -> StepResult): StepResult {
+        var started = System.currentTimeMillis()
         var result = check()
         var look = 1
-        while (result.status == StepStatus.FAIL && look < tries) {
+        while (result.status == StepStatus.FAIL && look < tries &&
+            System.currentTimeMillis() - started < SECOND_LOOK_QUICK_MS
+        ) {
             Logs.i("simple repair: ${step.name.lowercase()} failed (${describe(result)}), looking again")
             delay(SECOND_LOOK_MS)
+            started = System.currentTimeMillis()
             result = check()
             look++
         }
@@ -566,6 +571,9 @@ class DeviceRepairChecks(
 
         /** The pause before a failed check is looked at again ([secondLook]). */
         const val SECOND_LOOK_MS = 4_000L
+
+        /** A failure quicker than this may be a fluke and gets [SECOND_LOOK_MS] and another look. */
+        const val SECOND_LOOK_QUICK_MS = 15_000L
 
         /** connection-repair "Проверка времени на устройстве": more than 60 s off is a problem. */
         const val CLOCK_TOLERANCE_MS = 60_000L

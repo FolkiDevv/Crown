@@ -63,6 +63,39 @@ class RepairReportTest {
     }
 
     @Test
+    fun theFixesShowTheSettingBeforeAndAfterAndAStopUndoesThem() {
+        val change = FixChange("direct DNS", "192.0.2.1", "77.88.8.8, 77.88.8.1")
+        val fixed = results + (RepairStep.DNS_DIRECT to StepResult(
+            StepStatus.FIXED, setOf(Finding.DNS_NO_ANSWER), fix = FixKind.DIRECT_DNS_WHITELISTED, fixChange = change,
+        ))
+        val json = JSONObject(RepairReport.json(fixed, RepairVerdict.of(fixed), device, 0L))
+        val stepChange = json.getJSONArray("steps").getJSONObject(RepairStep.DNS_DIRECT.ordinal).getJSONObject("fix_change")
+        assertEquals("192.0.2.1", stepChange.getString("before"))
+        assertEquals("77.88.8.8, 77.88.8.1", stepChange.getString("after"))
+        assertEquals("direct DNS", json.getJSONArray("fixes").getJSONObject(0).getJSONObject("change").getString("setting"))
+        val text = RepairReport.text(fixed, RepairVerdict.of(fixed), device, 0L)
+        assertTrue(text, text.contains("fixed: direct DNS changed to a whitelisted one (direct DNS: 192.0.2.1 -> 77.88.8.8, 77.88.8.1)"))
+
+        // Stopped after the fix: the check is back to its failure, the fix is listed as undone, not as made.
+        val undone = results + (RepairStep.DNS_DIRECT to StepResult(
+            StepStatus.FAIL, setOf(Finding.DNS_NO_ANSWER), undoneFix = FixKind.DIRECT_DNS_WHITELISTED, fixChange = change,
+        ))
+        val stoppedJson = JSONObject(RepairReport.json(undone, null, device, 0L))
+        val step = stoppedJson.getJSONArray("steps").getJSONObject(RepairStep.DNS_DIRECT.ordinal)
+        assertEquals("fail", step.getString("status"))
+        assertEquals("direct_dns_whitelisted", step.getString("fix_undone"))
+        assertEquals(0, stoppedJson.getJSONArray("fixes").length())
+        val stoppedText = RepairReport.text(undone, null, device, 0L)
+        assertTrue(stoppedText, stoppedText.contains("fix undone (the run was stopped): direct DNS changed to a whitelisted one"))
+    }
+
+    @Test
+    fun theVpnThatDidNotConnectIsExplained() {
+        val result = StepResult.skipped(SkipReason.VPN_START_FAILED)
+        assertEquals("not checked: the VPN started for the checks did not connect", RepairReport.explain(RepairStep.SITES_VPN, result))
+    }
+
+    @Test
     fun aStoppedRunHasNoVerdict() {
         val stopped = RepairPlan.ORDER.associateWith { StepResult.skipped(SkipReason.STOPPED) }
         val json = JSONObject(RepairReport.json(stopped, null, device, 0L))
