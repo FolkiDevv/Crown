@@ -2,7 +2,6 @@ package io.nekohasekai.sagernet.simple.repair
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
@@ -13,7 +12,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -403,13 +401,13 @@ class RepairVpnSyncTest {
 
     @Test
     fun aLateBindAfterTheWaitWasStoppedSubmitsNothing() = runBlocking {
-        // The binding answers only after the run was stopped (a binder wait cannot be interrupted): nothing is
-        // submitted then.
+        // The binding answers only after the run was stopped (a binder wait cannot be interrupted): the claim fails,
+        // nothing is submitted.
         val submitted = AtomicInteger()
         val waiter = launch {
-            detachedCall(scope, 5_000L) { live ->
-                withContext(NonCancellable) { delay(300) }
-                if (live()) submitted.incrementAndGet()
+            detachedCall(scope, 5_000L) { claim ->
+                Thread.sleep(300) // a blocking binder wait: not interrupted
+                if (claim()) submitted.incrementAndGet()
             }
         }
         delay(100)
@@ -419,11 +417,32 @@ class RepairVpnSyncTest {
     }
 
     @Test
+    fun aSubmissionClaimedBeforeTheStopIsPartOfTheRunEvenWithAPauseBeforeIt() = runBlocking {
+        // The call claims, then pauses before it submits (non-suspending code is not interrupted); the stop comes in
+        // that pause. The claim came first, so the submission goes through as part of the run — and a stop that comes
+        // before a claim can never be overtaken by it (one compare-and-set).
+        val claimed = CompletableDeferred<Unit>()
+        val submitted = AtomicInteger()
+        val waiter = launch {
+            detachedCall(scope, 5_000L) { claim ->
+                val mine = claim()
+                claimed.complete(Unit)
+                Thread.sleep(300) // a blocking binder wait: not interrupted
+                if (mine) submitted.incrementAndGet()
+            }
+        }
+        claimed.await()
+        waiter.cancel()
+        delay(500)
+        assertEquals(1, submitted.get())
+    }
+
+    @Test
     fun aBindOverTheLimitIsGivenUpAndSubmitsNothing() = runBlocking {
         val submitted = AtomicInteger()
-        val result = detachedCall(scope, 100L) { live ->
-            withContext(NonCancellable) { delay(300) }
-            if (live()) submitted.incrementAndGet()
+        val result = detachedCall(scope, 100L) { claim ->
+            Thread.sleep(300) // a blocking binder wait: not interrupted
+            if (claim()) submitted.incrementAndGet()
         }
         assertNull(result)
         delay(400)
@@ -432,6 +451,6 @@ class RepairVpnSyncTest {
 
     @Test
     fun aCallInTimeReturnsItsResult() = runBlocking {
-        assertEquals(42, detachedCall(scope, 1_000L) { live -> if (live()) 42 else 0 })
+        assertEquals(42, detachedCall(scope, 1_000L) { claim -> if (claim()) 42 else 0 })
     }
 }

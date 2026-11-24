@@ -1110,4 +1110,39 @@ class RepairRollbackTest {
         assertEquals("A", value)
         assertFalse(carry.pending)
     }
+
+    @Test
+    fun theServerChainSurvivesARunBoundVpnStopThatCannotBeRetried() = runBlocking {
+        // «Доступность серверов» switched A → B; the VPN for the checks selected C and started; on the stop the VPN
+        // stop fails (bound to the run: never retried) and so does the selection's C → B. The selection is a change
+        // of its own, retriable and in the server chain: carried with A → B, it is put back first, then A → B — the
+        // older change is never dropped as superseded because the run-bound VPN stop was not carried.
+        var server = "A"
+        var selectionFails = true
+        val stops = mutableListOf<String>()
+        val journal = RepairJournal()
+        server = "B"
+        journal.record(RepairStep.SERVERS, FixKind.SWITCHED_SERVER, stillOurs = { server == "B" }, key = "server") {
+            server = "A"
+        }
+        server = "C"
+        journal.record(RepairStep.DNS_VPN, kind = null, keepIf = RepairStep.SITES_VPN, key = "server", stillOurs = { server == "C" }) {
+            if (selectionFails) error("cannot write") else server = "B"
+        }
+        journal.record(RepairStep.DNS_VPN, kind = null, keepIf = RepairStep.SITES_VPN, retriable = false) {
+            stops += "stop"
+            error("cannot stop")
+        }
+        journal.restoreAll()
+        assertEquals("C", server)
+        val carry = UnrestoredChanges()
+        carry.keep(journal, FakeChecks(Settings()))
+        assertTrue(carry.pending)
+        selectionFails = false
+        carry.retry()
+        assertEquals("A", server)
+        assertFalse(carry.pending)
+        // The VPN stop was tried once, in its run, never again.
+        assertEquals(listOf("stop"), stops)
+    }
 }
