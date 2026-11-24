@@ -8,7 +8,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The service as «Починка» waits for it while it changes settings (design.md D8). Pure: the device side is the home
@@ -279,28 +279,36 @@ class SubscriptionUpdateFix(
 
 /**
  * A call to `:bg` that a wait may give up on (a stop, a time limit): [block] runs in [scope], since a binder call
- * cannot be interrupted, and the caller waits at most [limitMs] (null then). A wait that ends early cancels the call
- * too — a service binding that never answered is given up (and unbound) — and turns [block]'s `live()` false: a late
- * callback checks it before it submits anything, so nothing is submitted after the wait is over. A call already in
- * the service runs on (its work was accepted).
+ * cannot be interrupted, and the caller waits at most [limitMs] (null then); a wait that ends early cancels the call
+ * too — a service binding that never answered is given up (and unbound).
+ *
+ * [block] must `claim()` before it hands anything to the service. The claim and the give-up are one compare-and-set on
+ * the same state, so they cannot interleave: either the give-up comes first — the claim fails and nothing is
+ * submitted — or the claim does, and the submission is part of the run whatever happens after (a subscription update
+ * is not rolled back anyway). No pause between the check and the submission can let a submission slip in after a stop.
  */
 suspend fun <T> detachedCall(
     scope: CoroutineScope,
     limitMs: Long,
-    block: suspend (live: () -> Boolean) -> T,
+    block: suspend (claim: () -> Boolean) -> T,
 ): T? {
-    val live = AtomicBoolean(true)
-    val call = scope.async { block { live.get() } }
+    val state = AtomicInteger(LIVE)
+    val call = scope.async { block { state.compareAndSet(LIVE, CLAIMED) } }
+    // A claimed call goes on (its work is part of the run); one not claimed yet is given up and submits nothing.
+    fun giveUp() {
+        state.compareAndSet(LIVE, GIVEN_UP)
+        call.cancel()
+    }
     try {
         val result = withTimeoutOrNull(limitMs) { call.await() }
-        if (result == null) {
-            live.set(false)
-            call.cancel()
-        }
+        if (result == null) giveUp()
         return result
     } catch (e: CancellationException) {
-        live.set(false)
-        call.cancel()
+        giveUp()
         throw e
     }
 }
+
+private const val LIVE = 0
+private const val CLAIMED = 1
+private const val GIVEN_UP = 2

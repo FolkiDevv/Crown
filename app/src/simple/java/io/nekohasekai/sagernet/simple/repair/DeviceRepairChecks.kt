@@ -480,8 +480,21 @@ class DeviceRepairChecks(
         // reloads) and drops it when the service stops, so a VPN the user stopped and started again meanwhile (the
         // quick toggle) has another one and is never stopped by this rollback. Null while the start is in flight.
         var session: Long? = null
-        // Bound to this run (not retriable): a later retry could stop a VPN the user started since.
-        val entry = journal.record(step, kind = null, keepIf = RepairStep.SITES_VPN, retriable = false, key = "server") {
+        // Two changes, put back newest first: the VPN (stopped first), then the server selected for it.
+        // The server: a setting «Починка» wrote, in the chain of the server setting (key "server") with the switch of
+        // «Доступность серверов» before it, and retriable like any setting — compare and set against the server
+        // written.
+        val selection = if (selected != chosen) {
+            journal.record(
+                step, kind = null, keepIf = RepairStep.SITES_VPN, key = "server",
+                stillOurs = { DataStore.selectedProxy == chosen },
+            ) { DataStore.selectedProxy = selected }
+        } else {
+            null
+        }
+        // The VPN: bound to this run (not retriable — a later retry could stop a VPN the user started since) and to
+        // its session; no setting of its own, so it never holds the server chain back.
+        val vpnStart = journal.record(step, kind = null, keepIf = RepairStep.SITES_VPN, retriable = false) {
             val running = DataStore.configurationStore.getLong(SimpleHooks.KEY_CONNECTED_SINCE)
             if (!env.serviceOff() && (session == null || running == session)) {
                 Logs.i("simple repair: stopping the VPN started for the checks")
@@ -490,8 +503,6 @@ class DeviceRepairChecks(
             } else {
                 Logs.i("simple repair: the VPN started for the checks is gone; the one running now is left alone")
             }
-            // The server selected for it goes back while it is still the one «Починка» wrote (compare and set).
-            if (selected != chosen && DataStore.selectedProxy == chosen) DataStore.selectedProxy = selected
         }
         if (selected != chosen) withContext(Dispatchers.IO) { DataStore.selectedProxy = chosen }
         Logs.i("simple repair: starting the VPN on server $chosen for the checks through it")
@@ -501,7 +512,8 @@ class DeviceRepairChecks(
             return null
         }
         Logs.w("simple repair: the VPN started for the checks did not connect")
-        journal.restore(entry)
+        journal.restore(vpnStart)
+        selection?.let(journal::restore)
         return SkipReason.VPN_START_FAILED.also { vpnProblem = it }
     }
 
