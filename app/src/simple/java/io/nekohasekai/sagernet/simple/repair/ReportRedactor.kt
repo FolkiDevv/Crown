@@ -34,12 +34,16 @@ class ReportRedactor(
     /** The subscription links, longest first so that a link that is the start of another is not cut out of it. */
     private val links: List<Pair<String, String>>
 
-    /** The known dotted names and addresses in free text, the longest first. */
+    /**
+     * The known names and addresses anywhere in free text, as whole words, the longest first: dotted names, addresses
+     * and single-label names that identify something ("mybox7").
+     */
     private val names: Regex?
 
     /**
-     * The known single-label server names ("gateway"), only where they stand as a host — after "@" or "//", before
-     * ":<port>": as plain words ("vpn") they are everywhere in a log.
+     * The known single-label server names that are generic words ([GENERIC_NAMES]: "gateway", "vpn"), only where they
+     * stand as a host — after "@" or "//", before ":<port>". As plain words they identify nothing and are everywhere in
+     * a log («VPN service», «the gateway is down»), so they stay readable there.
      */
     private val singleNames: Regex?
 
@@ -60,17 +64,17 @@ class ReportRedactor(
                 for (form in forms(host)) labels.putIfAbsent(form, "<subscription-${i + 1}-host>")
             }
         }
-        val (single, dotted) = labels.keys.partition(::isSingleLabel)
+        val (generic, anywhere) = labels.keys.partition { isSingleLabel(it) && it in GENERIC_NAMES }
         // A subdomain of a server's domain names the server too: "cdn.vpn.example.com" becomes the label of
-        // "vpn.example.com" (group 1 is dropped).
-        names = dotted.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
+        // "vpn.example.com" (group 1 is dropped). Word edges are Unicode letters and digits (IDN, Cyrillic names).
+        names = anywhere.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
             // A colon may come before a name ("dialing to tcp:host:443"): only a letter, digit, dot or dash may not.
             Regex(
-                "(?iu)(?<![\\w.\\-])((?:[a-z0-9_\\-]+\\.)*)(" + known.joinToString("|") { Regex.escape(it) } +
-                    ")(?![\\w\\-]|\\.[\\w\\-])",
+                "(?iu)(?<![\\p{L}\\p{N}_.\\-])((?:[a-z0-9_\\-]+\\.)*)(" + known.joinToString("|") { Regex.escape(it) } +
+                    ")(?![\\p{L}\\p{N}_\\-]|\\.[\\p{L}\\p{N}_\\-])",
             )
         }
-        singleNames = single.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
+        singleNames = generic.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
             val alternatives = known.joinToString("|") { Regex.escape(it) }
             Regex("(?iu)(?<=@|//)($alternatives)(?![\\w.\\-])|(?<![\\w.\\-])($alternatives)(?=:\\d)")
         }
@@ -94,7 +98,12 @@ class ReportRedactor(
             val credentials = if (m.groups[CREDENTIALS] != null) "<redacted>@" else ""
             m.groupValues[1] + "://" + credentials + labelFor(m.groups[HOST]!!.value)
         }
-        names?.let { pattern -> s = pattern.replace(s) { m -> labels[normalize(m.groupValues[2])] ?: m.value } }
+        names?.let { pattern ->
+            s = pattern.replace(s) { m ->
+                val name = m.groupValues[2]
+                labels[normalize(name) ?: name.lowercase()] ?: m.value
+            }
+        }
         singleNames?.let { pattern ->
             s = pattern.replace(s) { m -> labels[(m.groups[1] ?: m.groups[2])!!.value.lowercase()] ?: m.value }
         }
@@ -160,19 +169,34 @@ class ReportRedactor(
         private const val HOST = 3
 
         /** What a known secret becomes until the end of [redact]: private-use characters, no angle brackets. */
-        private const val MASK = "redacted"
+        private const val MASK = "\uE000redacted\uE000"
+
+        private val LABEL_WORD = Regex("""(?:server|host|subscription)-\d+(?:-host)?""")
 
         private val SINGLE_LABEL = Regex("[\\p{L}\\p{N}](?:[\\p{L}\\p{N}\\-]*[\\p{L}\\p{N}])?")
 
         /** Words a profile writes where an address would be, which are no host. */
         private val NOT_HOSTS = setOf(
             "localhost", "none", "auto", "direct", "block", "local", "any", "true", "false", "null", "default",
+            // The words of the report's own labels: a server called so would eat them.
+            "redacted", "uuid", "key", "ip", "domain",
         )
 
         /** The keys whose single-label value ("gateway") is a server; a transport's "host" or an SNI is not that sure. */
         private val PRIMARY_SERVER_KEYS = setOf(
             "server", "address", "endpoint", "peer", "remote", "remote_address", "server_address", "serveraddress",
             "hostname",
+        )
+
+        /**
+         * Generic words a single-label server may be called by, English and Russian: they identify nothing, so as plain
+         * words they stay readable (labelled only as a host); any other single-label name is replaced everywhere.
+         */
+        val GENERIC_NAMES = setOf(
+            "vpn", "proxy", "server", "gateway", "router", "host", "node", "local", "localhost", "auto", "direct",
+            "none", "default", "home", "office", "main", "backup", "test", "relay", "bridge", "tunnel", "exit", "edge",
+            "впн", "прокси", "сервер", "шлюз", "роутер", "маршрутизатор", "хост", "узел", "нода", "дом", "офис",
+            "основной", "резервный", "тест", "мост", "туннель",
         )
 
         private fun isSingleLabel(name: String) = !name.contains('.') && !name.contains(':')
@@ -187,7 +211,7 @@ class ReportRedactor(
             s = s.substringBefore('/')
             if (s.count { it == ':' } == 1) s = s.substringBefore(':')
             s = s.trimEnd('.').lowercase()
-            if (s.length !in 2..63 || s in NOT_HOSTS || s.all(Char::isDigit)) return null
+            if (s.length !in 2..63 || s in NOT_HOSTS || s.all(Char::isDigit) || LABEL_WORD.matches(s)) return null
             return s.takeIf { SINGLE_LABEL.matches(it) }
         }
 

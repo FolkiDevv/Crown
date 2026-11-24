@@ -252,7 +252,7 @@ class ReportRedactorTest {
             val out = r.redact(line)
             for (part in listOf(secret, "pw-", "-Zq", "203.0.113.9")) assertFalse(out, out.contains(part))
             assertTrue(out, out.contains("<redacted>"))
-            assertFalse(out, out.contains(""))
+            assertFalse(out, out.contains("\uE000"))
         }
     }
 
@@ -272,6 +272,29 @@ class ReportRedactorTest {
         assertEquals("[Info] the gateway is down, VPN service on", r.redact("[Info] the gateway is down, VPN service on"))
         // Words a profile writes for "no address" are no servers.
         assertEquals(emptySet<String>(), ReportRedactor.serverNames("none", """{"address":"auto","endpoint":"8080"}"""))
+    }
+
+    /**
+     * A single-label server name that identifies something ("mybox7", "дача5") is replaced as a plain word too; a
+     * generic one (GENERIC_NAMES) stays readable as a word and is labelled only as a host (review).
+     */
+    @Test
+    fun distinctiveSingleLabelServer() {
+        val names = ReportRedactor.serverNames("mybox7", "{}") + ReportRedactor.serverNames("дача5", "{}") +
+            ReportRedactor.serverNames("proxy", "{}")
+        assertEquals(setOf("mybox7", "дача5", "proxy"), names)
+        val r = ReportRedactor(names, emptyList())
+        assertEquals("[Info] <server-1> handshake failed", r.redact("[Info] mybox7 handshake failed"))
+        assertEquals("[Info] outbound <server-1> down", r.redact("[Info] outbound MYBOX7 down"))
+        assertEquals("[Info] сервер <server-2> не отвечает", r.redact("[Info] сервер дача5 не отвечает"))
+        assertEquals("[Info] tcp:<server-1>:443 and https://<server-1>/<redacted>", r.redact("[Info] tcp:mybox7:443 and https://mybox7/x"))
+        // Part of a longer word is not the name.
+        assertEquals("[Info] mybox77 and xmybox7 and дача55", r.redact("[Info] mybox77 and xmybox7 and дача55"))
+        // A generic name: a word stays, a host is labelled.
+        assertEquals("[Info] proxy started, dial tcp:<server-3>:1080", r.redact("[Info] proxy started, dial tcp:proxy:1080"))
+        // The report's own label words are never server names.
+        assertEquals(emptySet<String>(), ReportRedactor.serverNames("redacted", """{"address":"server-1"}"""))
+        assertEquals("[Info] password=<redacted> uuid <uuid>", r.redact("[Info] password=secret12 uuid $uuid"))
     }
 
     /** An IPv6 server in any spelling — compressed, full, zero-padded, with brackets and port (neighbouring case). */
