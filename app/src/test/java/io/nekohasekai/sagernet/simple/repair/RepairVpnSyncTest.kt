@@ -339,17 +339,29 @@ class RepairVpnSyncTest {
     fun aCancelledWaitDoesNotLoseTheOwedReloadAndItGoesOnlyOnceConnected() = runBlocking {
         // A value was put back while the VPN was starting with the replaced one; the run waits (settle) and the user
         // stops it during that wait.
-        var phase = ServicePhase.STARTING
+        val phase = java.util.concurrent.atomic.AtomicReference(ServicePhase.STARTING)
         val reloads = AtomicInteger()
-        val pending = pending({ phase }, reloads)
+        // The watcher's looks are counted: the assertions wait for looks, not for time.
+        val lookedWhileStarting = java.util.concurrent.CountDownLatch(3)
+        val pending = pending({
+            val now = phase.get()
+            if (now == ServicePhase.STARTING) lookedWhileStarting.countDown()
+            now
+        }, reloads)
         val owed = pending.arm()
-        val waiter = launch { owed.await(60_000L) }
-        delay(100)
+        val waiting = CompletableDeferred<Unit>()
+        val waiter = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            waiting.complete(Unit)
+            owed.await(60_000L)
+        }
+        waiting.await()
         waiter.cancel()
-        delay(200)
+        waiter.join()
+        // The watcher looked at a starting service several times after the wait was cancelled, and sent nothing.
+        assertTrue(lookedWhileStarting.await(5, java.util.concurrent.TimeUnit.SECONDS))
         assertEquals("never during the start", 0, reloads.get())
         assertTrue(pending.armed)
-        phase = ServicePhase.CONNECTED
+        phase.set(ServicePhase.CONNECTED)
         assertEquals(ReloadOutcome.SENT, owed.await(2_000L))
         assertEquals(1, reloads.get())
         assertFalse(pending.armed)
@@ -392,28 +404,49 @@ class RepairVpnSyncTest {
         pending.disarm()
         phase = ServicePhase.CONNECTED
         assertEquals("the VPN «Починка» started is being stopped", ReloadOutcome.DROPPED, stopped.await(2_000L))
-        delay(200)
+        // No wait needed: a send checks under the same lock that the reload is still owed, and disarm cleared it.
         assertEquals(0, reloads.get())
         assertFalse(pending.armed)
     }
 
     // ------------------------------------------------------------------------------------------------ detached calls
 
+    /**
+     * A service callback the test steps through: it reports it [started], blocks (as a binder call, not interrupted)
+     * until [release]d, claims (or uses an earlier claim), and reports [done] after the claim and the submission —
+     * the assertions wait for [done], never for time.
+     */
+    private class Callback {
+        val started = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val done = java.util.concurrent.CountDownLatch(1)
+        val submitted = AtomicInteger()
+
+        fun claimAfterRelease(claim: () -> Boolean) {
+            started.countDown()
+            check(release.await(5, java.util.concurrent.TimeUnit.SECONDS)) { "never released" }
+            if (claim()) submitted.incrementAndGet()
+            done.countDown()
+        }
+
+        fun awaitStarted() = assertTrue("the callback did not start", started.await(5, java.util.concurrent.TimeUnit.SECONDS))
+
+        fun awaitDone() = assertTrue("the callback did not finish", done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+    }
+
     @Test
     fun aLateBindAfterTheWaitWasStoppedSubmitsNothing() = runBlocking {
         // The binding answers only after the run was stopped (a binder wait cannot be interrupted): the claim fails,
         // nothing is submitted.
-        val submitted = AtomicInteger()
-        val waiter = launch {
-            detachedCall(scope, 5_000L) { claim ->
-                Thread.sleep(300) // a blocking binder wait: not interrupted
-                if (claim()) submitted.incrementAndGet()
-            }
-        }
-        delay(100)
+        val callback = Callback()
+        // Off the test thread, which blocks on the latches below.
+        val waiter = launch(Dispatchers.Default) { detachedCall(scope, 5_000L) { claim -> callback.claimAfterRelease(claim) } }
+        callback.awaitStarted()
         waiter.cancel()
-        delay(500)
-        assertEquals(0, submitted.get())
+        waiter.join()
+        callback.release.countDown()
+        callback.awaitDone()
+        assertEquals(0, callback.submitted.get())
     }
 
     @Test
@@ -422,31 +455,30 @@ class RepairVpnSyncTest {
         // that pause. The claim came first, so the submission goes through as part of the run — and a stop that comes
         // before a claim can never be overtaken by it (one compare-and-set).
         val claimed = CompletableDeferred<Unit>()
-        val submitted = AtomicInteger()
-        val waiter = launch {
+        val callback = Callback()
+        val waiter = launch(Dispatchers.Default) {
             detachedCall(scope, 5_000L) { claim ->
                 val mine = claim()
                 claimed.complete(Unit)
-                Thread.sleep(300) // a blocking binder wait: not interrupted
-                if (mine) submitted.incrementAndGet()
+                callback.claimAfterRelease { mine }
             }
         }
         claimed.await()
         waiter.cancel()
-        delay(500)
-        assertEquals(1, submitted.get())
+        waiter.join()
+        callback.release.countDown()
+        callback.awaitDone()
+        assertEquals(1, callback.submitted.get())
     }
 
     @Test
     fun aBindOverTheLimitIsGivenUpAndSubmitsNothing() = runBlocking {
-        val submitted = AtomicInteger()
-        val result = detachedCall(scope, 100L) { claim ->
-            Thread.sleep(300) // a blocking binder wait: not interrupted
-            if (claim()) submitted.incrementAndGet()
-        }
+        val callback = Callback()
+        val result = detachedCall(scope, 100L) { claim -> callback.claimAfterRelease(claim) }
         assertNull(result)
-        delay(400)
-        assertEquals(0, submitted.get())
+        callback.release.countDown()
+        callback.awaitDone()
+        assertEquals(0, callback.submitted.get())
     }
 
     @Test
@@ -459,21 +491,15 @@ class RepairVpnSyncTest {
         // The service callback comes while the stop has been pressed but the waiting coroutine has not processed its
         // cancellation yet (it is not cancelled at all here): the closed gate makes the claim fail.
         val gate = RepairStopGate()
-        val inCallback = java.util.concurrent.CountDownLatch(1)
-        val stopped = java.util.concurrent.CountDownLatch(1)
-        val submitted = AtomicInteger()
+        val callback = Callback()
         val waiter = launch(Dispatchers.Default) {
-            detachedCall(scope, 5_000L, gate) { claim ->
-                inCallback.countDown()
-                stopped.await() // the callback is about to claim when the stop comes
-                if (claim()) submitted.incrementAndGet()
-            }
+            detachedCall(scope, 5_000L, gate) { claim -> callback.claimAfterRelease(claim) }
         }
-        inCallback.await()
+        callback.awaitStarted()
         gate.close() // «Остановить»: give up first …
-        stopped.countDown()
-        delay(200)
-        assertEquals(0, submitted.get())
+        callback.release.countDown()
+        callback.awaitDone()
+        assertEquals(0, callback.submitted.get())
         waiter.cancel() // … and only then the cancellation
     }
 
