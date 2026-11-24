@@ -28,7 +28,9 @@ object PendingImports {
     /** Where the entries live: the UI process's preferences in the app, memory in tests. */
     interface Records {
         fun load(): List<Entry>
-        fun save(entries: List<Entry>)
+
+        /** False when the entries could not be written. */
+        fun save(entries: List<Entry>): Boolean
     }
 
     /** A subscription group as the restore sees it. */
@@ -89,8 +91,21 @@ object PendingImports {
     }
 
     /** Adds or replaces (the group id became known) the entry of one import. */
-    fun record(records: Records, lock: Any, entry: Entry) = synchronized(lock) {
+    /** Adds or replaces the entry; false when it could not be written. */
+    fun record(records: Records, lock: Any, entry: Entry): Boolean = synchronized(lock) {
         records.save(records.load().filterNot { it.sameImport(entry) } + entry)
+    }
+
+    /**
+     * The heal on a start of the interface: settles the entries of imports not running in this process ([stale]).
+     * True when there were any, whether or not each restore was confirmed: a restore may have turned the global
+     * automatic updates on before its scheduler check failed, so the caller shows the settings again either way.
+     */
+    suspend fun heal(records: Records, lock: Any, restore: suspend (Entry) -> Boolean, session: String = SESSION): Boolean {
+        val stale = synchronized(lock) { stale(records.load(), session) }
+        if (stale.isEmpty()) return false
+        settle(records, lock, stale, restore)
+        return true
     }
 
     /**
