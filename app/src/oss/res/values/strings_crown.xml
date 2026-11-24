@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Crown: the fork's name; overrides the src/main strings.xml values for the oss flavor. -->
+<resources>
+    <string name="app_name" translatable="false">Crown</string>
+    <string name="app_name_long" translatable="false">Crown, based on Throne for Android</string>
+</resources>

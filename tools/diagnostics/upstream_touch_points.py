@@ -1,9 +1,11 @@
-"""Upstream touch-point check for the simple UI (openspec change simple-ui-redesign, design.md D2).
+"""Upstream touch-point check for the simple UI (openspec change simple-ui-redesign, design.md D2) and the Crown fork
+identity (openspec/specs/repository-governance, requirement "Идентичность форка Crown").
 
 Read-only: compares the working tree (committed, staged, unstaged and untracked files) with a base ref and lists every
 changed file outside the allowed set:
-  - the touch-point table of design.md D2 (TOUCH_POINTS below);
-  - the fork-only directories app/src/simple/, openspec/, tools/diagnostics/;
+  - the touch-point table of design.md D2 (TOUCH_POINTS below) and the fork identity points (FORK_IDENTITY_POINTS);
+  - the fork-only directories and files (FORK_DIRS): app/src/simple/, openspec/, tools/diagnostics/ and the fork
+    identity files;
   - app/src/test/: only files that do not exist in the base (new JVM unit tests); a modified or deleted upstream test
     is a violation.
 
@@ -34,7 +36,24 @@ TOUCH_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/group/RemoteRouteUpdater.kt": "7: SimpleConfigRepo.refresh",
 }
 
-FORK_DIRS = ("app/src/simple/", "openspec/", "tools/diagnostics/")
+# openspec/specs/repository-governance, requirement "Идентичность форка Crown". Keep both in sync.
+FORK_IDENTITY_POINTS: dict[str, str] = {
+    "buildSrc/src/main/kotlin/Helpers.kt": "crown: package, version and BuildConfig fields from fork.properties, APK name",
+    "app/src/main/java/io/nekohasekai/sagernet/update/UpdateChecker.kt": "crown: update repository and changelog file",
+    "app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt": "crown: GitHub link to the update repository",
+    "app/src/main/java/io/nekohasekai/sagernet/SagerNet.kt": "crown: displayed version with the Throne base",
+    "app/src/main/java/io/nekohasekai/sagernet/ktx/Nets.kt": "crown: User-Agent keeps the Throne version",
+    "buildScript/release_assets.py": "crown: update manifest for previews too",
+    "buildScript/release_notes.sh": "crown: fork changelog",
+    ".github/workflows/preview.yml": "crown: previews published as pre-releases",
+    ".github/workflows/release.yml": "crown: fork version, release notes fallback, patch bump",
+}
+
+FORK_DIRS = (
+    "app/src/simple/", "openspec/", "tools/diagnostics/",
+    # fork identity files
+    "fork.properties", "CROWN_CHANGELOG.md", "CROWN.md", "buildSrc/src/main/kotlin/Fork.kt", "app/src/oss/res/",
+)
 NEW_ONLY_DIRS = ("app/src/test/",)
 
 
@@ -69,6 +88,8 @@ def classify(path: str, status: str) -> tuple[bool, str]:
     """(allowed, reason)"""
     if path in TOUCH_POINTS:
         return True, f"touch point {TOUCH_POINTS[path]}"
+    if path in FORK_IDENTITY_POINTS:
+        return True, f"touch point {FORK_IDENTITY_POINTS[path]}"
     for prefix in FORK_DIRS:
         if path.startswith(prefix):
             return True, f"fork directory {prefix}"
@@ -77,7 +98,7 @@ def classify(path: str, status: str) -> tuple[bool, str]:
             if status == "A":
                 return True, f"new file in {prefix}"
             return False, f"existing upstream file in {prefix} (only new files are allowed)"
-    return False, "outside the touch-point list of design.md D2"
+    return False, "outside the touch-point lists (design.md D2, repository-governance)"
 
 
 def main() -> int:
@@ -102,7 +123,7 @@ def main() -> int:
         allowed, reason = classify(path, status)
         if not allowed:
             violations.append(f"{status} {path}: {reason}")
-        elif path in TOUCH_POINTS:
+        elif path in TOUCH_POINTS or path in FORK_IDENTITY_POINTS:
             touched.append(f"{status} {path}: {reason}")
         elif args.all and not path.startswith(FORK_DIRS):
             touched.append(f"{status} {path}: {reason}")
