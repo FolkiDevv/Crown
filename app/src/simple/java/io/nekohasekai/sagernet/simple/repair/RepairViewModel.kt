@@ -136,10 +136,9 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
             if (run == runs) mutableState.update(change)
         }
         // A stopped run is no longer active while it still puts its changes back (not cancellable): the new run reads
-        // and changes the settings only after that, so it never takes a value about to be restored as its "before".
-        val previous = job
-        job = viewModelScope.launch {
-            previous?.join()
+        // and changes the settings only after that, so it never takes a value about to be restored as its "before" —
+        // also when it is itself stopped while it waits ([SerialRuns]).
+        job = serial.launch {
             // A change an earlier run could not put back is tried again before this run reads any setting.
             if (unrestored.pending) {
                 withContext(NonCancellable) { unrestored.retry() }
@@ -175,6 +174,9 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Changes earlier runs could not put back, retried before the next run (they outlive their run). */
     private val unrestored = UnrestoredChanges()
+
+    /** The runs, one after another (each after the previous one's rollback). */
+    private val serial = SerialRuns(viewModelScope)
 
     private val consentChannel = Channel<Unit>(Channel.CONFLATED)
 

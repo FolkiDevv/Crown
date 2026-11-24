@@ -1,10 +1,17 @@
 package io.nekohasekai.sagernet.simple.repair
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -481,6 +488,42 @@ class RepairRollbackTest {
         // Nothing left: a second retry does nothing.
         unrestored.retry()
         assertEquals(listOf(false, true), firstChecks.settles)
+    }
+
+    @Test
+    fun aRunStoppedWhileItWaitsKeepsTheRollbackItWaitedFor() = runBlocking {
+        // Run A is stopped and puts its changes back (not cancellable, slow). Run B starts and waits for it; B is
+        // stopped while it waits. Run C must still start only after A's rollback, not right after B.
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val serial = SerialRuns(scope)
+            val events = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val inA = CompletableDeferred<Unit>()
+            val a = serial.launch {
+                try {
+                    inA.complete(Unit)
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) {
+                        delay(300)
+                        events += "A rolled back"
+                    }
+                }
+            }
+            inA.await()
+            a.cancel()
+            // B's body still runs once its wait is over (and ends at once as stopped, as the view model's run does:
+            // it publishes «Проверка остановлена»); it must not run before A's rollback.
+            val b = serial.launch { events += if (isActive) "B started" else "B ended stopped" }
+            delay(50)
+            b.cancel()
+            val c = serial.launch { events += "C started" }
+            c.join()
+            assertEquals(listOf("A rolled back", "B ended stopped", "C started"), events.toList())
+            assertTrue(b.isCompleted)
+        } finally {
+            scope.cancel()
+        }
     }
 
     @Test
