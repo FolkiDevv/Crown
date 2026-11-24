@@ -1,7 +1,9 @@
 package io.nekohasekai.sagernet.simple.add
 
 import io.nekohasekai.sagernet.simple.add.PendingImports.Entry
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -52,6 +54,87 @@ class PendingImportsTest {
         val justInTime = since + PendingImports.STALE_AFTER_MS
         assertTrue(PendingImports.stale(listOf(entry), now = justInTime, processStart = processStart).isEmpty())
         assertEquals(listOf(entry), PendingImports.stale(listOf(entry), now = justInTime + 1, processStart = processStart))
+    }
+
+    /** The preferences of the app, in memory. */
+    private class Memory(var entries: List<Entry> = emptyList()) : PendingImports.Records {
+        override fun load() = entries
+        override fun save(entries: List<Entry>) { this.entries = entries }
+    }
+
+    private val lock = Any()
+
+    /** A group's «skip automatic updates» flag, as the database keeps it. */
+    private class Group(var skipAutoUpdate: Boolean = true)
+
+    @Test
+    fun theRecordIsForgottenOnlyAfterTheFlagIsCleared() = runBlocking {
+        val group = Group()
+        val records = Memory()
+        val entry = Entry(1_000L, 5L, url)
+        PendingImports.record(records, lock, entry)
+        val done = PendingImports.settle(records, lock, listOf(entry)) {
+            // At the moment of the restore the record is still there: a death here loses nothing.
+            assertEquals(listOf(entry), records.entries)
+            group.skipAutoUpdate = false
+            true
+        }
+        assertEquals(listOf(entry), done)
+        assertFalse(group.skipAutoUpdate)
+        assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
+    fun aFailedRestoreKeepsTheRecord() = runBlocking {
+        val records = Memory(listOf(Entry(1_000L, 5L, url)))
+        assertTrue(PendingImports.settle(records, lock, records.entries) { false }.isEmpty())
+        assertEquals(1, records.entries.size)
+        assertTrue(PendingImports.settle(records, lock, records.entries) { error("database is locked") }.isEmpty())
+        assertEquals(1, records.entries.size)
+    }
+
+    @Test
+    fun aDeathBetweenClearAndForgetIsHealedByAHarmlessSecondRun() = runBlocking {
+        val group = Group()
+        val entry = Entry(1_000L, 5L, url)
+        // First run: the flag is cleared, then the process dies before the record is forgotten.
+        group.skipAutoUpdate = false
+        val records = Memory(listOf(entry))
+        // Next start: the restore finds nothing to do (idempotent) and the record goes.
+        var writes = 0
+        val done = PendingImports.settle(records, lock, listOf(entry)) {
+            if (group.skipAutoUpdate) { group.skipAutoUpdate = false; writes++ }
+            true
+        }
+        assertEquals(listOf(entry), done)
+        assertEquals(0, writes)
+        assertFalse(group.skipAutoUpdate)
+        assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
+    fun settlingKeepsTheOtherImportsAndTheOnesRecordedMeanwhile() = runBlocking {
+        val interrupted = Entry(1_000L, 5L, url)
+        val running = Entry(50_000L, 0L, "https://running.example")
+        val records = Memory(listOf(interrupted, running))
+        val meanwhile = Entry(60_000L, 0L, "https://new.example")
+        PendingImports.settle(records, lock, listOf(interrupted)) {
+            PendingImports.record(records, lock, meanwhile)
+            true
+        }
+        assertEquals(listOf(running, meanwhile), records.entries)
+    }
+
+    @Test
+    fun theGroupIdReplacesTheEntryOfTheSameImport() {
+        val records = Memory()
+        val begun = Entry(1_000L, 0L, url)
+        PendingImports.record(records, lock, begun)
+        PendingImports.record(records, lock, begun.copy(gid = 7L))
+        assertEquals(listOf(begun.copy(gid = 7L)), records.entries)
+        // Settling the entry without its id (the finally of an import that never heard it) still forgets it.
+        runBlocking { PendingImports.settle(records, lock, listOf(begun)) { true } }
+        assertTrue(records.entries.isEmpty())
     }
 
     @Test
