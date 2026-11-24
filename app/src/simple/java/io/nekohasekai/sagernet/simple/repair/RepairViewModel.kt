@@ -147,7 +147,7 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         // also when it is itself stopped while it waits ([SerialRuns]).
         // This run's stop gate: «Остановить» closes it before it cancels the run.
         val gate = RepairStopGate().also { runOwner.gate = it }
-        job = serial.launch {
+        job = serial.launch(runOwner.scope) {
             // A change an earlier run could not put back is tried again before this run reads any setting — unless this
             // run was stopped while it waited (it ends at once, as stopped; the next run retries).
             unrestored.retryUnlessCancelled()
@@ -185,8 +185,11 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
     /** Changes earlier runs could not put back, retried before the next run: process-wide, they outlive any screen. */
     private val unrestored get() = RepairLog.unrestored
 
-    /** The runs, one after another (each after the previous one's rollback). */
-    private val serial = SerialRuns(runOwner.scope)
+    /**
+     * The runs, one after another (each after the previous one's rollback): process-wide, so a run of a new screen waits
+     * for the rollback of a run whose view model was cleared too.
+     */
+    private val serial get() = RepairLog.runs
 
     private val consentChannel = Channel<Unit>(Channel.CONFLATED)
 
@@ -219,9 +222,17 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         return try {
             waiter.await()
         } finally {
-            if (consent === waiter) consent = null
+            if (consent === waiter) {
+                consent = null
+                // Its request may still be queued (the activity was stopped, nothing collected it): no dialog may open
+                // for a check that has ended. A newer request owns the queued one, so it is left alone then.
+                consentChannel.tryReceive()
+            }
         }
     }
+
+    /** A check waits for the VPN consent now: a request taken from the queue opens the dialog only then. */
+    val consentWaited: Boolean get() = consent?.isActive == true
 
     /** The activity shows the consent dialog now. */
     fun consentDialogShown() {
@@ -376,4 +387,7 @@ private object RepairLog {
 
     /** One carry for the process: the chain rule of a setting holds across runs. */
     val unrestored = UnrestoredChanges(::inSettingsTransaction, ::restoreFailed, ::superseded)
+
+    /** The runs of every view model of the process, one after another ([SerialRuns]). */
+    val runs = SerialRuns()
 }

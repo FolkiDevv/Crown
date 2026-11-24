@@ -517,11 +517,11 @@ class RepairRollbackTest {
     private fun serialRunsOrder(stopB: (Job, ManualDispatcher) -> Unit): List<String> {
         val dispatcher = ManualDispatcher()
         val scope = CoroutineScope(SupervisorJob() + dispatcher)
-        val serial = SerialRuns(scope)
+        val serial = SerialRuns()
         val events = mutableListOf<String>()
         val rollback = CompletableDeferred<Unit>()
         // Run A is stopped and puts its changes back (not cancellable), until the test lets the rollback end.
-        val a = serial.launch {
+        val a = serial.launch(scope) {
             try {
                 awaitCancellation()
             } finally {
@@ -536,9 +536,9 @@ class RepairRollbackTest {
         dispatcher.runAll()
         // B's body runs once its wait is over (already cancelled, it ends as stopped — the view model's run then
         // publishes «Проверка остановлена»); it must not run before A's rollback.
-        val b = serial.launch { events += if (isActive) "B started" else "B ended stopped" }
+        val b = serial.launch(scope) { events += if (isActive) "B started" else "B ended stopped" }
         stopB(b, dispatcher)
-        val c = serial.launch { events += "C started" }
+        val c = serial.launch(scope) { events += "C started" }
         dispatcher.runAll()
         assertTrue("nothing may start while A rolls back: $events", events.isEmpty())
         rollback.complete(Unit)
@@ -563,6 +563,39 @@ class RepairRollbackTest {
             b.cancel()
         }
         assertEquals(listOf("A rolled back", "B ended stopped", "C started"), order)
+    }
+
+    @Test(timeout = 20_000)
+    fun aRunOfANewViewModelWaitsForTheRollbackOfAClearedOne() {
+        // One chain for the process: run A belongs to a view model that is cleared (its owner closed, A cancelled and
+        // putting its changes back); run B of the next view model starts only after that rollback.
+        val dispatcher = ManualDispatcher()
+        val serial = SerialRuns()
+        val events = mutableListOf<String>()
+        val rollback = CompletableDeferred<Unit>()
+        val first = SerialRuns.Owner(dispatcher)
+        serial.launch(first.scope) {
+            try {
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable) {
+                    rollback.await()
+                    events += "A rolled back"
+                }
+            }
+        }
+        dispatcher.runAll()
+        first.close()
+        dispatcher.runAll()
+        val second = SerialRuns.Owner(dispatcher)
+        val b = serial.launch(second.scope) { events += "B started" }
+        dispatcher.runAll()
+        assertTrue("B may not start while A rolls back: $events", events.isEmpty())
+        rollback.complete(Unit)
+        dispatcher.runAll()
+        assertTrue(b.isCompleted)
+        assertEquals(listOf("A rolled back", "B started"), events)
+        second.close()
     }
 
     @Test(timeout = 20_000)
@@ -1159,7 +1192,7 @@ class RepairRollbackTest {
         val release = java.util.concurrent.CountDownLatch(1)
         val done = java.util.concurrent.CountDownLatch(1)
         val submitted = java.util.concurrent.atomic.AtomicInteger()
-        SerialRuns(owner.scope).launch {
+        SerialRuns().launch(owner.scope) {
             detachedCall(external, 5_000L, gate) { claim ->
                 atClaim.countDown()
                 check(release.await(5, java.util.concurrent.TimeUnit.SECONDS)) { "never released" }

@@ -1,8 +1,10 @@
 package io.nekohasekai.sagernet.simple.repair
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
@@ -12,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -21,6 +24,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 
 /**
  * «Починка» and the service around its fixes (design.md D8): the subscription updates it submits — every group, in
@@ -473,12 +477,49 @@ class RepairVpnSyncTest {
 
     @Test(timeout = 20_000)
     fun aBindOverTheLimitIsGivenUpAndSubmitsNothing() = runBlocking {
+        // The callback has entered before the limit starts (an unconfined scope enters it inside the launch) and goes
+        // on in a binder wait of its own past the limit: the claim after it fails, nothing is submitted.
         val callback = Callback()
-        val result = detachedCall(scope, 100L) { claim -> callback.claimAfterRelease(claim) }
+        val entering = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val result = detachedCall(entering, 100L) { claim ->
+            callback.started.countDown()
+            // Not interrupted by the give-up, as a binder wait is not.
+            withContext(NonCancellable + Dispatchers.IO) { callback.claimAfterRelease(claim) }
+        }
         assertNull(result)
+        callback.awaitStarted()
         callback.release.countDown()
         callback.awaitDone()
         assertEquals(0, callback.submitted.get())
+        entering.cancel()
+    }
+
+    /** Holds every dispatched task until the test runs it: a callback that has not entered yet, for as long as needed. */
+    private class HeldDispatcher : CoroutineDispatcher() {
+        private val tasks = java.util.concurrent.ConcurrentLinkedQueue<Runnable>()
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            tasks.add(block)
+        }
+
+        fun runAll() {
+            while (true) (tasks.poll() ?: return).run()
+        }
+    }
+
+    @Test(timeout = 20_000)
+    fun aCallNotEnteredByTheLimitIsGivenUpAndNeverRuns() = runBlocking {
+        // The limit ends before the callback could even start: given up, and when its turn comes it does not run.
+        val dispatcher = HeldDispatcher()
+        val held = CoroutineScope(SupervisorJob() + dispatcher)
+        val callback = Callback()
+        val result = detachedCall(held, 100L) { claim -> callback.claimAfterRelease(claim) }
+        assertNull(result)
+        callback.release.countDown()
+        dispatcher.runAll()
+        assertEquals(1L, callback.started.count)
+        assertEquals(0, callback.submitted.get())
+        held.cancel()
     }
 
     @Test(timeout = 20_000)

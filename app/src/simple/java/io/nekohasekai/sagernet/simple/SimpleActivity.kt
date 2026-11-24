@@ -439,6 +439,8 @@ class SimpleActivity : AppCompatActivity() {
 
     /** Shows the system's VPN consent dialog for «Починка»; a device without it counts as a refusal. */
     private fun askRepairConsent() {
+        // A request whose check has ended meanwhile opens no dialog.
+        if (!repair.consentWaited) return
         val intent = try {
             VpnService.prepare(this)
         } catch (e: Exception) {
