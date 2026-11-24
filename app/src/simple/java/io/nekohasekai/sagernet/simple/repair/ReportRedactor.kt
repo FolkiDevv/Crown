@@ -134,10 +134,10 @@ class ReportRedactor(
 
     private fun spans(s: String): List<Span> {
         val out = ArrayList<Span>()
-        fun add(range: IntRange, kind: Kind, text: String) {
-            // A label already in the line is kept as it is; any other replacement has the secrets in its kept text masked.
-            val kept = kind == Kind.LABEL && text == s.substring(range)
-            out += Span(range.first, range.last + 1, kind, if (kept) text else maskKept(text))
+        // Only a generated label already in the line ([LABEL_PATTERN]) is kept as it is; every other replacement — also
+        // one that rebuilds its text unchanged, as a pathless loopback URL — has the secrets in its kept text masked.
+        fun add(range: IntRange, kind: Kind, text: String, generated: Boolean = false) {
+            out += Span(range.first, range.last + 1, kind, if (generated) text else maskKept(text))
         }
         // A subscription link whole (it is a secret: its path holds the token).
         for ((link, label) in links) {
@@ -149,7 +149,7 @@ class ReportRedactor(
         }
         // The labels already in the line stay as they are; nothing inside them is matched (a server "x", a secret
         // "redacted").
-        for (m in LABEL_PATTERN.findAll(s)) add(m.range, Kind.LABEL, m.value)
+        for (m in LABEL_PATTERN.findAll(s)) add(m.range, Kind.LABEL, m.value, generated = true)
         // A URL is rebuilt whole, never copied, as LogRedactor would write it: the credentials (up to the last "@"
         // before the host — a password may hold one) become "<redacted>@", the host its label, the port stays, anything
         // after it "/<redacted>". A scheme that is a secret ("https", "foo.bar", "pw-1.2.3.4") is masked with it.

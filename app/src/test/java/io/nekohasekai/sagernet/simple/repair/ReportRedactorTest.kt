@@ -433,8 +433,13 @@ class ReportRedactorTest {
         )
         assertEquals("GET https://<host-1>:<redacted>/<redacted>", r.redact("GET https://vpn.example.org:8443/x"))
         assertEquals("dialing to <redacted>:<ip>", r.redact("dialing to udp:2a00:1450::1"))
+        // A pathless URL rebuilds to the same text: its kept host and scheme are still checked (review).
+        assertEquals("[Info] GET http://<redacted> ok", r.redact("[Info] GET http://localhost ok"))
+        val scheme = ReportRedactor(emptyList(), emptyList(), listOf("https"))
+        assertEquals("[Info] GET <redacted>://<host-1> ok", scheme.redact("[Info] GET https://example.net ok"))
         val plain = ReportRedactor(emptyList(), emptyList())
         assertEquals("[Info] GET http://localhost:9/<redacted>", plain.redact("[Info] GET http://localhost:9/x"))
+        assertEquals("[Info] GET http://localhost ok", plain.redact("[Info] GET http://localhost ok"))
     }
 
     /** Loopback is an address in 127/8, localhost or ::1 — not a host name that starts with "127." (review). */
