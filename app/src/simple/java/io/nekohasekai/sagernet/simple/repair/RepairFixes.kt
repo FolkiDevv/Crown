@@ -1,5 +1,11 @@
 package io.nekohasekai.sagernet.simple.repair
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 /**
  * One reversible automatic fix of «Починка» (connection-repair "Безопасные автоматические исправления"): a setting of
  * this app changed to a value that may help, checked again, and put back when the check still fails
@@ -105,6 +111,27 @@ class RepairJournal(
         synchronized(entries) { failed += entry }
         onRestoreFailed(entry, e)
         false
+    }
+}
+
+/**
+ * Runs of «Починка» one after another: each starts only after the run before it has ended — a stopped run ends only
+ * after its rollback (not cancellable), so the next run never reads a value about to be put back. The wait itself is
+ * not cancellable either: a run stopped while it still waits keeps the dependency, and the run after it waits for the
+ * same rollback. Such a run's [launch] block still runs after the wait, already cancelled: it ends at its first
+ * suspension, so it can publish its own stopped state.
+ */
+class SerialRuns(private val scope: CoroutineScope) {
+
+    private var last: Job? = null
+
+    @Synchronized
+    fun launch(block: suspend CoroutineScope.() -> Unit): Job {
+        val previous = last
+        return scope.launch {
+            if (previous != null) withContext(NonCancellable) { previous.join() }
+            block()
+        }.also { last = it }
     }
 }
 
