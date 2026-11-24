@@ -90,8 +90,7 @@ object PendingImports {
         !work.finished && before.none { it.id == work.id && it.generation >= work.generation }
     }
 
-    /** Adds or replaces (the group id became known) the entry of one import. */
-    /** Adds or replaces the entry; false when it could not be written. */
+    /** Adds or replaces (the group id became known) the entry of one import; false when it could not be written. */
     fun record(records: Records, lock: Any, entry: Entry): Boolean = synchronized(lock) {
         records.save(records.load().filterNot { it.sameImport(entry) } + entry)
     }
