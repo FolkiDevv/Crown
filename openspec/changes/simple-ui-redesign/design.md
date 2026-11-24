@@ -45,7 +45,7 @@
 | 3 | `app/src/main/AndroidManifest.xml` | объявление `simple.SimpleActivity` (фильтры лаунчера остаются на `MainActivity`) |
 | 4 | `app/src/main/res/menu/main_drawer_menu.xml` | пункт «Новый интерфейс» (заголовок — строка из `strings_simple.xml`) |
 | 5 | `app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt` | в начале `onCreate` — `if (SimpleUi.redirect(this)) return`, в начале `onNewIntent` — `if (SimpleUi.redirect(this, intent)) return` (повторно используемый singleTask-экземпляр); обработчик пункта меню — `SimpleUi.switchTo(this, simple = true)` |
-| 6 | `app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt` | вызовы `SimpleHooks.onServiceStarted/onServiceStopped` (запуск и остановка наблюдателя сети) |
+| 6 | `app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt` | вызовы `SimpleHooks.onServiceStarted/onServiceStopped` перед сменой состояния на Connected/Stopped (время начала подключения для главной в ключе `DataStore` `simple_connected_since`, с батча 2; запуск и остановка наблюдателя сети) |
 | 7 | `app/src/main/java/io/nekohasekai/sagernet/group/RemoteRouteUpdater.kt` (или место вызова `RouteRepo.refresh()`) | вызов `SimpleConfigRepo.refresh()` рядом с обновлением снимка маршрутов |
 
 Скрипт `tools/diagnostics/upstream_touch_points.py` сравнивает рабочее дерево с `--base` (по умолчанию `upstream/main`) и падает, если изменён файл вне этого списка и вне `app/src/simple/`, `openspec/`, `tools/diagnostics/`; в `app/src/test/` разрешены только новые файлы (JVM unit-тесты нового кода) — изменение файла, который уже есть в `--base` (сейчас там 4 теста upstream), считается правкой вне списка.
