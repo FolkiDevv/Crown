@@ -475,7 +475,8 @@ class DeviceRepairChecks(
         }
         val selected = DataStore.selectedProxy
         val connects = env.connects()
-        val entry = journal.record(step, kind = null, keepIf = RepairStep.SITES_VPN) {
+        // Bound to this run (not retriable): a later retry could stop a VPN the user started since.
+        val entry = journal.record(step, kind = null, keepIf = RepairStep.SITES_VPN, retriable = false) {
             Logs.i("simple repair: stopping the VPN started for the checks")
             fixes.vpnStopped()
             env.stopVpn()

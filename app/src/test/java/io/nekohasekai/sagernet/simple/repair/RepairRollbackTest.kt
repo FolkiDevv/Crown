@@ -12,6 +12,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
@@ -910,5 +911,118 @@ class RepairRollbackTest {
         assertEquals("9000", settings.values["mtu"])
         assertTrue(settings.log.none { it.startsWith("apply mtu") })
         assertEquals(listOf(RepairStep.SITES_VPN), journal.unrestored.map { it.step })
+    }
+
+    @Test
+    fun aFailedLookupOfTheFollowUpFixesLeavesTheWarning() = runBlocking {
+        // The update makes B answer, the selected A still does not; looking up the follow-up fixes throws: the step
+        // stays a warning (the current server is down), it is not «исправлено».
+        val inner = PartialServers(switchWorks = true)
+        val checks = object : RepairChecks {
+            override suspend fun run(step: RepairStep, done: Map<RepairStep, StepResult>) = inner.run(step, done)
+            override suspend fun fixesFor(
+                step: RepairStep,
+                result: StepResult,
+                done: Map<RepairStep, StepResult>,
+            ): List<RepairFix> =
+                if (step == RepairStep.SERVERS && result.status == StepStatus.WARN) error("lookup failed")
+                else inner.fixesFor(step, result, done)
+        }
+        val servers = engine(checks).run { }.results.getValue(RepairStep.SERVERS)
+        assertEquals(StepStatus.WARN, servers.status)
+        assertTrue(servers.has(Finding.CURRENT_SERVER_DOWN))
+        assertNull(servers.fix)
+    }
+
+    /** A setting another writer may change; the lock plays the settings database's write transaction. */
+    private class LockedSetting(@Volatile var value: String) {
+        val lock = java.util.concurrent.locks.ReentrantLock()
+        fun atomically(block: () -> Unit) {
+            lock.lock()
+            try {
+                block()
+            } finally {
+                lock.unlock()
+            }
+        }
+    }
+
+    @Test
+    fun aWriterBeforeTheCompareAndSetSupersedesTheRestore() {
+        val setting = LockedSetting("77.88.8.8")
+        val journal = RepairJournal(atomically = setting::atomically)
+        journal.record(RepairStep.DNS_DIRECT, FixKind.DIRECT_DNS_WHITELISTED, stillOurs = { setting.value == "77.88.8.8" }) {
+            setting.value = "local"
+        }
+        // The other writer gets there first: the restore sees its value and keeps it.
+        setting.value = "9.9.9.9"
+        journal.restoreAll()
+        assertEquals("9.9.9.9", setting.value)
+    }
+
+    @Test
+    fun aWriterDuringTheCompareAndSetWaitsAndKeepsItsValue() {
+        // The other writer tries while the check and the restore run: it waits for the transaction and writes after
+        // it, so the newer value is the one that stays — never the old one over it.
+        val setting = LockedSetting("77.88.8.8")
+        val inside = java.util.concurrent.CountDownLatch(1)
+        val writer = Thread {
+            inside.await()
+            setting.atomically { setting.value = "9.9.9.9" }
+        }
+        writer.start()
+        val journal = RepairJournal(atomically = setting::atomically)
+        journal.record(RepairStep.DNS_DIRECT, FixKind.DIRECT_DNS_WHITELISTED, stillOurs = { setting.value == "77.88.8.8" }) {
+            inside.countDown()
+            Thread.sleep(100)
+            setting.value = "local"
+        }
+        journal.restoreAll()
+        writer.join(2_000L)
+        assertEquals("9.9.9.9", setting.value)
+    }
+
+    @Test
+    fun aChangeBoundToItsRunIsNotRetriedByALaterRun() = runBlocking {
+        // The VPN started for the checks could not be stopped by the stop: a later run must not stop the VPN the
+        // user may have started since.
+        val journal = RepairJournal()
+        val stops = mutableListOf<String>()
+        var fails = true
+        journal.record(RepairStep.DNS_VPN, kind = null, keepIf = RepairStep.SITES_VPN, retriable = false) {
+            if (fails) error("cannot stop") else stops += "stop"
+        }
+        journal.restoreAll()
+        assertEquals(1, journal.unrestored.size)
+        fails = false
+        val unrestored = UnrestoredChanges()
+        unrestored.keep(journal, FakeChecks(Settings()))
+        assertFalse(unrestored.pending)
+        unrestored.retry()
+        assertTrue(stops.isEmpty())
+    }
+
+    @Test
+    fun aRunStoppedBeforeItsStartDoesNotRetryAnEarlierChange() = runBlocking {
+        val settings = Settings()
+        val fix = FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8", failingRestores = 1)
+        fix.apply()
+        val journal = RepairJournal()
+        journal.record(RepairStep.DNS_DIRECT, fix.kind, stillOurs = fix::stillApplied, restore = fix::restore)
+        journal.restoreAll()
+        val unrestored = UnrestoredChanges()
+        unrestored.keep(journal, FakeChecks(settings))
+        // The run was stopped while it waited: it ends, the change stays for the next run.
+        val stopped = launch {
+            cancel()
+            unrestored.retryUnlessCancelled()
+        }
+        stopped.join()
+        assertTrue(unrestored.pending)
+        assertEquals("77.88.8.8", settings.values["dns"])
+        // The next run retries it.
+        unrestored.retryUnlessCancelled()
+        assertFalse(unrestored.pending)
+        assertEquals("local", settings.values["dns"])
     }
 }

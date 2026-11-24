@@ -125,6 +125,7 @@ class RepairVpnSyncTest {
         // The update deleted the running profile 5 and stopped the service; `:bg` starts the successor afterwards in
         // a coroutine of its own, after its queue job is through.
         val vpn = FakeVpn()
+        var runningNow = 5L
         var successorStartedAt = 0L
         val queue = FakeQueue(jobMs = { 100L })
         val started = System.nanoTime()
@@ -136,17 +137,93 @@ class RepairVpnSyncTest {
                     vpn.isConnected = false
                     delay(500)
                     successorStartedAt = System.nanoTime()
+                    runningNow = 6L
                     vpn.connect()
                 }
             },
             barrier = queue::barrier,
             profileExists = { it != 5L },
             vpn = vpn,
+            runningNow = { runningNow },
             successorMs = 2_000L,
+            pollMs = 20L,
         )
         assertTrue(wait.await(listOf(1L), running = 5L))
         val returned = System.nanoTime()
         assertTrue("returned before the successor started", successorStartedAt in (started + 1)..returned)
+    }
+
+    @Test
+    fun anUnrelatedReconnectBeforeTheSuccessorDoesNotEndTheWait() = runBlocking {
+        // The service reconnects (a reload) on the replaced profile before `:bg` starts the successor: that connect
+        // must not end the wait — only the service running another profile does.
+        val vpn = FakeVpn()
+        var runningNow = 5L
+        var successorStartedAt = 0L
+        val queue = FakeQueue(jobMs = { 50L })
+        val wait = SubscriptionWait(
+            submit = { gid ->
+                queue.submit(gid)
+                scope.launch {
+                    delay(100)
+                    vpn.connect()
+                    delay(500)
+                    successorStartedAt = System.nanoTime()
+                    runningNow = 6L
+                    vpn.connect()
+                }
+            },
+            barrier = queue::barrier,
+            profileExists = { it != 5L },
+            vpn = vpn,
+            runningNow = { runningNow },
+            successorMs = 3_000L,
+            pollMs = 20L,
+        )
+        assertTrue(wait.await(listOf(1L), running = 5L))
+        assertTrue("the wait ended on the unrelated reconnect", successorStartedAt in 1..System.nanoTime())
+    }
+
+    @Test
+    fun aFailedSubmissionStillWaitsForTheGroupsAlreadyQueued() = runBlocking {
+        // Group 1 is queued, the submission of group 2 fails: group 1 must have run before the wait returns.
+        val queue = FakeQueue(jobMs = { 400L })
+        val wait = SubscriptionWait(
+            submit = { gid -> if (gid == 2L) throw IllegalStateException("binder failed") else queue.submit(gid) },
+            barrier = queue::barrier,
+            profileExists = { true },
+            vpn = FakeVpn(),
+        )
+        assertFalse(wait.await(listOf(1L, 2L, 3L), running = null))
+        assertEquals(listOf(1L), queue.done.toList())
+    }
+
+    @Test
+    fun anOwedReloadSurvivesAFailingLookAndIsSentOnTheNextOne() = runBlocking {
+        // The state cannot be read once, then sending fails once: the watcher goes on, the reload stays owed and is
+        // sent once both work.
+        var looks = 0
+        val reloads = AtomicInteger()
+        var sends = 0
+        val pending = PendingReload(
+            phase = {
+                looks++
+                if (looks == 1) throw IllegalStateException("state unreadable")
+                ServicePhase.CONNECTED
+            },
+            sendReload = {
+                sends++
+                if (sends == 1) throw IllegalStateException("broadcast failed")
+                reloads.incrementAndGet()
+            },
+            scope = scope,
+            pollMs = 20L,
+            lifetimeMs = 5_000L,
+        )
+        val owed = pending.arm()
+        assertEquals(ReloadOutcome.SENT, owed.await(2_000L))
+        assertEquals(1, reloads.get())
+        assertFalse(pending.armed)
     }
 
     /** The selected server; [putBack]s are recorded. */

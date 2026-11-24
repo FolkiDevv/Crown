@@ -13,12 +13,12 @@ import androidx.core.content.ContextCompat
 import io.nekohasekai.sagernet.BuildConfig
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -139,11 +139,10 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         // and changes the settings only after that, so it never takes a value about to be restored as its "before" —
         // also when it is itself stopped while it waits ([SerialRuns]).
         job = serial.launch {
-            // A change an earlier run could not put back is tried again before this run reads any setting.
-            if (unrestored.pending) {
-                withContext(NonCancellable) { unrestored.retry() }
-                if (unrestored.pending) Logs.w("simple repair: a change of an earlier run still could not be put back")
-            }
+            // A change an earlier run could not put back is tried again before this run reads any setting — unless this
+            // run was stopped while it waited (it ends at once, as stopped; the next run retries).
+            unrestored.retryUnlessCancelled()
+            if (unrestored.pending) Logs.w("simple repair: a change of an earlier run is still not put back")
             // What this run changes, to be put back when a fix does not help or the run is stopped.
             fun name(entry: RepairJournal.Entry) = entry.kind?.name?.lowercase() ?: "the VPN started for the checks"
             val journal = RepairJournal(
@@ -151,6 +150,9 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
                 onSuperseded = { entry ->
                     Logs.i("simple repair: ${name(entry)} was changed since; the newer value is kept, not put back")
                 },
+                // The settings live in this database: a write transaction excludes every other writer (`:bg` too)
+                // between the check and the restore.
+                atomically = { block -> SagerDatabase.instance.runInTransaction(Runnable { block() }) },
             )
             val checks = DeviceRepairChecks(getApplication(), environment, journal)
             val engine = RepairEngine(checks, journal)

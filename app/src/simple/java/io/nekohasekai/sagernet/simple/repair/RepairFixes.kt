@@ -5,6 +5,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -69,6 +71,12 @@ class RepairJournal(
     private val onRestoreFailed: (Entry, Exception) -> Unit = { _, _ -> },
     /** A change whose setting was changed since by something else: dropped without a write. */
     private val onSuperseded: (Entry) -> Unit = { },
+    /**
+     * Runs one compare-and-set (the check whether the change is still in place, and the restore) so that no other
+     * writer can come between them: on the device a write transaction of the settings database, which excludes every
+     * other writer, the other processes too.
+     */
+    private val atomically: (() -> Unit) -> Unit = { it() },
 ) {
 
     class Entry(
@@ -82,6 +90,11 @@ class RepairJournal(
         val stillOurs: () -> Boolean,
         /** Whether a restore reverses the change ([RepairFix.reversible]). */
         val reversible: Boolean,
+        /**
+         * Whether a later run may retry a failed restore ([UnrestoredChanges]). False for a change bound to this run,
+         * such as the VPN it started: a retry later could stop a VPN the user started since.
+         */
+        val retriable: Boolean,
         val restore: () -> Unit,
     ) {
         /** The change was put back by a restore that reversed it (not superseded, not provider content). */
@@ -101,8 +114,11 @@ class RepairJournal(
     /** The changes a rollback tried to put back and could not, oldest first (still in effect). */
     val unrestored: List<Entry> get() = synchronized(entries) { entries.filter { it in failed } }
 
-    /** Tries the [unrestored] changes again, newest first; returns those put back now. */
-    fun retryFailed(): List<Entry> = restoreWhere { it in failed }
+    /** The [unrestored] changes a later run may try again ([Entry.retriable]). */
+    val retriable: List<Entry> get() = unrestored.filter { it.retriable }
+
+    /** Tries the [retriable] changes again, newest first; returns those put back now. */
+    fun retryFailed(): List<Entry> = restoreWhere { it in failed && it.retriable }
 
     fun record(
         step: RepairStep,
@@ -110,8 +126,10 @@ class RepairJournal(
         keepIf: RepairStep = step,
         stillOurs: () -> Boolean = { true },
         reversible: Boolean = true,
+        retriable: Boolean = true,
         restore: () -> Unit,
-    ): Entry = Entry(step, kind, keepIf, stillOurs, reversible, restore).also { synchronized(entries) { entries += it } }
+    ): Entry = Entry(step, kind, keepIf, stillOurs, reversible, retriable, restore)
+        .also { synchronized(entries) { entries += it } }
 
     /** Puts [entry] back; true when it was in effect and is put back now (a failed restore keeps it in effect). */
     fun restore(entry: Entry): Boolean {
@@ -141,12 +159,16 @@ class RepairJournal(
      * done with, without a write (the newer value stays). True when the change is no longer in effect.
      */
     private fun run(entry: Entry): Boolean = try {
-        if (entry.stillOurs()) {
-            entry.restore()
-            entry.reversed = entry.reversible
-        } else {
-            onSuperseded(entry)
+        var superseded = false
+        atomically {
+            if (entry.stillOurs()) {
+                entry.restore()
+                entry.reversed = entry.reversible
+            } else {
+                superseded = true
+            }
         }
+        if (superseded) onSuperseded(entry)
         synchronized(entries) { failed -= entry }
         true
     } catch (e: Exception) {
@@ -200,9 +222,9 @@ class UnrestoredChanges {
     /** Whether some change is still waiting to be put back. */
     val pending: Boolean get() = synchronized(left) { left.isNotEmpty() }
 
-    /** After a run: keeps its journal when a change of it could not be put back. */
+    /** After a run: keeps its journal when a change of it that a later run may retry could not be put back. */
     fun keep(journal: RepairJournal, checks: RepairChecks) {
-        if (journal.unrestored.isNotEmpty()) synchronized(left) { left += journal to checks }
+        if (journal.retriable.isNotEmpty()) synchronized(left) { left += journal to checks }
     }
 
     /** Before a run: tries every kept change again, the newest run first; the VPN takes what was put back up. */
@@ -210,8 +232,17 @@ class UnrestoredChanges {
         val runs = synchronized(left) { left.toList() }.asReversed()
         for ((journal, checks) in runs) {
             if (journal.retryFailed().isNotEmpty()) settle(checks)
-            if (journal.unrestored.isEmpty()) synchronized(left) { left.remove(journal to checks) }
+            if (journal.retriable.isEmpty()) synchronized(left) { left.remove(journal to checks) }
         }
+    }
+
+    /**
+     * [retry] at the start of a run — unless that run was stopped before it got there (it waited for the run before
+     * it): then it only ends, and the next run retries. Once started, the retry is not cut short.
+     */
+    suspend fun retryUnlessCancelled() {
+        if (!currentCoroutineContext().isActive || !pending) return
+        withContext(NonCancellable) { retry() }
     }
 
     /**
