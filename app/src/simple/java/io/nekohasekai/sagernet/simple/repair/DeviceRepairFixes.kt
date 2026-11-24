@@ -3,13 +3,13 @@ package io.nekohasekai.sagernet.simple.repair
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.bg.CoreServiceClient
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RouteDnsSettings
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.group.RemoteRouteUpdater
-import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import kotlinx.coroutines.CoroutineScope
@@ -60,9 +60,9 @@ class DeviceRepairFixes(
     private val testServer: suspend (Long) -> Int?,
 ) {
 
-    /** A value was put back while the VPN ran: [settle] lets it take them up, once for all. */
+    /** The reload owed since a value was put back while the service ran ([RepairReloads]); [settle] waits for it. */
     @Volatile
-    private var reloadPending = false
+    private var owed: PendingReload.Owed? = null
 
     /** «Починка» stopped the VPN it had started: nothing may reload (a reload would start it again). */
     @Volatile
@@ -106,32 +106,38 @@ class DeviceRepairFixes(
         }
     }
 
-    /** The VPN started for the checks was stopped again: no reload from here on. */
+    /**
+     * The VPN started for the checks is being stopped: no reload from here on, and none owed (a reload reaching the
+     * stopping service would start it again; its next start reads the stored values anyway).
+     */
     fun vpnStopped() {
         vpnStopped = true
+        RepairReloads.pending.disarm()
+        owed = null
     }
 
     /**
-     * After values were put back: a running VPN reloads once to take them up; [wait] until it is connected again. A
-     * service that is off reads them at its next start. One still starting or reloading may have read the replaced
-     * values already: it reloads once it is connected (a reload that reaches a start in flight would stop it) — here
-     * when [wait] and it connects in time, otherwise through the process-wide [RepairReloads] that outlives the run.
+     * A value was just put back: the running service owes a reload to take it up — armed here, before anything waits,
+     * in the process-wide [RepairReloads], which sends it once the service is connected (never into a start) whatever
+     * becomes of this run. A service that is off reads the value at its next start.
+     */
+    private fun owe() {
+        if (vpnStopped || env.serviceOff()) return
+        owed = RepairReloads.pending.arm { env.connects() }
+    }
+
+    /**
+     * After values were put back ([owe]): with [wait], until the owed reload was sent and the service is connected
+     * again — the run goes on and checks through it; a service still starting keeps the reload owed when the wait
+     * ends. Without [wait] (the stop) nothing is waited for: the reload stays owed. Cancelling this never loses it.
      */
     suspend fun settle(wait: Boolean) {
-        if (!reloadPending) return
-        reloadPending = false
-        if (vpnStopped || env.serviceOff()) return
-        val connects = env.connects()
-        if (!env.vpnConnected() && !(wait && env.awaitConnected(connects, RECONNECT_MS))) {
-            if (!vpnStopped && !env.serviceOff()) RepairReloads.pending.arm()
-            return
-        }
-        if (vpnStopped) return
-        if (wait) {
-            reloader.reload("settings put back")
-        } else {
-            Logs.i("simple repair: settings put back, reload of the running service")
-            SagerNet.reloadService()
+        val o = owed ?: return
+        if (!wait) return
+        val outcome = o.await(RECONNECT_MS) ?: return
+        if (owed === o) owed = null
+        if (outcome == ReloadOutcome.SENT && !env.awaitConnected(o.connectsAtSend, RECONNECT_MS)) {
+            Logs.w("simple repair: the service did not reconnect after the owed reload")
         }
     }
 
@@ -142,7 +148,7 @@ class DeviceRepairFixes(
         val whitelisted = config.whitelistDns.joinToString(", ")
         val before = DataStore.directDns
         if (whitelisted.isBlank() || before.trim() == whitelisted) return null
-        return setting(FixKind.DIRECT_DNS_WHITELISTED, "direct DNS", before, whitelisted) { DataStore.directDns = it }
+        return setting(FixKind.DIRECT_DNS_WHITELISTED, "direct DNS", before, whitelisted, { DataStore.directDns }) { DataStore.directDns = it }
     }
 
     /**
@@ -157,7 +163,7 @@ class DeviceRepairFixes(
         }
         val before = DataStore.remoteDns
         val alternative = REMOTE_DNS_ALTERNATIVES.firstOrNull { it != before.trim() } ?: return null
-        return setting(FixKind.VPN_DNS_ALTERNATIVE, "remote DNS", before, alternative) { DataStore.remoteDns = it }
+        return setting(FixKind.VPN_DNS_ALTERNATIVE, "remote DNS", before, alternative, { DataStore.remoteDns }) { DataStore.remoteDns = it }
     }
 
     /** The VPN's MTU → 1280, when it is higher (VPN mode only: the proxy mode has no tunnel). */
@@ -165,14 +171,14 @@ class DeviceRepairFixes(
         if (DataStore.serviceMode != Key.MODE_VPN) return null
         val before = DataStore.vpnMtu
         if (before <= SAFE_MTU) return null
-        return setting(FixKind.MTU_LOWERED, "MTU", before, SAFE_MTU) { DataStore.vpnMtu = it }
+        return setting(FixKind.MTU_LOWERED, "MTU", before, SAFE_MTU, { DataStore.vpnMtu }) { DataStore.vpnMtu = it }
     }
 
     /** The current server does not answer → [chosen], which did; checked again by a test of that server alone. */
     private fun switchServer(chosen: Long): RepairFix? {
         val before = DataStore.selectedProxy
         if (chosen <= 0L || chosen == before) return null
-        val fix = setting(FixKind.SWITCHED_SERVER, "server", before, chosen) { DataStore.selectedProxy = it }
+        val fix = setting(FixKind.SWITCHED_SERVER, "server", before, chosen, { DataStore.selectedProxy }) { DataStore.selectedProxy = it }
         return object : RepairFix by fix {
             override suspend fun recheck(): StepResult {
                 val delay = testServer(chosen)
@@ -189,11 +195,20 @@ class DeviceRepairFixes(
         subscriptionsUpdated = true
         val selected = DataStore.selectedProxy
         val wait = SubscriptionWait(
-            states = SubscriptionClient.states,
-            request = { gid -> SubscriptionClient.refreshGroup(gid, false) },
-            lastUpdate = { gid -> GroupRepo.get(gid)?.subLastUpdate ?: 0L },
+            // Returns once `:bg`'s queue holds the update (SubscriptionQueue.refreshGroup enqueues synchronously).
+            submit = { gid -> withContext(Dispatchers.IO) { CoreServiceClient.call { it.refreshGroup(gid, false) } } },
+            // A no-op queued behind them in the same FIFO queue: returns once every update before it has run.
+            barrier = {
+                withContext(Dispatchers.IO) { CoreServiceClient.call { it.resolveProfiles(LongArray(0)) } }
+                // The lists of this process learn about the writes of `:bg`.
+                for (gid in groups) {
+                    GroupRepo.postUpdate(gid)
+                    GroupRepo.postReload(gid)
+                }
+            },
             profileExists = { id -> ProfileManager.getProfile(id) != null },
             vpn = vpn,
+            log = { Logs.i("simple repair: $it") },
         )
         return SubscriptionUpdateFix(
             groups = groups,
@@ -206,7 +221,7 @@ class DeviceRepairFixes(
                 // A selection the update moved goes back while its profile exists (a deleted one is replaced).
                 if (DataStore.selectedProxy != selected && ProfileManager.getProfile(selected) != null) {
                     DataStore.selectedProxy = selected
-                    reloadPending = true
+                    owe()
                 }
             },
             log = { Logs.i("simple repair: $it") },
@@ -236,25 +251,34 @@ class DeviceRepairFixes(
 
     /**
      * A setting changed from [before] to [after] through [write]; a running VPN reloads to take it up, and the fix
-     * fails when it does not connect again.
+     * fails when it does not connect again. Its rollback is compare and set: [before] goes back only while [read]
+     * still gives [after] (a later run or the user may have set it since).
      */
-    private fun <T> setting(fixKind: FixKind, name: String, before: T, after: T, write: (T) -> Unit): RepairFix =
-        object : RepairFix {
-            override val kind = fixKind
-            override val change = FixChange(name, before.toString(), after.toString())
+    private fun <T> setting(
+        fixKind: FixKind,
+        name: String,
+        before: T,
+        after: T,
+        read: () -> T,
+        write: (T) -> Unit,
+    ): RepairFix = object : RepairFix {
+        override val kind = fixKind
+        override val change = FixChange(name, before.toString(), after.toString())
 
-            override suspend fun apply() {
-                Logs.i("simple repair: fix ${kind.name.lowercase()}: $name ${describe(before)} -> ${describe(after)}")
-                withContext(Dispatchers.IO) { write(after) }
-                if (env.vpnConnected() && !reload("$name changed")) throw IllegalStateException("the VPN did not reconnect")
-            }
-
-            override fun restore() {
-                Logs.i("simple repair: rollback ${kind.name.lowercase()}: $name back to ${describe(before)}")
-                write(before)
-                reloadPending = true
-            }
+        override suspend fun apply() {
+            Logs.i("simple repair: fix ${kind.name.lowercase()}: $name ${describe(before)} -> ${describe(after)}")
+            withContext(Dispatchers.IO) { write(after) }
+            if (env.vpnConnected() && !reload("$name changed")) throw IllegalStateException("the VPN did not reconnect")
         }
+
+        override fun stillApplied(): Boolean = read() == after
+
+        override fun restore() {
+            Logs.i("simple repair: rollback ${kind.name.lowercase()}: $name back to ${describe(before)}")
+            write(before)
+            owe()
+        }
+    }
 
     /** Values for the log: DNS servers and MTU as they are, servers by id (never their address). */
     private fun describe(value: Any?): String = when (value) {

@@ -141,7 +141,7 @@ class RepairEngine(
             emptyList()
         }
         for (fix in fixes) {
-            val entry = journal.record(step, fix.kind, restore = fix::restore)
+            val entry = journal.record(step, fix.kind, stillOurs = fix::stillApplied, restore = fix::restore)
             val recheck = try {
                 withTimeout(fixTimeoutMs) {
                     fix.apply()

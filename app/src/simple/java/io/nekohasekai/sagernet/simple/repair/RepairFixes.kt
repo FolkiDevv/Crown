@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.simple.repair
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -31,6 +32,13 @@ interface RepairFix {
 
     /** A check of the fix lighter than the whole step again; null runs the step again. */
     suspend fun recheck(): StepResult? = null
+
+    /**
+     * Whether the setting still holds the value this fix wrote. A rollback puts the old value back only then (compare
+     * and set): when something else changed the setting since — a later run, the user — the change is superseded and
+     * the newer value is kept. True for a fix that writes nothing a later change could supersede.
+     */
+    fun stillApplied(): Boolean = true
 }
 
 /**
@@ -51,6 +59,8 @@ class RepairJournal(
      * being restored.
      */
     private val onRestoreFailed: (Entry, Exception) -> Unit = { _, _ -> },
+    /** A change whose setting was changed since by something else: dropped without a write. */
+    private val onSuperseded: (Entry) -> Unit = { },
 ) {
 
     class Entry(
@@ -60,6 +70,8 @@ class RepairJournal(
         val kind: FixKind?,
         /** The check whose failure puts the change back. */
         val keepIf: RepairStep,
+        /** Whether the value this change wrote is still in place ([RepairFix.stillApplied]). */
+        val stillOurs: () -> Boolean,
         val restore: () -> Unit,
     )
 
@@ -77,8 +89,13 @@ class RepairJournal(
     /** Tries the [unrestored] changes again, newest first; returns those put back now. */
     fun retryFailed(): List<Entry> = restoreWhere { it in failed }
 
-    fun record(step: RepairStep, kind: FixKind?, keepIf: RepairStep = step, restore: () -> Unit): Entry =
-        Entry(step, kind, keepIf, restore).also { synchronized(entries) { entries += it } }
+    fun record(
+        step: RepairStep,
+        kind: FixKind?,
+        keepIf: RepairStep = step,
+        stillOurs: () -> Boolean = { true },
+        restore: () -> Unit,
+    ): Entry = Entry(step, kind, keepIf, stillOurs, restore).also { synchronized(entries) { entries += it } }
 
     /** Puts [entry] back; true when it was in effect and is put back now (a failed restore keeps it in effect). */
     fun restore(entry: Entry): Boolean {
@@ -103,8 +120,12 @@ class RepairJournal(
         return restored
     }
 
+    /**
+     * Puts one change back, compare and set: only while the value it wrote is still in place; a superseded change is
+     * done with, without a write (the newer value stays). True when the change is no longer in effect.
+     */
     private fun run(entry: Entry): Boolean = try {
-        entry.restore()
+        if (entry.stillOurs()) entry.restore() else onSuperseded(entry)
         synchronized(entries) { failed -= entry }
         true
     } catch (e: Exception) {
@@ -116,22 +137,33 @@ class RepairJournal(
 
 /**
  * Runs of «Починка» one after another: each starts only after the run before it has ended — a stopped run ends only
- * after its rollback (not cancellable), so the next run never reads a value about to be put back. The wait itself is
- * not cancellable either: a run stopped while it still waits keeps the dependency, and the run after it waits for the
- * same rollback. Such a run's [launch] block still runs after the wait, already cancelled: it ends at its first
- * suspension, so it can publish its own stopped state.
+ * after its rollback (not cancellable), so the next run never reads a value about to be put back.
+ *
+ * The order does not depend on any run's body: each run has a «done» signal that completes only when the run itself
+ * has completed AND the «done» of the run before it has — set when the run is launched. A run cancelled before it even
+ * started, or while it waits, therefore still holds the next run back until every earlier rollback is through. Runs
+ * start atomically (a cancellation before the start does not skip the body) and wait without cancellation, so a
+ * stopped run's body still runs after the wait — already cancelled, it ends at its first suspension and can publish
+ * its own stopped state.
  */
 class SerialRuns(private val scope: CoroutineScope) {
 
-    private var last: Job? = null
+    /** The «done» of the newest run: complete when it and every run before it are complete. */
+    private var lastDone: Job? = null
 
     @Synchronized
     fun launch(block: suspend CoroutineScope.() -> Unit): Job {
-        val previous = last
-        return scope.launch {
+        val previous = lastDone
+        val done = Job()
+        lastDone = done
+        val run = scope.launch(start = CoroutineStart.ATOMIC) {
             if (previous != null) withContext(NonCancellable) { previous.join() }
             block()
-        }.also { last = it }
+        }
+        run.invokeOnCompletion {
+            if (previous == null) done.complete() else previous.invokeOnCompletion { done.complete() }
+        }
+        return run
     }
 }
 

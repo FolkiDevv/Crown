@@ -1,12 +1,11 @@
 package io.nekohasekai.sagernet.simple.repair
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -78,11 +77,21 @@ enum class ServicePhase {
     CONNECTED,
 }
 
+/** How an owed reload ended. */
+enum class ReloadOutcome {
+    /** Sent to a connected service. */
+    SENT,
+
+    /** Not needed any more: the service went off (its next start reads the stored values), or it was disarmed. */
+    DROPPED,
+}
+
 /**
- * A reload owed to the running VPN that outlives the run of «Починка» that owes it: values were put back while a start
- * was in flight (it may have read the replaced ones), and the start did not connect while the run waited. It fires
- * once, on the next connected state — never into a start — and is dropped when the service goes off (its next start
- * reads the restored values) or after [lifetimeMs].
+ * The one reload the running VPN is owed after «Починка» put a value back (design.md D8): process-wide, so it outlives
+ * the run, its screen and any wait for it. It is armed where the value is written — before anything waits — and
+ * resolved only by a reload actually sent while the service is connected (never into a start, which a reload would
+ * stop), or dropped when the service goes off, when it is [disarm]ed (the VPN «Починка» started is being stopped), or
+ * after [lifetimeMs]. A cancelled wait for it therefore never loses it.
  */
 class PendingReload(
     private val phase: () -> ServicePhase,
@@ -92,83 +101,123 @@ class PendingReload(
     private val pollMs: Long = 500L,
     private val lifetimeMs: Long = 10 * 60_000L,
 ) {
+
+    /** One arming: its outcome, and the connects of the service when the reload was sent (for the wait after it). */
+    class Owed internal constructor(private val connects: () -> Int) {
+        internal val outcome = CompletableDeferred<ReloadOutcome>()
+
+        @Volatile
+        var connectsAtSend: Int = 0
+            internal set
+
+        internal fun sent() {
+            connectsAtSend = connects()
+        }
+
+        /** The outcome; null when still owed after [timeoutMs]. */
+        suspend fun await(timeoutMs: Long): ReloadOutcome? = withTimeoutOrNull(timeoutMs) { outcome.await() }
+    }
+
+    private var current: Owed? = null
     private var job: Job? = null
 
-    val armed: Boolean @Synchronized get() = job?.isActive == true
+    val armed: Boolean @Synchronized get() = current != null
 
+    /**
+     * Owes a reload (a second arming before it resolved shares the first); [connects] counts the service's connects
+     * for the wait after the send.
+     */
     @Synchronized
-    fun arm() {
-        if (job?.isActive == true) return
+    fun arm(connects: () -> Int = { 0 }): Owed {
+        current?.let { return it }
+        val owed = Owed(connects)
+        current = owed
         log("a reload is owed to the service; it is sent once it is connected")
         job = scope.launch {
-            withTimeoutOrNull(lifetimeMs) {
-                while (true) {
-                    when (phase()) {
-                        ServicePhase.CONNECTED -> {
-                            log("the service is connected: the owed reload")
-                            sendReload()
-                            return@withTimeoutOrNull
-                        }
+            val sent = withTimeoutOrNull(lifetimeMs) { watch(owed) } ?: false
+            if (!sent) finish(owed, ReloadOutcome.DROPPED)
+        }
+        return owed
+    }
 
-                        ServicePhase.OFF -> return@withTimeoutOrNull
-                        ServicePhase.STARTING -> delay(pollMs)
-                    }
-                }
+    /** Until the service is connected (then the reload goes) or off; true when the reload was sent. */
+    private suspend fun watch(owed: Owed): Boolean {
+        while (true) {
+            when (phase()) {
+                ServicePhase.CONNECTED -> return sendIfOwed(owed)
+                ServicePhase.OFF -> return false
+                ServicePhase.STARTING -> delay(pollMs)
             }
         }
+    }
+
+    /** No reload is owed any more: the VPN is being stopped (a reload reaching it would start it again). */
+    @Synchronized
+    fun disarm() {
+        current?.let { finish(it, ReloadOutcome.DROPPED) }
+        job?.cancel()
+    }
+
+    @Synchronized
+    private fun sendIfOwed(owed: Owed): Boolean {
+        if (current !== owed) return false
+        log("the service is connected: the owed reload")
+        owed.sent()
+        sendReload()
+        finish(owed, ReloadOutcome.SENT)
+        return true
+    }
+
+    @Synchronized
+    private fun finish(owed: Owed, outcome: ReloadOutcome) {
+        if (current === owed) current = null
+        owed.outcome.complete(outcome)
     }
 }
 
 /**
- * The wait for the subscription updates «Починка» asked for (connection-repair "Безопасные автоматические
- * исправления": обновление подписки), so that its rollback never runs while an update can still change the selection
- * or start the service. An update counts as finished only when it was seen to run — the queue reported it, or the
- * group's last update time changed — and the queue then reported none of the groups any more. When the update
- * replaced the profile the service ran, `:bg` starts its successor in a coroutine of its own once the service has
- * stopped (within 15 s): that start is waited for too, up to [successorMs].
+ * The wait for the subscription updates «Починка» asks for, so that nothing they do can come after its rollback
+ * (design.md D8). It needs no guess about time: [submit] returns once `:bg`'s queue holds the update (or one already
+ * queued for the group), and [barrier] is a no-op queued behind them in the same FIFO queue, so it returns once every
+ * submitted update — of every group — has run. A refresh writes the selection and starts the service only in its own
+ * job, except when it replaced the profile the service ran: then `:bg` starts the successor in a coroutine of its own,
+ * which gives up 15 s after the update stopped the service — [successorMs] after the barrier no start can follow.
  */
 class SubscriptionWait(
-    /** gid → queued/running; absent = idle (SubscriptionClient.states). */
-    private val states: Flow<Map<Long, Int>>,
-    /** Asks the queue to update a group. */
-    private val request: (Long) -> Unit,
-    /** The group's last update time. */
-    private val lastUpdate: (Long) -> Long,
+    private val submit: suspend (Long) -> Unit,
+    private val barrier: suspend () -> Unit,
     private val profileExists: (Long) -> Boolean,
     private val vpn: RepairVpn,
-    private val startMs: Long = 15_000L,
-    private val perGroupMs: Long = 30_000L,
-    private val maxMs: Long = 180_000L,
-    private val successorMs: Long = 20_000L,
+    private val successorMs: Long = 17_000L,
+    private val log: (String) -> Unit = {},
 ) {
 
-    /** True when every update finished; [running]: the profile the service ran before, null when it was off. */
-    suspend fun await(groups: List<Long>, running: Long?): Boolean = coroutineScope {
-        val before = groups.associateWith(lastUpdate)
+    /**
+     * True when every update ran; false when the queue could not be reached (nothing submitted runs then either).
+     * [running]: the profile the service ran before, null when it was off.
+     */
+    suspend fun await(groups: List<Long>, running: Long?): Boolean {
         val connects = vpn.connects()
-        // Collecting the states keeps the queue's callback registered while the updates run.
-        val watch = launch { states.collect { } }
         try {
-            groups.forEach(request)
-            val seen = withTimeoutOrNull(startMs) { states.first { s -> groups.any { it in s } } } != null
-            val limit = minOf(maxMs, startMs + perGroupMs * groups.size)
-            val done = withTimeoutOrNull(limit) { states.first { s -> groups.none { it in s } } } != null
-            // Too quick to be seen queued, but its time was written: it ran.
-            val ran = seen || groups.any { lastUpdate(it) != before.getValue(it) }
-            if (running != null && !profileExists(running)) vpn.awaitConnected(connects, successorMs)
-            done && ran
-        } finally {
-            watch.cancel()
+            for (gid in groups) submit(gid)
+            barrier()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log("the subscription queue could not be reached: ${e.message}")
+            return false
         }
+        if (running != null && !profileExists(running)) vpn.awaitConnected(connects, successorMs)
+        return true
     }
 }
 
 /**
  * «Обновление подписки»: every subscription is updated, the wait ([SubscriptionWait]) cannot be cut short by a stop,
  * and a VPN that runs takes the update up before the recheck (a running profile that kept its id but took new content
- * is otherwise applied only at its next start). An update that did not finish, or a VPN that did not connect with it,
- * makes the fix unsuccessful. The servers are the provider's current ones and stay; [restoreSelection] puts back a
- * selection the update moved.
+ * is otherwise applied only at its next start). An update that did not run, one that left the user's VPN off, or a VPN
+ * that did not connect with it makes the fix unsuccessful. The servers are the provider's current ones and stay;
+ * [restoreSelection] puts back a selection the update moved.
  */
 class SubscriptionUpdateFix(
     private val groups: List<Long>,
@@ -189,7 +238,7 @@ class SubscriptionUpdateFix(
         log("fix subscription_updated: ${groups.size} subscription(s)")
         val before = if (vpn.off()) null else running()
         val finished = withContext(NonCancellable) { wait.await(groups, before) }
-        if (!finished) throw IllegalStateException("the subscription update did not finish")
+        if (!finished) throw IllegalStateException("the subscription update did not run")
         // The update removed the profile the VPN ran and nothing took over: the user's VPN is off now — no fix.
         if (before != null && vpn.off()) throw IllegalStateException("the update stopped the VPN")
         if (!vpn.off() && reloadAllowed() && !reloader.reloadWhenConnected("subscriptions updated")) {
