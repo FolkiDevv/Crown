@@ -285,9 +285,10 @@ internal data class GoRefKey(val refnum: Int)
 internal fun defaultInterfaceMonitorKey(listener: Any): Any {
     if (listener !is Seq.Proxy) return listener
     return try {
-        // Public field of a package-private generated class
-        GoRefKey(listener.javaClass.getField("refnum").apply { isAccessible = true }.getInt(listener))
-    } catch (_: ReflectiveOperationException) {
+        // Declared on the generated proxy class (public in sagernet/gomobile, private in golang/mobile)
+        GoRefKey(listener.javaClass.getDeclaredField("refnum").apply { isAccessible = true }.getInt(listener))
+    } catch (e: ReflectiveOperationException) {
+        Logs.w("no gomobile refnum on ${listener.javaClass.name}, network listeners will leak: $e")
         listener
     }
 }
