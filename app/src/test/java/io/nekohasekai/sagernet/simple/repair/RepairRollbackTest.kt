@@ -1,8 +1,10 @@
 package io.nekohasekai.sagernet.simple.repair
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -18,6 +20,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CancellationException
+import kotlin.coroutines.CoroutineContext
 
 /**
  * The automatic fixes and their rollback (design.md D8, connection-repair "Безопасные автоматические исправления",
@@ -50,6 +53,9 @@ class RepairRollbackTest {
             settings.log += "apply $key=$value"
             onApply()
         }
+
+        // Compare and set, as the device fixes do: only while the setting still holds what this fix wrote.
+        override fun stillApplied() = settings.values[key] == value
 
         override fun restore() {
             if (failingRestores > 0) {
@@ -353,7 +359,7 @@ class RepairRollbackTest {
     @Test
     fun aRestoreThatThrowsStopsNoneOfTheOthersAndIsTriedAgainLater() {
         val failed = mutableListOf<RepairStep>()
-        val journal = RepairJournal { entry, _ -> failed += entry.step }
+        val journal = RepairJournal(onRestoreFailed = { entry, _ -> failed += entry.step })
         val log = mutableListOf<String>()
         var serverFails = 1
         journal.record(RepairStep.DNS_DIRECT, FixKind.DIRECT_DNS_WHITELISTED) { log += "dns" }
@@ -490,40 +496,106 @@ class RepairRollbackTest {
         assertEquals(listOf(false, true), firstChecks.settles)
     }
 
-    @Test
-    fun aRunStoppedWhileItWaitsKeepsTheRollbackItWaitedFor() = runBlocking {
-        // Run A is stopped and puts its changes back (not cancellable, slow). Run B starts and waits for it; B is
-        // stopped while it waits. Run C must still start only after A's rollback, not right after B.
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        try {
-            val serial = SerialRuns(scope)
-            val events = java.util.Collections.synchronizedList(mutableListOf<String>())
-            val inA = CompletableDeferred<Unit>()
-            val a = serial.launch {
-                try {
-                    inA.complete(Unit)
-                    awaitCancellation()
-                } finally {
-                    withContext(NonCancellable) {
-                        delay(300)
-                        events += "A rolled back"
-                    }
+    /** Runs dispatched coroutines only when the test says so: deterministic queued starts, no real time. */
+    private class ManualDispatcher : CoroutineDispatcher() {
+        private val tasks = ArrayDeque<Runnable>()
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            synchronized(tasks) { tasks.addLast(block) }
+        }
+
+        fun runAll() {
+            while (true) {
+                val task = synchronized(tasks) { tasks.removeFirstOrNull() } ?: return
+                task.run()
+            }
+        }
+    }
+
+    private fun serialRunsOrder(stopB: (Job) -> Unit): List<String> {
+        val dispatcher = ManualDispatcher()
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        val serial = SerialRuns(scope)
+        val events = mutableListOf<String>()
+        val rollback = CompletableDeferred<Unit>()
+        // Run A is stopped and puts its changes back (not cancellable), until the test lets the rollback end.
+        val a = serial.launch {
+            try {
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable) {
+                    rollback.await()
+                    events += "A rolled back"
                 }
             }
-            inA.await()
-            a.cancel()
-            // B's body still runs once its wait is over (and ends at once as stopped, as the view model's run does:
-            // it publishes «Проверка остановлена»); it must not run before A's rollback.
-            val b = serial.launch { events += if (isActive) "B started" else "B ended stopped" }
-            delay(50)
-            b.cancel()
-            val c = serial.launch { events += "C started" }
-            c.join()
-            assertEquals(listOf("A rolled back", "B ended stopped", "C started"), events.toList())
-            assertTrue(b.isCompleted)
-        } finally {
-            scope.cancel()
         }
+        dispatcher.runAll()
+        a.cancel()
+        dispatcher.runAll()
+        // B's body runs once its wait is over (already cancelled, it ends as stopped — the view model's run then
+        // publishes «Проверка остановлена»); it must not run before A's rollback.
+        val b = serial.launch { events += if (isActive) "B started" else "B ended stopped" }
+        stopB(b)
+        val c = serial.launch { events += "C started" }
+        dispatcher.runAll()
+        assertTrue("nothing may start while A rolls back: $events", events.isEmpty())
+        rollback.complete(Unit)
+        dispatcher.runAll()
+        assertTrue(b.isCompleted && c.isCompleted)
+        scope.cancel()
+        return events
+    }
+
+    @Test
+    fun aRunCancelledBeforeItStartedStillHoldsTheNextRunBackUntilTheRollback() {
+        // B is cancelled while queued, before its body could start: C must still wait for A's rollback.
+        assertEquals(listOf("A rolled back", "B ended stopped", "C started"), serialRunsOrder { b -> b.cancel() })
+    }
+
+    @Test
+    fun aRunStoppedWhileItWaitsKeepsTheRollbackItWaitedFor() {
+        val order = serialRunsOrder { _ -> }
+        assertEquals(listOf("A rolled back", "B started", "C started"), order)
+    }
+
+    @Test
+    fun aSupersededChangeIsNotPutBackOverANewerValue() = runBlocking {
+        // The stop's restore and the first retry both fail; the next run then sets the same setting; the later retry
+        // must not write the old value over the newer one (compare and set).
+        val settings = Settings()
+        val fix = FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8", failingRestores = 2)
+        fix.apply()
+        val superseded = mutableListOf<RepairStep>()
+        val journal = RepairJournal(onSuperseded = { superseded += it.step })
+        journal.record(RepairStep.DNS_DIRECT, fix.kind, stillOurs = fix::stillApplied, restore = fix::restore)
+        assertTrue(journal.restoreAll().isEmpty())
+        val checks = FakeChecks(settings)
+        val unrestored = UnrestoredChanges()
+        unrestored.keep(journal, checks)
+        unrestored.retry()
+        assertTrue(unrestored.pending)
+        settings.values["dns"] = "9.9.9.9"
+        unrestored.retry()
+        assertEquals("9.9.9.9", settings.values["dns"])
+        assertTrue(!unrestored.pending)
+        assertEquals(listOf(RepairStep.DNS_DIRECT), superseded)
+        assertTrue(settings.log.none { it.startsWith("restore dns=") })
+    }
+
+    @Test
+    fun aChangeStillInPlaceIsPutBackByTheRetry() = runBlocking {
+        val settings = Settings()
+        val fix = FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8", failingRestores = 2)
+        fix.apply()
+        val journal = RepairJournal()
+        journal.record(RepairStep.DNS_DIRECT, fix.kind, stillOurs = fix::stillApplied, restore = fix::restore)
+        journal.restoreAll()
+        val unrestored = UnrestoredChanges()
+        unrestored.keep(journal, FakeChecks(settings))
+        unrestored.retry()
+        unrestored.retry()
+        assertEquals("local", settings.values["dns"])
+        assertTrue(!unrestored.pending)
     }
 
     @Test

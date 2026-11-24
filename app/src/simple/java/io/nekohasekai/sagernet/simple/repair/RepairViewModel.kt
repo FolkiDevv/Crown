@@ -145,9 +145,13 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
                 if (unrestored.pending) Logs.w("simple repair: a change of an earlier run still could not be put back")
             }
             // What this run changes, to be put back when a fix does not help or the run is stopped.
-            val journal = RepairJournal { entry, e ->
-                Logs.w("simple repair: could not put back ${entry.kind?.name?.lowercase() ?: "the VPN started for the checks"}", e)
-            }
+            fun name(entry: RepairJournal.Entry) = entry.kind?.name?.lowercase() ?: "the VPN started for the checks"
+            val journal = RepairJournal(
+                onRestoreFailed = { entry, e -> Logs.w("simple repair: could not put back ${name(entry)}", e) },
+                onSuperseded = { entry ->
+                    Logs.i("simple repair: ${name(entry)} was changed since; the newer value is kept, not put back")
+                },
+            )
             val checks = DeviceRepairChecks(getApplication(), environment, journal)
             val engine = RepairEngine(checks, journal)
             try {

@@ -1,13 +1,14 @@
 package io.nekohasekai.sagernet.simple.repair
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -16,13 +17,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * «Починка» and the service around its fixes (design.md D8): the subscription update and the successor start `:bg`
- * makes after it are waited for before a rollback; a fix whose VPN does not connect again is no fix; a reload owed by
- * a finished run fires on the next connected state. Real time with short limits.
+ * «Починка» and the service around its fixes (design.md D8): the subscription updates it submits — every group, in
+ * `:bg`'s FIFO queue — and the successor start after them are waited for before a rollback; a fix whose VPN does not
+ * connect again is no fix; a reload owed after a rollback survives any cancelled wait and fires only on a connected
+ * service. Real time with short limits.
  */
 class RepairVpnSyncTest {
 
@@ -54,105 +56,104 @@ class RepairVpnSyncTest {
         }
     }
 
-    /** The `:bg` queue: [run] plays what a refresh does after it was asked for. */
-    private class FakeQueue {
-        val states = MutableStateFlow<Map<Long, Int>>(emptyMap())
-        val stamps = ConcurrentHashMap<Long, Long>()
-        @Volatile var finishedAt = 0L
+    /**
+     * `:bg`'s subscription queue: one job at a time, first in first out; [submit] returns once the job is queued
+     * (after [submitDelayMs], a slow binder), [barrier] is a queued no-op that returns once it ran.
+     */
+    private inner class FakeQueue(private val jobMs: (Long) -> Long, private val submitDelayMs: Long = 0L) {
+        private val jobs = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+        val done: MutableList<Long> = Collections.synchronizedList(mutableListOf())
 
-        // Atomic: the updates of several groups run at once, like the callbacks of the real queue.
-        fun set(gid: Long, state: Int?) {
-            states.update { if (state == null) it - gid else it + (gid to state) }
+        init {
+            scope.launch { for (job in jobs) job() }
+        }
+
+        suspend fun submit(gid: Long) {
+            delay(submitDelayMs)
+            jobs.send {
+                delay(jobMs(gid))
+                done += gid
+            }
+        }
+
+        suspend fun barrier() {
+            val ran = CompletableDeferred<Unit>()
+            jobs.send { ran.complete(Unit) }
+            ran.await()
         }
     }
 
-    private fun wait(queue: FakeQueue, vpn: RepairVpn, request: (Long) -> Unit, exists: (Long) -> Boolean = { true }) =
-        SubscriptionWait(
-            states = queue.states,
-            request = request,
-            lastUpdate = { queue.stamps[it] ?: 0L },
-            profileExists = exists,
-            vpn = vpn,
-            startMs = 300L,
-            perGroupMs = 1_000L,
-            maxMs = 2_000L,
-            successorMs = 1_500L,
+    private fun wait(queue: FakeQueue, vpn: RepairVpn, exists: (Long) -> Boolean = { true }) = SubscriptionWait(
+        submit = queue::submit,
+        barrier = queue::barrier,
+        profileExists = exists,
+        vpn = vpn,
+        successorMs = 1_500L,
+    )
+
+    @Test
+    fun everySubmittedGroupIsThroughBeforeTheWaitEnds() = runBlocking {
+        // Two groups with independent durations, one far longer than any fixed limit the wait could have had.
+        val queue = FakeQueue(jobMs = { gid -> if (gid == 7L) 1_200L else 100L })
+        val done = wait(queue, FakeVpn()).await(listOf(7L, 8L), running = null)
+        assertTrue(done)
+        assertEquals(listOf(7L, 8L), queue.done.toList())
+    }
+
+    @Test
+    fun aSlowSubmissionIsStillWaitedFor() = runBlocking {
+        // The request reaches the queue late (a slow binder): the barrier is only queued after it.
+        val queue = FakeQueue(jobMs = { 50L }, submitDelayMs = 400L)
+        assertTrue(wait(queue, FakeVpn()).await(listOf(1L, 2L, 3L), running = null))
+        assertEquals(listOf(1L, 2L, 3L), queue.done.toList())
+    }
+
+    @Test
+    fun aQueueThatCannotBeReachedIsNoFinishedUpdate() = runBlocking {
+        val wait = SubscriptionWait(
+            submit = { throw IllegalStateException("cannot bind core service") },
+            barrier = { },
+            profileExists = { true },
+            vpn = FakeVpn(),
         )
-
-    @Test
-    fun aDelayedQueueIsWaitedForUntilEveryUpdateIsThrough() = runBlocking {
-        val queue = FakeQueue()
-        val vpn = FakeVpn()
-        val done = wait(queue, vpn, request = { gid ->
-            scope.launch {
-                delay(100)
-                queue.set(gid, 1)
-                delay(150)
-                queue.set(gid, 2)
-                delay(250)
-                queue.stamps[gid] = 42L
-                queue.finishedAt = System.nanoTime()
-                queue.set(gid, null)
-            }
-        }).await(listOf(7L, 8L), running = null)
-        assertTrue(done)
-        assertTrue(queue.finishedAt > 0L)
-        assertEquals(emptyMap<Long, Int>(), queue.states.value)
-    }
-
-    @Test
-    fun anUpdateTooQuickToBeSeenCountsByItsLastUpdateTime() = runBlocking {
-        val queue = FakeQueue()
-        val done = wait(queue, FakeVpn(), request = { gid -> queue.stamps[gid] = 1L }).await(listOf(3L), running = null)
-        assertTrue(done)
-    }
-
-    @Test
-    fun anUpdateThatNeverRanOrDoesNotFinishIsNoFinishedUpdate() = runBlocking {
-        val queue = FakeQueue()
-        assertFalse(wait(queue, FakeVpn(), request = { }).await(listOf(3L), running = null))
-        val stuck = FakeQueue()
-        assertFalse(wait(stuck, FakeVpn(), request = { gid -> stuck.set(gid, 2) }).await(listOf(3L), running = null))
+        assertFalse(wait.await(listOf(1L), running = null))
     }
 
     @Test
     fun theSuccessorStartOfAReplacedRunningProfileIsWaitedFor() = runBlocking {
-        // The update deleted the running profile 5: `:bg` stopped the service and starts the successor afterwards, in
-        // a coroutine of its own, after the queue already reported the update through.
-        val queue = FakeQueue()
+        // The update deleted the running profile 5 and stopped the service; `:bg` starts the successor afterwards in
+        // a coroutine of its own, after its queue job is through.
         val vpn = FakeVpn()
         var successorStartedAt = 0L
+        val queue = FakeQueue(jobMs = { 100L })
         val started = System.nanoTime()
-        val done = wait(queue, vpn, exists = { it != 5L }, request = { gid ->
-            scope.launch {
-                queue.set(gid, 2)
-                delay(100)
-                vpn.isConnected = false
-                queue.stamps[gid] = 1L
-                queue.set(gid, null)
-                delay(600)
-                successorStartedAt = System.nanoTime()
-                vpn.connect()
-            }
-        }).await(listOf(1L), running = 5L)
+        val wait = SubscriptionWait(
+            submit = { gid ->
+                queue.submit(gid)
+                scope.launch {
+                    delay(150)
+                    vpn.isConnected = false
+                    delay(500)
+                    successorStartedAt = System.nanoTime()
+                    vpn.connect()
+                }
+            },
+            barrier = queue::barrier,
+            profileExists = { it != 5L },
+            vpn = vpn,
+            successorMs = 2_000L,
+        )
+        assertTrue(wait.await(listOf(1L), running = 5L))
         val returned = System.nanoTime()
-        assertTrue(done)
         assertTrue("returned before the successor started", successorStartedAt in (started + 1)..returned)
     }
 
-    private fun fix(queue: FakeQueue, vpn: FakeVpn, restored: MutableList<String>) = SubscriptionUpdateFix(
+    private fun fix(vpn: FakeVpn, restored: MutableList<String>, running: Long = 9L) = SubscriptionUpdateFix(
         groups = listOf(1L),
-        wait = wait(queue, vpn, request = { gid ->
-            scope.launch {
-                queue.set(gid, 2)
-                delay(100)
-                queue.stamps[gid] = 1L
-                queue.set(gid, null)
-            }
-        }),
+        wait = wait(FakeQueue(jobMs = { 50L }), vpn),
         vpn = vpn,
         reloader = VpnReloader(vpn, reconnectMs = 400L, restartShowMs = 10L),
-        running = { 9L },
+        running = { running },
         reloadAllowed = { true },
         restoreSelection = { restored += "selection" },
     )
@@ -160,19 +161,19 @@ class RepairVpnSyncTest {
     @Test
     fun aSubscriptionFixReloadsTheRunningVpnBeforeTheRecheck() = runBlocking {
         val vpn = FakeVpn()
-        fix(FakeQueue(), vpn, mutableListOf()).apply()
+        fix(vpn, mutableListOf()).apply()
         assertEquals(1, vpn.reloads.get())
     }
 
     @Test
     fun aSubscriptionFixWhoseVpnDoesNotConnectFailsAndIsPutBack() = runBlocking {
-        // The service is starting and never connects: the fix must not count, the engine puts it back.
+        // The service is starting and never connects: the fix must not count; the engine puts it back.
         val vpn = FakeVpn(isConnected = false)
         val restored = mutableListOf<String>()
-        val subscriptionFix = fix(FakeQueue(), vpn, restored)
-        // The recheck would pass: only the VPN that did not connect makes the fix fail.
+        val subscriptionFix = fix(vpn, restored)
         var applied = false
-        val failing = object : RepairChecks {
+        val checks = object : RepairChecks {
+            // The recheck would pass: only the VPN that did not connect makes the fix fail.
             override suspend fun run(step: RepairStep, done: Map<RepairStep, StepResult>): StepResult =
                 if (step == RepairStep.SUBSCRIPTION && !applied) StepResult.fail(Finding.SUBSCRIPTION_EXPIRED) else StepResult.ok()
 
@@ -184,7 +185,7 @@ class RepairVpnSyncTest {
                     }
                 }) else emptyList()
         }
-        val result = RepairEngine(failing, timeoutMs = { 10_000L }, fixTimeoutMs = 10_000L).run { }.results
+        val result = RepairEngine(checks, timeoutMs = { 10_000L }, fixTimeoutMs = 10_000L).run { }.results
             .getValue(RepairStep.SUBSCRIPTION)
         assertEquals(StepStatus.FAIL, result.status)
         assertEquals(listOf("selection"), restored)
@@ -193,21 +194,22 @@ class RepairVpnSyncTest {
 
     @Test
     fun aSubscriptionFixThatLeftTheUsersVpnOffIsNoFix() = runBlocking {
-        // The update deleted the running profile and no successor took over: the service is off afterwards.
+        // The update deleted the running profile, no successor took over: the service is off afterwards.
         val vpn = FakeVpn()
-        val queue = FakeQueue()
+        val queue = FakeQueue(jobMs = { 50L })
         val subscriptionFix = SubscriptionUpdateFix(
             groups = listOf(1L),
-            wait = wait(queue, vpn, exists = { false }, request = { gid ->
-                scope.launch {
-                    queue.set(gid, 2)
-                    delay(50)
+            wait = SubscriptionWait(
+                submit = { gid ->
+                    queue.submit(gid)
                     vpn.isConnected = false
                     vpn.isOff = true
-                    queue.stamps[gid] = 1L
-                    queue.set(gid, null)
-                }
-            }),
+                },
+                barrier = queue::barrier,
+                profileExists = { false },
+                vpn = vpn,
+                successorMs = 200L,
+            ),
             vpn = vpn,
             reloader = VpnReloader(vpn, reconnectMs = 200L, restartShowMs = 10L),
             running = { 9L },
@@ -233,33 +235,70 @@ class RepairVpnSyncTest {
         assertEquals(0, off.reloads.get())
     }
 
+    // ------------------------------------------------------------------------------------------------ owed reload
+
+    private fun pending(phase: () -> ServicePhase, reloads: AtomicInteger) =
+        PendingReload(phase, { reloads.incrementAndGet() }, scope, pollMs = 20L, lifetimeMs = 5_000L)
+
     @Test
-    fun anOwedReloadFiresOnceTheServiceConnectsAfterTheRunGaveUpWaiting() = runBlocking {
-        // The run waited for a start in flight and gave up; the start connects later, with the replaced value.
+    fun aCancelledWaitDoesNotLoseTheOwedReloadAndItGoesOnlyOnceConnected() = runBlocking {
+        // A value was put back while the VPN was starting with the replaced one; the run waits (settle) and the user
+        // stops it during that wait.
         var phase = ServicePhase.STARTING
         val reloads = AtomicInteger()
-        val pending = PendingReload({ phase }, { reloads.incrementAndGet() }, scope, pollMs = 20L, lifetimeMs = 5_000L)
-        pending.arm()
-        pending.arm()
-        delay(300)
+        val pending = pending({ phase }, reloads)
+        val owed = pending.arm()
+        val waiter = launch { owed.await(60_000L) }
+        delay(100)
+        waiter.cancel()
+        delay(200)
         assertEquals("never during the start", 0, reloads.get())
+        assertTrue(pending.armed)
         phase = ServicePhase.CONNECTED
-        withTimeoutOrNull(2_000L) { while (pending.armed) delay(20) }
+        assertEquals(ReloadOutcome.SENT, owed.await(2_000L))
         assertEquals(1, reloads.get())
         assertFalse(pending.armed)
     }
 
     @Test
-    fun anOwedReloadIsDroppedWhenTheServiceGoesOff() = runBlocking {
+    fun armingTwiceOwesOneReload() = runBlocking {
         var phase = ServicePhase.STARTING
         val reloads = AtomicInteger()
-        val pending = PendingReload({ phase }, { reloads.incrementAndGet() }, scope, pollMs = 20L, lifetimeMs = 5_000L)
-        pending.arm()
-        delay(100)
-        phase = ServicePhase.OFF
-        withTimeoutOrNull(2_000L) { while (pending.armed) delay(20) }
+        val pending = pending({ phase }, reloads)
+        val first = pending.arm()
+        val second = pending.arm()
         phase = ServicePhase.CONNECTED
+        assertEquals(ReloadOutcome.SENT, first.await(2_000L))
+        assertEquals(ReloadOutcome.SENT, second.await(2_000L))
+        assertEquals(1, reloads.get())
+    }
+
+    @Test
+    fun theOwedReloadRecordsTheConnectsAtItsSend() = runBlocking {
+        val vpn = FakeVpn()
+        vpn.connect()
+        vpn.connect()
+        val reloads = AtomicInteger()
+        val owed = pending({ ServicePhase.CONNECTED }, reloads).arm { vpn.connects() }
+        assertEquals(ReloadOutcome.SENT, owed.await(2_000L))
+        assertEquals(2, owed.connectsAtSend)
+    }
+
+    @Test
+    fun anOwedReloadIsDroppedWhenTheServiceGoesOffOrIsDisarmed() = runBlocking {
+        var phase = ServicePhase.STARTING
+        val reloads = AtomicInteger()
+        val pending = pending({ phase }, reloads)
+        val off = pending.arm()
+        phase = ServicePhase.OFF
+        assertEquals("the next start reads the restored values", ReloadOutcome.DROPPED, off.await(2_000L))
+        phase = ServicePhase.STARTING
+        val stopped = pending.arm()
+        pending.disarm()
+        phase = ServicePhase.CONNECTED
+        assertEquals("the VPN «Починка» started is being stopped", ReloadOutcome.DROPPED, stopped.await(2_000L))
         delay(200)
-        assertEquals("the next start reads the restored values", 0, reloads.get())
+        assertEquals(0, reloads.get())
+        assertFalse(pending.armed)
     }
 }
