@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.simple.repair
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
 import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.core.content.FileProvider
@@ -80,7 +81,7 @@ object RepairReportExport {
     }
 
     /** The share sheet for [file], one archive. */
-    fun shareIntent(context: Context, file: File, title: String): Intent {
+    fun shareIntent(context: Context, file: File, title: String, chosen: IntentSender? = null): Intent {
         val uri = FileProvider.getUriForFile(context, BuildConfig.APPLICATION_ID + ".cache", file)
         val send = Intent(Intent.ACTION_SEND)
             .setType(MIME)
@@ -88,7 +89,8 @@ object RepairReportExport {
             .putExtra(Intent.EXTRA_SUBJECT, file.nameWithoutExtension)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         send.clipData = ClipData.newRawUri(file.name, uri)
-        return Intent.createChooser(send, title)
+        // [chosen]: the system tells the app which target the user picked (ShareGuard).
+        return Intent.createChooser(send, title, chosen)
     }
 
     /** The cleaning with every server name, secret value and subscription link of this device. */

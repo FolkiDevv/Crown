@@ -442,11 +442,14 @@ class ReportRedactor(
 
         fun isSecretKey(key: String): Boolean = SECRET_KEY.matches(key)
 
-        /** The keys of a profile whose values name a server: its address, the TLS name, the transport's host. */
+        /**
+         * The keys of a profile whose values name a server: its address, the TLS name, the transport's host; the DNS
+         * tunnels (Dnstt, MasterDns) keep their server under "domain".
+         */
         private val SERVER_KEYS = setOf(
             "server", "server_name", "servername", "sni", "host", "hostname", "address", "peer", "endpoint",
             "server_address", "serveraddress", "remote", "remote_address", "ip", "verifypeercertbyname",
-            "verify_peer_cert_by_name",
+            "verify_peer_cert_by_name", "domain", "domains",
         )
 
         /**

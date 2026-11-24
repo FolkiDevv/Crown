@@ -559,6 +559,17 @@ class ReportRedactorTest {
         )
     }
 
+    /** A DNS tunnel keeps its server under "domain" (no "server"): it is a server name all the same (opus-loop S1). */
+    @Test
+    fun dnsTunnelServer() {
+        val profile = """{"type":"dnstt","server":"","domain":"t.tunnel-b9.example","public_key":"abc"}"""
+        assertEquals(setOf("t.tunnel-b9.example"), ReportRedactor.serverNames("", profile))
+        val r = ReportRedactor(ReportRedactor.serverNames("", profile), emptyList())
+        val config = r.redactJson("""{"outbounds":[{"type":"dnstt","domain":"t.tunnel-b9.example"}],"dns":{"rules":[{"domain_suffix":["t.tunnel-b9.example"]}]}}""")
+        assertFalse(config, config.contains("tunnel-b9"))
+        assertTrue(config, config.contains("<server-1>"))
+    }
+
     @Test
     fun normalize() {
         assertEquals("vpn.example.com", ReportRedactor.normalize("VPN.Example.com.:443"))

@@ -1,7 +1,16 @@
 package io.nekohasekai.sagernet.simple.repair
 
 import android.app.Application
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.IntentSender
+import android.os.Build
 import android.os.SystemClock
+import androidx.core.content.ContextCompat
+import io.nekohasekai.sagernet.BuildConfig
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.nekohasekai.sagernet.ktx.Logs
@@ -46,19 +55,22 @@ data class RepairUiState(
 /**
  * Whether a share sheet that came back was ever shown. Android silently blocks an activity start from the background:
  * when the user presses Home just before the app starts the sheet, the sheet is created hidden and finished, cancelled,
- * when the user returns — so its result comes after the app stopped. A sheet closed by Back comes back before the app
- * stops; one that started a target comes back after it, but only once the user picked the target. So a cancelled result
- * after a stop that came within [BLOCKED_WINDOW_MS] of the start — sooner than anyone picks a target — is taken for a
- * sheet that was never seen. A sheet the user closed with Home right after it appeared (Android delivers that result on
- * return too) is then offered once more: harmless. Pure Kotlin over [now] (elapsed ms), covered by a JVM unit test.
+ * when the user returns — so its result comes after the app stopped. A sheet where the user picked a target says so
+ * through the chooser's callback ([targetChosen]) and was seen, however fast the pick and whatever the target returns.
+ * A sheet closed by Back comes back before the app stops. So only a cancelled result, with no target picked, after a
+ * stop within [BLOCKED_WINDOW_MS] of the start is taken for a sheet that was never seen. A sheet the user closed with
+ * Home right after it appeared (Android delivers that result on return too) is then offered once more: harmless. Pure
+ * Kotlin over [now] (elapsed ms), covered by a JVM unit test.
  */
 class ShareGuard(private val now: () -> Long) {
     private var launchedAt = -1L
     private var stoppedAt = -1L
+    private var chosen = false
 
     fun launched() {
         launchedAt = now()
         stoppedAt = -1L
+        chosen = false
     }
 
     /** The app went to the background (a rotation is not one). */
@@ -66,11 +78,20 @@ class ShareGuard(private val now: () -> Long) {
         if (launchedAt >= 0 && stoppedAt < 0) stoppedAt = now()
     }
 
+    /**
+     * The sheet reported that the user picked a target (the chooser's callback): it was seen, however fast the pick
+     * and whatever result the target gives back.
+     */
+    fun targetChosen() {
+        if (launchedAt >= 0) chosen = true
+    }
+
     /** true: the sheet was there and is done with; false: it never showed, offer the archive again. */
     fun cameBack(ok: Boolean): Boolean {
-        val unseen = !ok && launchedAt >= 0 && stoppedAt >= 0 && stoppedAt - launchedAt <= BLOCKED_WINDOW_MS
+        val unseen = !ok && !chosen && launchedAt >= 0 && stoppedAt >= 0 && stoppedAt - launchedAt <= BLOCKED_WINDOW_MS
         launchedAt = -1L
         stoppedAt = -1L
+        chosen = false
         return !unseen
     }
 
@@ -166,6 +187,30 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
 
     private val shareGuard = ShareGuard(SystemClock::elapsedRealtime)
 
+    /** The chooser's callback when the user picks a target ([chosenTarget]); not exported, sent as this app. */
+    private val chosenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = shareGuard.targetChosen()
+    }
+
+    init {
+        ContextCompat.registerReceiver(
+            application, chosenReceiver, IntentFilter(ACTION_TARGET_CHOSEN), ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
+    override fun onCleared() {
+        getApplication<Application>().unregisterReceiver(chosenReceiver)
+    }
+
+    /** For Intent.createChooser: the system sends it when the user picks a target in the share sheet. */
+    fun chosenTarget(): IntentSender {
+        val app = getApplication<Application>()
+        // Mutable: the system adds the chosen component to it.
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+        return PendingIntent.getBroadcast(app, 0, Intent(ACTION_TARGET_CHOSEN).setPackage(app.packageName), flags)
+            .intentSender
+    }
+
     /** The screen started the share sheet of [RepairUiState.pendingShare]. */
     fun shareLaunched() = shareGuard.launched()
 
@@ -202,5 +247,9 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         is RepairVerdict.Fixed -> "fixed ${verdict.fixes.map { it.second.name.lowercase() }}"
         is RepairVerdict.CauseFound -> "cause ${verdict.cause.name.lowercase()}"
         is RepairVerdict.Unknown -> if (verdict.nothingFound) "unknown, no problem found" else "unknown"
+    }
+
+    private companion object {
+        const val ACTION_TARGET_CHOSEN = BuildConfig.APPLICATION_ID + ".REPAIR_SHARE_TARGET_CHOSEN"
     }
 }

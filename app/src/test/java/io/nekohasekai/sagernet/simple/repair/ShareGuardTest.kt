@@ -39,6 +39,22 @@ class ShareGuardTest {
         assertTrue(guard.cameBack(ok = false))
     }
 
+    /** A target picked fast that returns "cancelled" (Telegram, Quick Share): the pick was reported, it was seen (opus-loop S2). */
+    @Test
+    fun quickPickIsDone() {
+        guard.launched()
+        clock += 800
+        guard.targetChosen()
+        clock += 100
+        guard.stopped()
+        assertTrue(guard.cameBack(ok = false))
+        // The next start is judged afresh: a blocked one is still offered again.
+        guard.launched()
+        clock += 400
+        guard.stopped()
+        assertFalse(guard.cameBack(ok = false))
+    }
+
     /** The emulators' slow case: the app stopped 1.2 s after the blocked start. */
     @Test
     fun slowStopAfterABlockedStartIsOfferedAgain() {

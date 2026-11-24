@@ -592,7 +592,9 @@ fun SimpleApp(
                 if (file == null) return@collect
                 try {
                     shareSheet.launch(
-                        RepairReportExport.shareIntent(context, file, context.getString(R.string.simple_repair_export_share))
+                        RepairReportExport.shareIntent(
+                            context, file, context.getString(R.string.simple_repair_export_share), repair.chosenTarget(),
+                        )
                     )
                     repair.shareLaunched()
                 } catch (_: ActivityNotFoundException) {
