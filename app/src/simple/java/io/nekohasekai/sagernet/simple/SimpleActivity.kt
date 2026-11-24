@@ -89,6 +89,7 @@ import io.nekohasekai.sagernet.simple.add.AddViewModel
 import io.nekohasekai.sagernet.simple.add.ClipboardOfferDialog
 import io.nekohasekai.sagernet.simple.add.LinkDialog
 import io.nekohasekai.sagernet.simple.add.Notice
+import io.nekohasekai.sagernet.simple.add.SimpleImport
 import io.nekohasekai.sagernet.simple.home.ConnectionPhase
 import io.nekohasekai.sagernet.simple.home.HomeActions
 import io.nekohasekai.sagernet.simple.home.HomeScreen
@@ -267,6 +268,10 @@ class SimpleActivity : AppCompatActivity() {
         // Auto connect, updates and the theme may have been changed in the classic interface meanwhile.
         settings.refresh()
         clipboardCheck = true
+        // A subscription whose import was interrupted (process killed during its first download) updates itself again.
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { SimpleImport.healInterrupted() }.onFailure { Logs.w("simple add: interrupted imports", it) }
+        }
     }
 
     override fun onStop() {
