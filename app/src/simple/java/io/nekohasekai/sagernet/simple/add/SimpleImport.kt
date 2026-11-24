@@ -304,7 +304,7 @@ object SimpleImport {
      * cleared (PendingImports.settle), so a failure or another interruption is retried on the next start.
      */
     suspend fun healInterrupted(): Boolean = PendingImports.heal(records, pendingLock, ::restore).also { tried ->
-        if (tried) Logs.i("simple add: interrupted imports settled, ${records.load().size} left for the next start")
+        if (tried) Logs.i("simple add: interrupted imports settled")
     }
 
     /**
