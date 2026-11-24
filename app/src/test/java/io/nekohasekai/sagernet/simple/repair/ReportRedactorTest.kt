@@ -380,6 +380,23 @@ class ReportRedactorTest {
         assertEquals("[Debug] via <redacted>:<server-1>", before.redact("[Debug] via pw-x:fd00:0::1"))
     }
 
+    /**
+     * A secret that is part of a configured server name must not hide the name: all matchers see the same text, and
+     * the name (which contains the secret) wins; the secret alone is still masked (review).
+     */
+    @Test
+    fun secretInsideServerName() {
+        val server = "vpn-alpha.example.net"
+        val profile = """{"type":"trojan","server":"$server","password":"alpha","uuid":"example"}"""
+        val r = ReportRedactor(ReportRedactor.serverNames(server, profile), emptyList(), ReportRedactor.secretValues(profile))
+        assertEquals(
+            "[Debug] dialing to tcp:<server-1>:443, auth with <redacted> failed",
+            r.redact("[Debug] dialing to tcp:$server:443, auth with alpha failed"),
+        )
+        assertEquals("[Info] GET https://<server-1>/<redacted> for <redacted>", r.redact("[Info] GET https://$server/x for example"))
+        assertEquals("[Info] cdn <server-1> up", r.redact("[Info] cdn cdn.$server up"))
+    }
+
     /** A configured IPv6 server in a spelling none of its listed forms has: compared by value in free text (review). */
     @Test
     fun ipv6ServerByValueInFreeText() {
