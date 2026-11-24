@@ -137,6 +137,95 @@ class PendingImportsTest {
         assertTrue(records.entries.isEmpty())
     }
 
+    /** The database, the group listeners and the scheduler, with failures to switch on. */
+    private class FakeAutoUpdates(var skipAutoUpdate: Boolean = true, var exists: Boolean = true) : PendingImports.AutoUpdates {
+        var failChanged = false
+        var scheduleResult: () -> Boolean = { true }
+        var clears = 0
+        var notified = 0
+        var schedules = 0
+
+        override suspend fun groupsOf(entry: Entry) =
+            if (exists) listOf(PendingImports.GroupFlag(entry.gid, skipAutoUpdate)) else emptyList()
+
+        override suspend fun clearFlag(id: Long) {
+            skipAutoUpdate = false
+            clears++
+        }
+
+        override suspend fun changed(id: Long) {
+            if (failChanged) error("the listener failed")
+            notified++
+        }
+
+        override suspend fun schedule(): Boolean {
+            schedules++
+            return scheduleResult()
+        }
+    }
+
+    private suspend fun settleWithRestore(records: Memory, updates: FakeAutoUpdates, entry: Entry) =
+        PendingImports.settle(records, lock, listOf(entry)) { PendingImports.restore(it, updates) }
+
+    @Test
+    fun aRestoreClearsTellsAndSchedulesBeforeTheRecordGoes() = runBlocking {
+        val entry = Entry(1_000L, 5L, url)
+        val records = Memory(listOf(entry))
+        val updates = FakeAutoUpdates()
+        assertEquals(listOf(entry), settleWithRestore(records, updates, entry))
+        assertFalse(updates.skipAutoUpdate)
+        assertEquals(listOf(1, 1, 1), listOf(updates.clears, updates.notified, updates.schedules))
+        assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
+    fun aListenerFailureAfterTheFlagIsClearedIsCompletedByTheNextRun() = runBlocking {
+        val entry = Entry(1_000L, 5L, url)
+        val records = Memory(listOf(entry))
+        val updates = FakeAutoUpdates().apply { failChanged = true }
+        // The flag is cleared, then postUpdate throws: nothing scheduled yet, so the record stays.
+        assertTrue(settleWithRestore(records, updates, entry).isEmpty())
+        assertFalse(updates.skipAutoUpdate)
+        assertEquals(0, updates.schedules)
+        assertEquals(listOf(entry), records.entries)
+        // Next start: the flag is already cleared, yet the listeners and the scheduler still run, then the record goes.
+        updates.failChanged = false
+        assertEquals(listOf(entry), settleWithRestore(records, updates, entry))
+        assertEquals(1, updates.clears)
+        assertEquals(1, updates.notified)
+        assertEquals(1, updates.schedules)
+        assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
+    fun anUnconfirmedOrFailedRegistrationKeepsTheRecord() = runBlocking {
+        val entry = Entry(1_000L, 5L, url)
+        val records = Memory(listOf(entry))
+        val updates = FakeAutoUpdates().apply { scheduleResult = { false } }
+        assertTrue(settleWithRestore(records, updates, entry).isEmpty())
+        assertEquals(listOf(entry), records.entries)
+        updates.scheduleResult = { error("WorkManager is not available") }
+        assertTrue(settleWithRestore(records, updates, entry).isEmpty())
+        assertEquals(listOf(entry), records.entries)
+        // Once the registration is confirmed, the record goes; the flag was cleared only once.
+        updates.scheduleResult = { true }
+        assertEquals(listOf(entry), settleWithRestore(records, updates, entry))
+        assertEquals(3, updates.schedules)
+        assertEquals(1, updates.clears)
+        assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
+    fun aGroupThatIsGoneStillGetsTheSchedulerPlannedAgain() = runBlocking {
+        val entry = Entry(1_000L, 5L, url)
+        val records = Memory(listOf(entry))
+        val updates = FakeAutoUpdates(exists = false)
+        assertEquals(listOf(entry), settleWithRestore(records, updates, entry))
+        assertEquals(0, updates.clears)
+        assertEquals(1, updates.schedules)
+        assertTrue(records.entries.isEmpty())
+    }
+
     @Test
     fun onlyTheStaleOnesAreReturned() {
         val old = Entry(1_000L, 1L, "https://a")

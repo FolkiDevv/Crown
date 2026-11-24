@@ -5,6 +5,9 @@ import android.net.Uri
 import android.os.Process
 import android.os.SystemClock
 import android.provider.OpenableColumns
+import androidx.work.WorkQuery
+import androidx.work.multiprocess.RemoteWorkManager
+import com.google.common.util.concurrent.ListenableFuture
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SettingsRegistry
@@ -34,11 +37,15 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
+import java.util.concurrent.ExecutionException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * The universal add of the simple UI (simple-ui "Универсальное добавление серверов", design.md D4) over the import
@@ -213,27 +220,58 @@ object SimpleImport {
     private fun recordPending(entry: PendingImports.Entry, gid: Long = 0L) =
         PendingImports.record(records, pendingLock, entry.copy(gid = gid))
 
-    /**
-     * Turns automatic updates back on for the group of an import: by its id, else (the id never reached this process)
-     * by its URL among the groups still flagged. Idempotent: a group already cleared, or gone, needs nothing.
-     */
-    private suspend fun restore(entry: PendingImports.Entry): Boolean {
-        val groups = if (entry.gid > 0L) listOfNotNull(GroupRepo.get(entry.gid))
-        else GroupRepo.all().filter { it.url.trim() == entry.url }
-        updateItself(groups)
-        return true
+    /** Turns automatic updates back on for the group of an import (PendingImports.restore over the app's parts). */
+    private suspend fun restore(entry: PendingImports.Entry): Boolean = PendingImports.restore(entry, autoUpdates)
+
+    private val autoUpdates = object : PendingImports.AutoUpdates {
+        // By its id, else (the id never reached this process) by its URL.
+        override suspend fun groupsOf(entry: PendingImports.Entry) =
+            (if (entry.gid > 0L) listOfNotNull(GroupRepo.get(entry.gid)) else GroupRepo.all().filter { it.url.trim() == entry.url })
+                .map { PendingImports.GroupFlag(it.id, it.skipAutoUpdate) }
+
+        override suspend fun clearFlag(id: Long) {
+            SagerDatabase.instance.openHelper.writableDatabase
+                .execSQL("UPDATE `groups` SET `skip_auto_update` = 0 WHERE `id` = ?", arrayOf<Any>(id))
+        }
+
+        override suspend fun changed(id: Long) = GroupRepo.postUpdate(id)
+
+        /**
+         * SubscriptionScheduler.schedule registers the poll asynchronously and only logs a failure, so the result is
+         * read back from WorkManager: while a group updates itself, the unique periodic work must be there (an earlier
+         * registration counts too — every poll plans itself again from the groups). Nothing to confirm while no group
+         * updates automatically (the global switch is off): the scheduler then cancels the work on purpose.
+         */
+        override suspend fun schedule(): Boolean {
+            SubscriptionScheduler.schedule()
+            if (GroupRepo.all().none { SubscriptionScheduler.interval(it) > 0 }) return true
+            val workManager = RemoteWorkManager.getInstance(app)
+            val query = WorkQuery.fromUniqueWorkNames(listOf(SCHEDULER_WORK))
+            return withTimeoutOrNull(SCHEDULE_CONFIRM_MS) {
+                while (true) {
+                    if (workManager.getWorkInfos(query).await().any { !it.state.isFinished }) return@withTimeoutOrNull true
+                    delay(250)
+                }
+                @Suppress("UNREACHABLE_CODE")
+                false
+            } ?: false
+        }
     }
 
-    /** Clears the «skip automatic updates» flag the import set on [groups]; reschedules when one changed. */
-    private suspend fun updateItself(groups: List<ProxyGroup>) {
-        val flagged = groups.filter { it.skipAutoUpdate }
-        if (flagged.isEmpty()) return
-        val db = SagerDatabase.instance.openHelper.writableDatabase
-        for (group in flagged) {
-            db.execSQL("UPDATE `groups` SET `skip_auto_update` = 0 WHERE `id` = ?", arrayOf<Any>(group.id))
-            GroupRepo.postUpdate(group.id)
-        }
-        SubscriptionScheduler.schedule()
+    /** SubscriptionScheduler's unique work (its WORK_NAME, private there). */
+    private const val SCHEDULER_WORK = "SubscriptionScheduler"
+
+    private const val SCHEDULE_CONFIRM_MS = 10_000L
+
+    private suspend fun <T> ListenableFuture<T>.await(): T = suspendCancellableCoroutine { cont ->
+        addListener({
+            try {
+                cont.resume(get())
+            } catch (e: Throwable) {
+                cont.resumeWithException((e as? ExecutionException)?.cause ?: e)
+            }
+        }, Runnable::run)
+        cont.invokeOnCancellation { cancel(false) }
     }
 
     /**

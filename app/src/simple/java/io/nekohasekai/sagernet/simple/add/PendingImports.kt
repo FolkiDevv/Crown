@@ -24,6 +24,40 @@ object PendingImports {
         fun save(entries: List<Entry>)
     }
 
+    /** A subscription group as the restore sees it. */
+    data class GroupFlag(val id: Long, val skipAutoUpdate: Boolean)
+
+    /** What turning automatic updates back on touches: the groups, their listeners and the scheduler. */
+    interface AutoUpdates {
+        /** The group of an import: by its id, else by its URL. Empty when it is gone. */
+        suspend fun groupsOf(entry: Entry): List<GroupFlag>
+
+        /** Clears the group's «skip automatic updates» flag. */
+        suspend fun clearFlag(id: Long)
+
+        /** Tells the group's listeners that it changed. */
+        suspend fun changed(id: Long)
+
+        /**
+         * Plans the automatic updates again and confirms the result is in place: the periodic poll is registered, or
+         * none is needed (nothing updates automatically). False when that cannot be confirmed.
+         */
+        suspend fun schedule(): Boolean
+    }
+
+    /**
+     * Turns automatic updates back on for the group of [entry]: the flag cleared, the listeners told and the scheduler
+     * confirmed. Every step runs on every call, also when an earlier call already cleared the flag: a call that failed
+     * after the flag (listeners, scheduler) is completed by the next one. True only when all of it succeeded.
+     */
+    suspend fun restore(entry: Entry, updates: AutoUpdates): Boolean {
+        for (group in updates.groupsOf(entry)) {
+            if (group.skipAutoUpdate) updates.clearFlag(group.id)
+            updates.changed(group.id)
+        }
+        return updates.schedule()
+    }
+
     /** Adds or replaces (the group id became known) the entry of one import. */
     fun record(records: Records, lock: Any, entry: Entry) = synchronized(lock) {
         records.save(records.load().filterNot { it.sameImport(entry) } + entry)
