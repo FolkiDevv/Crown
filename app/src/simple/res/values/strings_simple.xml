@@ -342,11 +342,21 @@
     </plurals>
     <string name="simple_repair_sub_today">The subscription ends today</string>
     <string name="simple_repair_sub_low">Little subscription traffic is left</string>
-    <!-- %1$d: servers that answer, %2$d: all servers -->
-    <string name="simple_repair_servers_ok">%1$d of %2$d servers answer, the current one too</string>
-    <string name="simple_repair_servers_current_down">The current server does not answer; %1$d of %2$d servers do</string>
-    <!-- %1$d: all servers -->
-    <string name="simple_repair_servers_none">None of the %1$d servers answers</string>
+    <!-- %1$d: servers that answer, %2$d: all servers (the quantity) -->
+    <plurals name="simple_repair_servers_ok">
+        <item quantity="one">%1$d of %2$d server answers, the current one too</item>
+        <item quantity="other">%1$d of %2$d servers answer, the current one too</item>
+    </plurals>
+    <plurals name="simple_repair_servers_current_down">
+        <item quantity="one">The current server does not answer; %1$d of %2$d server does</item>
+        <item quantity="other">The current server does not answer; %1$d of %2$d servers do</item>
+    </plurals>
+    <!-- %1$d: all servers (the quantity) -->
+    <plurals name="simple_repair_servers_none">
+        <item quantity="one">The %1$d server does not answer</item>
+        <item quantity="other">None of the %1$d servers answers</item>
+    </plurals>
+    <string name="simple_repair_stopping">Stopping…</string>
     <string name="simple_repair_servers_empty">No servers added</string>
     <!-- %1$d of %2$d: servers for whitelists that answer -->
     <string name="simple_repair_servers_whitelist">Servers for whitelists: %1$d of %2$d answer</string>

@@ -330,9 +330,25 @@
     </plurals>
     <string name="simple_repair_sub_today">Подписка заканчивается сегодня</string>
     <string name="simple_repair_sub_low">Трафик подписки почти закончился</string>
-    <string name="simple_repair_servers_ok">Отвечают %1$d из %2$d серверов, текущий тоже</string>
-    <string name="simple_repair_servers_current_down">Текущий сервер не отвечает; отвечают %1$d из %2$d серверов</string>
-    <string name="simple_repair_servers_none">Ни один из %1$d серверов не отвечает</string>
+    <plurals name="simple_repair_servers_ok">
+        <item quantity="one">Отвечают %1$d из %2$d сервера, текущий тоже</item>
+        <item quantity="few">Отвечают %1$d из %2$d серверов, текущий тоже</item>
+        <item quantity="many">Отвечают %1$d из %2$d серверов, текущий тоже</item>
+        <item quantity="other">Отвечают %1$d из %2$d сервера, текущий тоже</item>
+    </plurals>
+    <plurals name="simple_repair_servers_current_down">
+        <item quantity="one">Текущий сервер не отвечает; отвечают %1$d из %2$d сервера</item>
+        <item quantity="few">Текущий сервер не отвечает; отвечают %1$d из %2$d серверов</item>
+        <item quantity="many">Текущий сервер не отвечает; отвечают %1$d из %2$d серверов</item>
+        <item quantity="other">Текущий сервер не отвечает; отвечают %1$d из %2$d сервера</item>
+    </plurals>
+    <plurals name="simple_repair_servers_none">
+        <item quantity="one">Ни один из %1$d сервера не отвечает</item>
+        <item quantity="few">Ни один из %1$d серверов не отвечает</item>
+        <item quantity="many">Ни один из %1$d серверов не отвечает</item>
+        <item quantity="other">Ни один из %1$d сервера не отвечает</item>
+    </plurals>
+    <string name="simple_repair_stopping">Останавливаем…</string>
     <string name="simple_repair_servers_empty">Серверы не добавлены</string>
     <string name="simple_repair_servers_whitelist">Серверы для белых списков: отвечают %1$d из %2$d</string>
     <string name="simple_repair_dns_vpn_ok">Адреса сайтов определяются через VPN</string>

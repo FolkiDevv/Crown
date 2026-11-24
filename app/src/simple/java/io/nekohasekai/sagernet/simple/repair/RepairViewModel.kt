@@ -40,6 +40,8 @@ data class RepairUiState(
     val verdict: RepairVerdict? = null,
     /** The user stopped the last run. */
     val stopped: Boolean = false,
+    /** «Остановить» was pressed and the run is ending (it may first wait for a subscription update, then roll back). */
+    val stopping: Boolean = false,
     /** The report archive is being built (batch 9). */
     val exporting: Boolean = false,
     /**
@@ -124,7 +126,9 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
     fun start(environment: RepairEnvironment) {
         if (job?.isActive == true) return
         val run = ++runs
-        mutableState.update { it.copy(running = true, progress = RepairProgress.initial(), verdict = null, stopped = false) }
+        mutableState.update {
+            it.copy(running = true, progress = RepairProgress.initial(), verdict = null, stopped = false, stopping = false)
+        }
         Logs.i("simple repair: started")
         // A stopped run still finishing must not overwrite the state of the next one.
         fun publish(change: (RepairUiState) -> RepairUiState) {
@@ -146,13 +150,13 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
                 // Every check, the skipped ones too (those never reach the device checks, which log the rest).
                 Logs.i("simple repair: results ${summary(progress.results)}")
                 Logs.i("simple repair: finished, verdict ${describe(verdict)}")
-                publish { it.copy(running = false, progress = progress, verdict = verdict) }
+                publish { it.copy(running = false, stopping = false, progress = progress, verdict = verdict) }
             } catch (e: CancellationException) {
                 journal.applied.takeIf { it.isNotEmpty() }?.let {
                     Logs.w("simple repair: ${it.size} change(s) could not be put back")
                 }
                 Logs.i("simple repair: stopped by the user")
-                publish { it.copy(running = false, stopped = true) }
+                publish { it.copy(running = false, stopping = false, stopped = true) }
                 throw e
             }
         }
@@ -191,7 +195,10 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
 
     /** «Остановить»: the check in flight and those after it are «не проверено: остановлено». */
     fun stop() {
-        job?.cancel()
+        val running = job ?: return
+        // Shown at once: the run may first wait for a subscription update it started before it can roll back.
+        if (running.isActive) mutableState.update { if (it.running) it.copy(stopping = true) else it }
+        running.cancel()
     }
 
     private val failures = Channel<Unit>(Channel.BUFFERED)

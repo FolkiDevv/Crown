@@ -114,8 +114,14 @@ fun RepairScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     if (state.running) {
-                        OutlinedButton(onClick = actions.stop, modifier = Modifier.widthIn(min = 200.dp)) {
-                            Text(stringResource(R.string.simple_repair_stop))
+                        // The stop may wait for work it cannot cut short (a subscription update) before it puts the
+                        // settings back: the button says so at once instead of seeming to do nothing.
+                        OutlinedButton(
+                            onClick = actions.stop,
+                            enabled = !state.stopping,
+                            modifier = Modifier.widthIn(min = 200.dp),
+                        ) {
+                            Text(stringResource(if (state.stopping) R.string.simple_repair_stopping else R.string.simple_repair_stop))
                         }
                     } else {
                         Button(onClick = actions.again, modifier = Modifier.widthIn(min = 200.dp)) {
@@ -157,7 +163,9 @@ fun RepairScreen(
             when {
                 state.running -> item(key = "running") {
                     Text(
-                        stringResource(if (progress.undoing) R.string.simple_repair_undoing else R.string.simple_repair_running),
+                        stringResource(
+                            if (progress.undoing || state.stopping) R.string.simple_repair_undoing else R.string.simple_repair_running
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = width.padding(vertical = 8.dp),
@@ -432,13 +440,18 @@ private fun explanation(step: RepairStep, result: StepResult): List<String> {
 
         RepairStep.SERVERS -> {
             val servers = result.servers
+            // By the summary's own numbers: after a subscription update the summary is the recheck's, and the line
+            // must not mix the «none answers» found before with the count found after.
             lines += when {
                 result.has(Finding.NO_SERVERS) || servers == null -> stringResource(R.string.simple_repair_servers_empty)
-                result.has(Finding.NO_SERVER_ANSWERS) -> stringResource(R.string.simple_repair_servers_none, servers.total)
-                result.has(Finding.CURRENT_SERVER_DOWN) ->
-                    stringResource(R.string.simple_repair_servers_current_down, servers.answering, servers.total)
+                servers.answering == 0 ->
+                    pluralStringResource(R.plurals.simple_repair_servers_none, servers.total, servers.total)
 
-                else -> stringResource(R.string.simple_repair_servers_ok, servers.answering, servers.total)
+                !servers.currentAnswers -> pluralStringResource(
+                    R.plurals.simple_repair_servers_current_down, servers.total, servers.answering, servers.total,
+                )
+
+                else -> pluralStringResource(R.plurals.simple_repair_servers_ok, servers.total, servers.answering, servers.total)
             }
             if (servers != null && servers.whitelistTotal > 0) {
                 lines += stringResource(R.string.simple_repair_servers_whitelist, servers.whitelistAnswering, servers.whitelistTotal)
