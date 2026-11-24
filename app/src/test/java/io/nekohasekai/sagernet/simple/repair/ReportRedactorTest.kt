@@ -256,7 +256,7 @@ class ReportRedactorTest {
         }
     }
 
-    /** A server with a single-label name ("gateway"): labelled where it stands as a host, the word itself stays (review). */
+    /** A server with a single-label name ("gateway"): labelled as a host and as a plain word (review). */
     @Test
     fun singleLabelServer() {
         val profile = """{"type":"vless","server":"gateway","server_port":443,"uuid":"$uuid","transport":{"type":"ws","host":"none"}}"""
@@ -268,15 +268,15 @@ class ReportRedactorTest {
         assertEquals("[Info] GET http://<server-1>/<redacted>", r.redact("[Info] GET http://gateway/status"))
         assertTrue(r.redact("[Info] import vless://$uuid@gateway:443?type=ws#gw").contains("vless://<redacted>@<server-1>:443"))
         assertTrue(r.redact("[Info] user@vpn connected").contains("user@<server-2>"))
-        // As plain words they are no hosts: «VPN service», «the gateway is down» stay readable.
-        assertEquals("[Info] the gateway is down, VPN service on", r.redact("[Info] the gateway is down, VPN service on"))
+        // Even a generic name is the user's server: as a plain word it is labelled too (the spec allows no server address).
+        assertEquals("[Info] the <server-1> is down, <server-2> service on", r.redact("[Info] the gateway is down, VPN service on"))
         // Words a profile writes for "no address" are no servers.
         assertEquals(emptySet<String>(), ReportRedactor.serverNames("none", """{"address":"auto","endpoint":"8080"}"""))
     }
 
     /**
-     * A single-label server name that identifies something ("mybox7", "дача5") is replaced as a plain word too; a
-     * generic one (GENERIC_NAMES) stays readable as a word and is labelled only as a host (review).
+     * Every single-label server name ("mybox7", "дача5", also the generic "proxy") is replaced as a whole word, never
+     * inside a longer word or the report's own labels (review).
      */
     @Test
     fun distinctiveSingleLabelServer() {
@@ -290,11 +290,17 @@ class ReportRedactorTest {
         assertEquals("[Info] tcp:<server-1>:443 and https://<server-1>/<redacted>", r.redact("[Info] tcp:mybox7:443 and https://mybox7/x"))
         // Part of a longer word is not the name.
         assertEquals("[Info] mybox77 and xmybox7 and дача55", r.redact("[Info] mybox77 and xmybox7 and дача55"))
-        // A generic name: a word stays, a host is labelled.
-        assertEquals("[Info] proxy started, dial tcp:<server-3>:1080", r.redact("[Info] proxy started, dial tcp:proxy:1080"))
-        // The report's own label words are never server names.
+        // A generic name is labelled as a word and as a host.
+        assertEquals("[Info] <server-3> started, dial tcp:<server-3>:1080", r.redact("[Info] proxy started, dial tcp:proxy:1080"))
+        // The report's own label words are never server names, and labels stay whole even for servers called
+        // "server" or "host".
         assertEquals(emptySet<String>(), ReportRedactor.serverNames("redacted", """{"address":"server-1"}"""))
         assertEquals("[Info] password=<redacted> uuid <uuid>", r.redact("[Info] password=secret12 uuid $uuid"))
+        val labelled = ReportRedactor(listOf("server", "host", "vpn.example.org"), emptyList())
+        assertEquals(
+            "[Info] <server-1> <server-2> at <server-3> https://<host-1>/<redacted>",
+            labelled.redact("[Info] server host at vpn.example.org https://other.example.net/x"),
+        )
     }
 
     /** An IPv6 server in any spelling — compressed, full, zero-padded, with brackets and port (neighbouring case). */

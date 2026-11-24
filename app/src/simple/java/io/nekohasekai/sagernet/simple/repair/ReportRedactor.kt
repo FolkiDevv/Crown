@@ -36,16 +36,10 @@ class ReportRedactor(
 
     /**
      * The known names and addresses anywhere in free text, as whole words, the longest first: dotted names, addresses
-     * and single-label names that identify something ("mybox7").
+     * and single-label names ("mybox7", even "vpn": a server called so turns that word of the log into its label too —
+     * the spec allows no address of the user's servers in the report).
      */
     private val names: Regex?
-
-    /**
-     * The known single-label server names that are generic words ([GENERIC_NAMES]: "gateway", "vpn"), only where they
-     * stand as a host — after "@" or "//", before ":<port>". As plain words they identify nothing and are everywhere in
-     * a log («VPN service», «the gateway is down»), so they stay readable there.
-     */
-    private val singleNames: Regex?
 
     /** The known secret values, anywhere, the longest first. */
     private val secretPattern: Regex? = secrets.map { it.trim() }.filter { it.length >= MIN_SECRET }.distinct()
@@ -64,19 +58,14 @@ class ReportRedactor(
                 for (form in forms(host)) labels.putIfAbsent(form, "<subscription-${i + 1}-host>")
             }
         }
-        val (generic, anywhere) = labels.keys.partition { isSingleLabel(it) && it in GENERIC_NAMES }
         // A subdomain of a server's domain names the server too: "cdn.vpn.example.com" becomes the label of
         // "vpn.example.com" (group 1 is dropped). Word edges are Unicode letters and digits (IDN, Cyrillic names).
-        names = anywhere.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
+        names = labels.keys.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
             // A colon may come before a name ("dialing to tcp:host:443"): only a letter, digit, dot or dash may not.
             Regex(
                 "(?iu)(?<![\\p{L}\\p{N}_.\\-])((?:[a-z0-9_\\-]+\\.)*)(" + known.joinToString("|") { Regex.escape(it) } +
                     ")(?![\\p{L}\\p{N}_\\-]|\\.[\\p{L}\\p{N}_\\-])",
             )
-        }
-        singleNames = generic.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
-            val alternatives = known.joinToString("|") { Regex.escape(it) }
-            Regex("(?iu)(?<=@|//)($alternatives)(?![\\w.\\-])|(?<![\\w.\\-])($alternatives)(?=:\\d)")
         }
     }
 
@@ -103,9 +92,6 @@ class ReportRedactor(
                 val name = m.groupValues[2]
                 labels[normalize(name) ?: name.lowercase()] ?: m.value
             }
-        }
-        singleNames?.let { pattern ->
-            s = pattern.replace(s) { m -> labels[(m.groups[1] ?: m.groups[2])!!.value.lowercase()] ?: m.value }
         }
         return s.replace(MASK, "<redacted>")
     }
@@ -188,18 +174,6 @@ class ReportRedactor(
             "hostname",
         )
 
-        /**
-         * Generic words a single-label server may be called by, English and Russian: they identify nothing, so as plain
-         * words they stay readable (labelled only as a host); any other single-label name is replaced everywhere.
-         */
-        val GENERIC_NAMES = setOf(
-            "vpn", "proxy", "server", "gateway", "router", "host", "node", "local", "localhost", "auto", "direct",
-            "none", "default", "home", "office", "main", "backup", "test", "relay", "bridge", "tunnel", "exit", "edge",
-            "впн", "прокси", "сервер", "шлюз", "роутер", "маршрутизатор", "хост", "узел", "нода", "дом", "офис",
-            "основной", "резервный", "тест", "мост", "туннель",
-        )
-
-        private fun isSingleLabel(name: String) = !name.contains('.') && !name.contains(':')
 
         /**
          * A single-label host name ("gateway", "vpn"; also "gateway:8080"), lowercase, or null: not a number, not one of
