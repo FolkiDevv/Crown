@@ -1145,4 +1145,34 @@ class RepairRollbackTest {
         // The VPN stop was tried once, in its run, never again.
         assertEquals(listOf("stop"), stops)
     }
+
+    @Test
+    fun clearingTheOwnerGivesTheRunsCallsUpBeforeTheRunIsCancelled() {
+        // The view model is cleared while a run waits for a call to `:bg` whose callback is about to claim. The owner
+        // closes the gate first; the run's cancellation is not even processed here (the manual dispatcher is not run),
+        // so only the gate can stop the claim — and it does: nothing is submitted.
+        val dispatcher = ManualDispatcher()
+        val owner = SerialRuns.Owner(dispatcher)
+        val gate = RepairStopGate().also { owner.gate = it }
+        val external = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val atClaim = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val submitted = java.util.concurrent.atomic.AtomicInteger()
+        SerialRuns(owner.scope).launch {
+            detachedCall(external, 5_000L, gate) { claim ->
+                atClaim.countDown()
+                release.await()
+                if (claim()) submitted.incrementAndGet()
+            }
+        }
+        dispatcher.runAll()
+        atClaim.await()
+        owner.close()
+        assertTrue(gate.isClosed)
+        release.countDown()
+        Thread.sleep(300)
+        assertEquals(0, submitted.get())
+        dispatcher.runAll()
+        external.cancel()
+    }
 }

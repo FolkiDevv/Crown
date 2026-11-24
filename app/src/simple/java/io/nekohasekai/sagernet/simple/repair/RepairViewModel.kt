@@ -117,15 +117,12 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
 
     private var job: Job? = null
 
-    /** The stop gate of the newest run ([stop] closes it). */
-    @Volatile
-    private var runGate: RepairStopGate? = null
-
-    /** The scope is cancelled after this: the run's calls to `:bg` are given up first, as by «Остановить». */
-    override fun onCleared() {
-        runGate?.close()
-        super.onCleared()
-    }
+    /**
+     * The runs' own scope and the newest run's stop gate. Not `viewModelScope`: a view model cancels that before
+     * anything else of its own when it is cleared. Closed with the view model (`addCloseable`): the gate first — the
+     * run's calls to `:bg` are given up, as by «Остановить» — then the scope.
+     */
+    private val runOwner = SerialRuns.Owner(Dispatchers.Main.immediate).also { addCloseable(it) }
 
     /** Opens the screen and starts a run, unless one runs already. */
     fun open(environment: RepairEnvironment) {
@@ -149,7 +146,7 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         // and changes the settings only after that, so it never takes a value about to be restored as its "before" —
         // also when it is itself stopped while it waits ([SerialRuns]).
         // This run's stop gate: «Остановить» closes it before it cancels the run.
-        val gate = RepairStopGate().also { runGate = it }
+        val gate = RepairStopGate().also { runOwner.gate = it }
         job = serial.launch {
             // A change an earlier run could not put back is tried again before this run reads any setting — unless this
             // run was stopped while it waited (it ends at once, as stopped; the next run retries).
@@ -189,7 +186,7 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
     private val unrestored get() = RepairLog.unrestored
 
     /** The runs, one after another (each after the previous one's rollback). */
-    private val serial = SerialRuns(viewModelScope)
+    private val serial = SerialRuns(runOwner.scope)
 
     private val consentChannel = Channel<Unit>(Channel.CONFLATED)
 
@@ -244,7 +241,7 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         if (running.isActive) mutableState.update { if (it.running) it.copy(stopping = true) else it }
         // Stop → give up → cancel: the run's calls to `:bg` that have not claimed yet are given up here, before the
         // cancellation reaches the coroutine that waits for them.
-        runGate?.close()
+        runOwner.gate?.close()
         running.cancel()
     }
 
