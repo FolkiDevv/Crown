@@ -2,6 +2,8 @@ package io.nekohasekai.sagernet.simple.add
 
 import android.content.Context
 import android.net.Uri
+import android.os.Process
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
@@ -15,6 +17,8 @@ import io.nekohasekai.sagernet.database.backup.ThrBackup
 import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.simple.servers.CountryFromName
@@ -160,13 +164,19 @@ object SimpleImport {
         val reports = Channel<SubscriptionClient.Report>(Channel.UNLIMITED)
         // Collecting keeps the callback registered; it lands before the download ends (that needs the network).
         val listener = launch { SubscriptionClient.reports.collect { reports.trySend(it) } }
+        // Recorded before the group exists: a process killed at any point after this leaves the entry, and the next
+        // start of the interface turns automatic updates on for the group (healInterrupted).
+        val pending = PendingImports.Entry(System.currentTimeMillis(), 0L, plan.url.trim())
+        recordPending(pending)
+        var gid = -1L
         try {
             delay(200)
             // Without automatic updates for now: subscribeUrl would schedule a poll while the new group has no
             // `sub_last_update` yet, and with another subscription already updating itself that poll takes the new
-            // group as due and downloads it a second time right after its first download. updateAutomatically turns
-            // them on once the first download has stamped the group.
-            val gid = SubscriptionClient.subscribeUrl(plan.url, plan.name, autoUpdate = false)
+            // group as due and downloads it a second time right after its first download. They are turned on below,
+            // when this import ends, however it ends.
+            gid = SubscriptionClient.subscribeUrl(plan.url, plan.name, autoUpdate = false)
+            if (gid > 0L) recordPending(pending, gid)
             if (gid <= 0L) {
                 return@coroutineScope SubscribeResult.Failed(drainError(reports, -1L))
             }
@@ -179,8 +189,73 @@ object SimpleImport {
             result
         } finally {
             listener.cancel()
+            // Done, failed (the group is gone then), cancelled or thrown: a group that is still there updates itself.
+            withContext(NonCancellable) {
+                runCatching { if (gid > 0L) updateItself(listOfNotNull(GroupRepo.get(gid))) }
+                    .onFailure { Logs.w("simple add: automatic updates of subscription $gid", it) }
+                forgetPending(pending)
+            }
         }
     }
+
+    // ------------------------------------------------------------------------------------------- pending imports
+
+    private val pendingLock = Any()
+
+    private fun recordPending(entry: PendingImports.Entry, gid: Long = 0L) = synchronized(pendingLock) {
+        val store = SimpleUi.store(app)
+        val entries = PendingImports.parse(store.getString(KEY_PENDING_IMPORTS))
+            .filterNot { it.since == entry.since && it.url == entry.url } + entry.copy(gid = gid)
+        store.putString(KEY_PENDING_IMPORTS, PendingImports.format(entries))
+    }
+
+    private fun forgetPending(entry: PendingImports.Entry) = synchronized(pendingLock) {
+        val store = SimpleUi.store(app)
+        val entries = PendingImports.parse(store.getString(KEY_PENDING_IMPORTS))
+            .filterNot { it.since == entry.since && it.url == entry.url }
+        store.putString(KEY_PENDING_IMPORTS, PendingImports.format(entries))
+    }
+
+    /** Clears the «skip automatic updates» flag the import set on [groups]; reschedules when one changed. */
+    private suspend fun updateItself(groups: List<ProxyGroup>) {
+        val flagged = groups.filter { it.skipAutoUpdate }
+        if (flagged.isEmpty()) return
+        val db = SagerDatabase.instance.openHelper.writableDatabase
+        for (group in flagged) {
+            db.execSQL("UPDATE `groups` SET `skip_auto_update` = 0 WHERE `id` = ?", arrayOf<Any>(group.id))
+            GroupRepo.postUpdate(group.id)
+        }
+        SubscriptionScheduler.schedule()
+    }
+
+    /**
+     * Imports that never reached their end (the process died during the first download, or before it heard the new
+     * group's id): their groups would otherwise never update automatically. Called on every start of the interface;
+     * an import still running in this process is left alone. A group without a known id is found by its URL among the
+     * groups still flagged.
+     */
+    suspend fun healInterrupted() {
+        val stale = synchronized(pendingLock) {
+            val store = SimpleUi.store(app)
+            val entries = PendingImports.parse(store.getString(KEY_PENDING_IMPORTS))
+            if (entries.isEmpty()) return
+            val now = System.currentTimeMillis()
+            val processStart = now - (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime())
+            PendingImports.stale(entries, now, processStart).also { stale ->
+                if (stale.isNotEmpty()) store.putString(KEY_PENDING_IMPORTS, PendingImports.format(entries - stale.toSet()))
+            }
+        }
+        if (stale.isEmpty()) return
+        val groups = GroupRepo.all()
+        val healed = stale.flatMap { entry ->
+            if (entry.gid > 0L) groups.filter { it.id == entry.gid }
+            else groups.filter { it.url.trim() == entry.url }
+        }.distinctBy { it.id }
+        updateItself(healed)
+        Logs.i("simple add: ${stale.size} interrupted import(s), automatic updates turned on for ${healed.count { it.skipAutoUpdate }} group(s)")
+    }
+
+    private const val KEY_PENDING_IMPORTS = "pending_subscription_imports"
 
     /**
      * The first update stamps `sub_last_update` before it reports; a failed one reports (a popup of the first
@@ -256,8 +331,8 @@ object SimpleImport {
         val group = GroupRepo.get(gid) ?: return 0
         val options = group.subOptions.copy(updateInterval = DAILY_MINUTES)
         val db = SagerDatabase.instance.openHelper.writableDatabase
-        // `subscribe` added the group without automatic updates (no early poll); they start here, after its first
-        // download stamped `sub_last_update`, so the next automatic update is one interval away.
+        // `subscribe` already turned automatic updates on when it ended (after the first download stamped
+        // `sub_last_update`); clearing the flag here again keeps the interval and the flag in one write.
         db.execSQL(
             "UPDATE `groups` SET `sub_options_json` = ?, `skip_auto_update` = 0 WHERE `id` = ?",
             arrayOf<Any>(options.toJsonString(), gid),
