@@ -4,10 +4,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -194,12 +192,14 @@ class PendingReload(
 }
 
 /**
- * The wait for the subscription updates «Починка» asks for, so that nothing they do can come after its rollback
- * (design.md D8). It needs no guess about time: [submit] returns once `:bg`'s queue holds the update (or one already
- * queued for the group), and [barrier] is a no-op queued behind them in the same FIFO queue, so it returns once every
- * submitted update — of every group — has run. A refresh writes the selection and starts the service only in its own
- * job, except when it replaced the profile the service ran: then `:bg` starts the successor in a coroutine of its own,
- * which gives up 15 s after the update stopped the service — [successorMs] after the barrier no start can follow.
+ * The wait for the subscription updates «Починка» asks for — best effort, for the recheck to see the updated servers;
+ * no rollback depends on it (design.md D8: an update of provider content is not rolled back, and «Починка» puts back
+ * only what it wrote itself). [submit] hands a group to `:bg`'s queue, [barrier] is a no-op queued behind them in the
+ * same FIFO queue, so it returns once every submitted update has run. When the update replaced the profile the service
+ * ran, the successor start `:bg` makes afterwards is waited for too (the service runs another profile and is
+ * connected). Every wait is bounded: [limitMs] for the queue, [successorMs] for the successor; over the limit the
+ * update counts as not done (the fix is not counted), never a hang. Cancellable: a stop ends the wait at once, and
+ * the update goes on in `:bg` with what it writes.
  */
 class SubscriptionWait(
     private val submit: suspend (Long) -> Unit,
@@ -208,53 +208,41 @@ class SubscriptionWait(
     private val vpn: RepairVpn,
     /** The profile the service runs now. */
     private val runningNow: () -> Long = { 0L },
+    private val limitMs: Long = 90_000L,
     private val successorMs: Long = 17_000L,
     private val pollMs: Long = 200L,
     private val log: (String) -> Unit = {},
 ) {
 
-    /**
-     * True when every update was submitted and ran; false when a submission or the queue failed. Even then the barrier
-     * is waited for: a group submitted before the failure still runs before it, so nothing submitted can come after
-     * the return (if the queue itself cannot be reached, `:bg` is gone and its queue with it). [running]: the profile
-     * the service ran before, null when it was off.
-     */
+    /** True when every update was submitted and ran within the limit. [running]: the profile the service ran, or null. */
     suspend fun await(groups: List<Long>, running: Long?): Boolean {
-        var failure: Exception? = null
-        try {
-            for (gid in groups) submit(gid)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            failure = e
-        }
-        try {
-            barrier()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            failure = failure ?: e
-        }
-        // The successor start of a replaced running profile: the service runs another profile and is connected — not
-        // just any connect, which a reload meanwhile could have made — or the window `:bg` gives it is over.
-        if (running != null && !profileExists(running)) {
+        val ran = withTimeoutOrNull(limitMs) {
+            try {
+                for (gid in groups) submit(gid)
+                barrier()
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("the subscription update could not be submitted: ${e.message}")
+                false
+            }
+        } ?: false.also { log("the subscription update did not finish within ${limitMs / 1000} s") }
+        if (ran && running != null && !profileExists(running)) {
             withTimeoutOrNull(successorMs) {
                 while (!(vpn.connected() && runningNow() != running)) delay(pollMs)
             }
         }
-        failure?.let { log("the subscription update could not be submitted: ${it.message}") }
-        return failure == null
+        return ran
     }
 }
 
 /**
- * «Обновление подписки»: every subscription is updated, the wait ([SubscriptionWait]) cannot be cut short by a stop,
- * and a VPN that runs takes the update up before the recheck (a running profile that kept its id but took new content
- * is otherwise applied only at its next start). An update that did not run, one that left the user's VPN off, or a VPN
- * that did not connect with it makes the fix unsuccessful. The servers are the provider's current ones and stay (a
- * stop does not report the fix as undone); only a selection the update moved goes back — compare and set: while the
- * selection is still the one the update made (a server the user chose since stays) — and [putBack] writes it only
- * while the saved profile exists.
+ * «Обновление подписки»: every subscription is updated and a VPN that runs takes the update up before the recheck (a
+ * running profile that kept its id but took new content is otherwise applied only at its next start). An update that
+ * did not run in time, one that left the user's VPN off, or a VPN that did not connect with it makes the fix
+ * unsuccessful. Not reversible (design.md D8): the servers are the provider's current ones and stay, and so does a
+ * selection the update itself made (a successor of a replaced profile); a rollback writes nothing.
  */
 class SubscriptionUpdateFix(
     private val groups: List<Long>,
@@ -265,10 +253,6 @@ class SubscriptionUpdateFix(
     private val running: () -> Long,
     /** False once «Починка» stopped the VPN it had started: nothing may reload it. */
     private val reloadAllowed: () -> Boolean,
-    /** The selected server now. */
-    private val selection: () -> Long,
-    /** Selects [saved] again, if its profile still exists. */
-    private val putBack: (saved: Long) -> Unit,
     private val log: (String) -> Unit = {},
 ) : RepairFix {
 
@@ -276,21 +260,10 @@ class SubscriptionUpdateFix(
 
     override val reversible: Boolean get() = false
 
-    /** The selection before the update. */
-    private val saved = selection()
-
-    /** The selection the update moved it to; null when it did not move it. */
-    @Volatile
-    private var movedTo: Long? = null
-
-    override fun stillApplied(): Boolean = movedTo.let { it == null || selection() == it }
-
     override suspend fun apply() {
         log("fix subscription_updated: ${groups.size} subscription(s)")
         val before = if (vpn.off()) null else running()
-        val finished = withContext(NonCancellable) { wait.await(groups, before) }
-        selection().takeIf { it != saved }?.let { movedTo = it }
-        if (!finished) throw IllegalStateException("the subscription update could not be submitted")
+        if (!wait.await(groups, before)) throw IllegalStateException("the subscription update did not run in time")
         // The update removed the profile the VPN ran and nothing took over: the user's VPN is off now — no fix.
         if (before != null && vpn.off()) throw IllegalStateException("the update stopped the VPN")
         if (!vpn.off() && reloadAllowed() && !reloader.reloadWhenConnected("subscriptions updated")) {
@@ -298,8 +271,6 @@ class SubscriptionUpdateFix(
         }
     }
 
-    override fun restore() {
-        val moved = movedTo ?: return
-        if (selection() == moved) putBack(saved)
-    }
+    // Provider content and the update's own selection stay.
+    override fun restore() = Unit
 }

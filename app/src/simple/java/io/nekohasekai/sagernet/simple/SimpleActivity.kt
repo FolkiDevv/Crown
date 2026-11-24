@@ -452,6 +452,7 @@ class SimpleActivity : AppCompatActivity() {
         }
         try {
             repairConsent.launch(intent)
+            repair.consentDialogShown()
         } catch (e: ActivityNotFoundException) {
             Logs.w(e)
             repair.consentAnswered(false)

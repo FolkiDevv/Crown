@@ -169,7 +169,8 @@ class RepairEngine(
     ): StepResult {
         for (fix in candidates(step, failed, done, tried).orEmpty()) {
             val entry = journal.record(
-                step, fix.kind, stillOurs = fix::stillApplied, reversible = fix.reversible, restore = fix::restore,
+                step, fix.kind, stillOurs = fix::stillApplied, reversible = fix.reversible,
+                key = fix.change?.setting, restore = fix::restore,
             )
             val recheck = try {
                 withTimeout(fixTimeoutMs) {
@@ -194,8 +195,12 @@ class RepairEngine(
                     val more = candidates(step, recheck, done, tried2) ?: return partial
                     if (more.isNotEmpty()) {
                         val further = tryFixes(step, recheck, done, tried2, fixedFrom)
-                        return if (further.status == StepStatus.FIXED) further else partial
+                        // A follow-up fix whose change could not be put back says so on the warning.
+                        return if (further.status == StepStatus.FIXED) further else partial.copy(note = further.note ?: partial.note)
                     }
+                    // No follow-up for a warning that says the check's own problem remains (the selected server does
+                    // not answer): still no fix.
+                    if (recheck.findings.any { it in UNRESOLVED }) return partial
                 }
                 fixedFrom[step] = failed
                 return failed.copy(
@@ -244,6 +249,12 @@ class RepairEngine(
     companion object {
         /** A fix with its reload and its recheck: a VPN reload may take a while on a slow device. */
         const val FIX_TIMEOUT_MS = 120_000L
+
+        /**
+         * Warnings that say the check's own problem is still there: a fix whose recheck ends with one of them is
+         * partial progress, never «исправлено» (the selected server still does not answer).
+         */
+        private val UNRESOLVED = setOf(Finding.CURRENT_SERVER_DOWN)
 
         /**
          * The URL test of every server takes longest; the checks through the VPN may first ask for the VPN consent and

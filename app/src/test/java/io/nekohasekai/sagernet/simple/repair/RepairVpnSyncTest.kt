@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -185,17 +186,18 @@ class RepairVpnSyncTest {
     }
 
     @Test
-    fun aFailedSubmissionStillWaitsForTheGroupsAlreadyQueued() = runBlocking {
-        // Group 1 is queued, the submission of group 2 fails: group 1 must have run before the wait returns.
-        val queue = FakeQueue(jobMs = { 400L })
+    fun aWaitOverItsLimitEndsAsNotRunInsteadOfHanging() = runBlocking {
+        // The service binding (or the queue) never answers: the wait ends at its limit, the update counts as not run.
         val wait = SubscriptionWait(
-            submit = { gid -> if (gid == 2L) throw IllegalStateException("binder failed") else queue.submit(gid) },
-            barrier = queue::barrier,
+            submit = { awaitCancellation() },
+            barrier = { },
             profileExists = { true },
             vpn = FakeVpn(),
+            limitMs = 300L,
         )
-        assertFalse(wait.await(listOf(1L, 2L, 3L), running = null))
-        assertEquals(listOf(1L), queue.done.toList())
+        val started = System.nanoTime()
+        assertFalse(wait.await(listOf(1L), running = null))
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 2_000)
     }
 
     @Test
@@ -226,28 +228,13 @@ class RepairVpnSyncTest {
         assertFalse(pending.armed)
     }
 
-    /** The selected server; [putBack]s are recorded. */
-    private class Selection(@Volatile var value: Long = 9L) {
-        val putBacks: MutableList<Long> = Collections.synchronizedList(mutableListOf())
-    }
-
-    private fun fix(vpn: FakeVpn, selection: Selection = Selection(), moveTo: Long? = null) = SubscriptionUpdateFix(
+    private fun fix(vpn: FakeVpn, wait: SubscriptionWait = wait(FakeQueue(jobMs = { 50L }), vpn)) = SubscriptionUpdateFix(
         groups = listOf(1L),
-        wait = if (moveTo == null) {
-            wait(FakeQueue(jobMs = { 50L }), vpn)
-        } else {
-            // An update that moves the selection (its running profile replaced by a successor).
-            SubscriptionWait(submit = { selection.value = moveTo }, barrier = { }, profileExists = { true }, vpn = vpn)
-        },
+        wait = wait,
         vpn = vpn,
         reloader = VpnReloader(vpn, reconnectMs = 400L, restartShowMs = 10L),
         running = { 9L },
         reloadAllowed = { true },
-        selection = { selection.value },
-        putBack = { saved ->
-            selection.putBacks += saved
-            selection.value = saved
-        },
     )
 
     @Test
@@ -258,32 +245,19 @@ class RepairVpnSyncTest {
     }
 
     @Test
-    fun theSelectionTheUpdateMovedGoesBackUnlessTheUserChoseAnotherSince() = runBlocking {
-        // The update moved the selection 9 → 10; nothing else changed it: the rollback puts 9 back.
-        val moved = Selection()
-        val first = fix(FakeVpn(), moved, moveTo = 10L)
-        first.apply()
-        assertEquals(10L, moved.value)
-        assertTrue(first.stillApplied())
-        first.restore()
-        assertEquals(9L, moved.value)
-        assertEquals(listOf(9L), moved.putBacks.toList())
-        // The user chose 11 while the update ran: the rollback keeps it (compare and set).
-        val chosen = Selection()
-        val second = fix(FakeVpn(), chosen, moveTo = 10L)
-        second.apply()
-        chosen.value = 11L
-        assertFalse(second.stillApplied())
-        second.restore()
-        assertEquals(11L, chosen.value)
-        assertTrue(chosen.putBacks.isEmpty())
-        // An update that did not move it puts nothing back; its content is no undoable effect.
-        val still = Selection()
-        val third = fix(FakeVpn(), still)
-        third.apply()
-        third.restore()
-        assertTrue(still.putBacks.isEmpty())
-        assertFalse(third.reversible)
+    fun aSubscriptionUpdateIsNotRolledBackNorItsOwnSelection() = runBlocking {
+        // The update moves the selection 9 → 10 (a successor of a replaced profile): a stop keeps it and the
+        // provider's content; the rollback writes nothing (design.md D8: not reversible).
+        var selection = 9L
+        val vpn = FakeVpn()
+        val subscriptionFix = fix(
+            vpn,
+            SubscriptionWait(submit = { selection = 10L }, barrier = { }, profileExists = { true }, vpn = vpn),
+        )
+        subscriptionFix.apply()
+        assertFalse(subscriptionFix.reversible)
+        subscriptionFix.restore()
+        assertEquals(10L, selection)
     }
 
     @Test
@@ -334,8 +308,6 @@ class RepairVpnSyncTest {
             reloader = VpnReloader(vpn, reconnectMs = 200L, restartShowMs = 10L),
             running = { 9L },
             reloadAllowed = { true },
-            selection = { 9L },
-            putBack = { },
         )
         // The update itself ran through (the queue drained): the failure is the stopped VPN, nothing else.
         val failure = try {

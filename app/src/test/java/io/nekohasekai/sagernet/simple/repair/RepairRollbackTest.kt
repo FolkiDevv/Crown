@@ -637,14 +637,14 @@ class RepairRollbackTest {
         // recheck chose, not the «none» of the first look.
         val settings = Settings()
         val none = ServersSummary(total = 5, answering = 0, whitelistTotal = 0, whitelistAnswering = 0)
-        val refreshed = ServersSummary(total = 6, answering = 4, whitelistTotal = 0, whitelistAnswering = 0, chosenId = 7L)
+        val refreshed = ServersSummary(total = 6, answering = 4, whitelistTotal = 0, whitelistAnswering = 0, chosenId = 7L, currentAnswers = true)
         var seenByVpnCheck: Long? = null
         val checks = object : RepairChecks {
             var updated = false
 
             override suspend fun run(step: RepairStep, done: Map<RepairStep, StepResult>): StepResult = when (step) {
                 RepairStep.SERVERS -> if (updated) {
-                    StepResult(StepStatus.WARN, setOf(Finding.CURRENT_SERVER_DOWN), servers = refreshed)
+                    StepResult(StepStatus.OK, servers = refreshed)
                 } else {
                     StepResult(StepStatus.FAIL, setOf(Finding.NO_SERVER_ANSWERS), servers = none)
                 }
@@ -966,20 +966,71 @@ class RepairRollbackTest {
         // it, so the newer value is the one that stays — never the old one over it.
         val setting = LockedSetting("77.88.8.8")
         val inside = java.util.concurrent.CountDownLatch(1)
+        val tried = java.util.concurrent.CountDownLatch(1)
+        var gotInWhileRestoring = true
         val writer = Thread {
             inside.await()
+            // While the restore holds the transaction the writer cannot get in…
+            gotInWhileRestoring = setting.lock.tryLock().also { if (it) setting.lock.unlock() }
+            tried.countDown()
+            // …and writes once it is over.
             setting.atomically { setting.value = "9.9.9.9" }
         }
         writer.start()
         val journal = RepairJournal(atomically = setting::atomically)
         journal.record(RepairStep.DNS_DIRECT, FixKind.DIRECT_DNS_WHITELISTED, stillOurs = { setting.value == "77.88.8.8" }) {
             inside.countDown()
-            Thread.sleep(100)
+            // The restore goes on only once the writer has tried (and failed) to get in.
+            tried.await()
             setting.value = "local"
         }
         journal.restoreAll()
         writer.join(2_000L)
+        assertFalse("the writer got in during the compare-and-set", gotInWhileRestoring)
         assertEquals("9.9.9.9", setting.value)
+    }
+
+    @Test
+    fun anOlderChangeOfTheSameSettingWaitsForTheNewerRestore() {
+        // A → B (first fix) and B → C (second fix) on one setting; the C → B restore fails: the A → B change must not
+        // be dropped as superseded (it would see C) — it stays pending, and once C → B works, B → A follows.
+        var value = "A"
+        var newerFails = true
+        val journal = RepairJournal()
+        value = "B"
+        journal.record(RepairStep.DNS_DIRECT, FixKind.DIRECT_DNS_WHITELISTED, stillOurs = { value == "B" }, key = "dns") {
+            value = "A"
+        }
+        value = "C"
+        journal.record(RepairStep.DNS_VPN, FixKind.VPN_DNS_ALTERNATIVE, stillOurs = { value == "C" }, key = "dns") {
+            if (newerFails) error("cannot write") else value = "B"
+        }
+        assertTrue(journal.restoreAll().isEmpty())
+        assertEquals("C", value)
+        assertEquals(2, journal.retriable.size)
+        newerFails = false
+        assertEquals(2, journal.retryFailed().size)
+        assertEquals("A", value)
+        assertTrue(journal.applied.isEmpty())
+    }
+
+    @Test
+    fun aWarningWithoutAFollowUpThatStillSaysTheProblemIsNoFix() = runBlocking {
+        // The update makes B answer, A stays down, and no switch is offered (the selection already changed): the
+        // step keeps the warning instead of falling through to «исправлено».
+        val inner = PartialServers(switchWorks = true)
+        val checks = object : RepairChecks {
+            override suspend fun run(step: RepairStep, done: Map<RepairStep, StepResult>) = inner.run(step, done)
+            override suspend fun fixesFor(
+                step: RepairStep,
+                result: StepResult,
+                done: Map<RepairStep, StepResult>,
+            ): List<RepairFix> = if (result.status == StepStatus.WARN) emptyList() else inner.fixesFor(step, result, done)
+        }
+        val servers = engine(checks).run { }.results.getValue(RepairStep.SERVERS)
+        assertEquals(StepStatus.WARN, servers.status)
+        assertTrue(servers.has(Finding.CURRENT_SERVER_DOWN))
+        assertNull(servers.fix)
     }
 
     @Test
