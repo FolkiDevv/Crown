@@ -192,6 +192,39 @@ class RepairVpnSyncTest {
     }
 
     @Test
+    fun aSubscriptionFixThatLeftTheUsersVpnOffIsNoFix() = runBlocking {
+        // The update deleted the running profile and no successor took over: the service is off afterwards.
+        val vpn = FakeVpn()
+        val queue = FakeQueue()
+        val subscriptionFix = SubscriptionUpdateFix(
+            groups = listOf(1L),
+            wait = wait(queue, vpn, exists = { false }, request = { gid ->
+                scope.launch {
+                    queue.set(gid, 2)
+                    delay(50)
+                    vpn.isConnected = false
+                    vpn.isOff = true
+                    queue.stamps[gid] = 1L
+                    queue.set(gid, null)
+                }
+            }),
+            vpn = vpn,
+            reloader = VpnReloader(vpn, reconnectMs = 200L, restartShowMs = 10L),
+            running = { 9L },
+            reloadAllowed = { true },
+            restoreSelection = { },
+        )
+        val failed = try {
+            subscriptionFix.apply()
+            false
+        } catch (e: IllegalStateException) {
+            true
+        }
+        assertTrue(failed)
+        assertEquals(0, vpn.reloads.get())
+    }
+
+    @Test
     fun aReloadThatDoesNotReconnectIsReported() = runBlocking {
         val vpn = FakeVpn(reconnects = false)
         assertFalse(VpnReloader(vpn, reconnectMs = 200L).reload("MTU changed"))

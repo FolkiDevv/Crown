@@ -163,8 +163,14 @@ fun RepairScreen(
             when {
                 state.running -> item(key = "running") {
                     Text(
+                        // «Возвращаем настройки» only while settings are being put back; before that the stop may
+                        // only be waiting for work it cannot cut short.
                         stringResource(
-                            if (progress.undoing || state.stopping) R.string.simple_repair_undoing else R.string.simple_repair_running
+                            when {
+                                progress.undoing -> R.string.simple_repair_undoing
+                                state.stopping -> R.string.simple_repair_stopping
+                                else -> R.string.simple_repair_running
+                            }
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
