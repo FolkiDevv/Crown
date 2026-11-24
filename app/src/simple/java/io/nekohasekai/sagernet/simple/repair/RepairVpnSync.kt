@@ -190,6 +190,8 @@ class SubscriptionUpdateFix(
         val before = if (vpn.off()) null else running()
         val finished = withContext(NonCancellable) { wait.await(groups, before) }
         if (!finished) throw IllegalStateException("the subscription update did not finish")
+        // The update removed the profile the VPN ran and nothing took over: the user's VPN is off now — no fix.
+        if (before != null && vpn.off()) throw IllegalStateException("the update stopped the VPN")
         if (!vpn.off() && reloadAllowed() && !reloader.reloadWhenConnected("subscriptions updated")) {
             throw IllegalStateException("the VPN did not connect with the updated subscription")
         }
