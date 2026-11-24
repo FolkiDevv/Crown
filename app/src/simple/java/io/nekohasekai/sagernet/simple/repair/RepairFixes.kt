@@ -125,6 +125,20 @@ class RepairJournal(
     /** Tries the [retriable] changes again, newest first; returns those put back now. */
     fun retryFailed(): List<Entry> = restoreWhere { it in failed && it.retriable }
 
+    /** Hands the [retriable] changes over (oldest first) to another journal ([adopt]); they leave this one. */
+    fun takeRetriable(): List<Entry> = synchronized(entries) {
+        entries.filter { it in failed && it.retriable }.also {
+            entries.removeAll(it.toSet())
+            failed.removeAll(it.toSet())
+        }
+    }
+
+    /** Takes over changes still to be put back, after the ones it holds (they are newer). */
+    fun adopt(changes: List<Entry>) = synchronized(entries) {
+        entries += changes
+        failed += changes
+    }
+
     fun record(
         step: RepairStep,
         kind: FixKind?,
@@ -231,25 +245,38 @@ class SerialRuns(private val scope: CoroutineScope) {
  * checks that made them (whose [RepairChecks.settle] lets the VPN take a restored value up) and tried again before the
  * next run reads or changes any setting. Pure, like the engine.
  */
-class UnrestoredChanges {
+class UnrestoredChanges(
+    /** The compare-and-set of every carried change, as in the journal of its run. */
+    atomically: (() -> Unit) -> Unit = { it() },
+    onRestoreFailed: (RepairJournal.Entry, Exception) -> Unit = { _, _ -> },
+    onSuperseded: (RepairJournal.Entry) -> Unit = { },
+) {
 
-    private val left = ArrayList<Pair<RepairJournal, RepairChecks>>()
+    /**
+     * One journal for the changes of every run, oldest first: the chain rule of a setting (an older change waits while
+     * a newer one of the same setting is not put back) holds across runs too.
+     */
+    private val carry = RepairJournal(onRestoreFailed, onSuperseded, atomically)
+
+    /** The checks of the run that made each carried change: their [RepairChecks.settle] lets the VPN take it up. */
+    private val owners = HashMap<RepairJournal.Entry, RepairChecks>()
 
     /** Whether some change is still waiting to be put back. */
-    val pending: Boolean get() = synchronized(left) { left.isNotEmpty() }
+    val pending: Boolean get() = carry.retriable.isNotEmpty()
 
-    /** After a run: keeps its journal when a change of it that a later run may retry could not be put back. */
+    /** After a run: takes over its changes that a later run may retry and that could not be put back. */
     fun keep(journal: RepairJournal, checks: RepairChecks) {
-        if (journal.retriable.isNotEmpty()) synchronized(left) { left += journal to checks }
+        val changes = journal.takeRetriable()
+        if (changes.isEmpty()) return
+        synchronized(owners) { changes.forEach { owners[it] = checks } }
+        carry.adopt(changes)
     }
 
-    /** Before a run: tries every kept change again, the newest run first; the VPN takes what was put back up. */
+    /** Before a run: tries every carried change again, the newest first; the VPN takes what was put back up. */
     suspend fun retry() {
-        val runs = synchronized(left) { left.toList() }.asReversed()
-        for ((journal, checks) in runs) {
-            if (journal.retryFailed().isNotEmpty()) settle(checks)
-            if (journal.retriable.isEmpty()) synchronized(left) { left.remove(journal to checks) }
-        }
+        val restored = carry.retryFailed()
+        val settle = synchronized(owners) { restored.mapNotNull { owners.remove(it) }.distinct() }
+        for (checks in settle) settle(checks)
     }
 
     /**
