@@ -209,6 +209,35 @@ class ReportRedactorTest {
         assertTrue(hosts.toString(), hosts.has("<server-1>") && hosts.has("<server-2>"))
     }
 
+    /** A password with an "@": LogRedactor cuts the credentials at the first one; nothing of the rest may stay (review). */
+    @Test
+    fun passwordWithAtSign() {
+        val url = "[Info] url test: https://user:pa@ssword@$serverDomain/probe failed"
+        val expected = "[Info] url test: https://<redacted>@<server-1>/<redacted> failed"
+        val withoutSecrets = redactor().redact(url)
+        assertEquals(expected, withoutSecrets)
+        val servers = ReportRedactor.serverNames(serverDomain, profile)
+        val withSecret = ReportRedactor(servers, emptyList(), listOf("pa@ssword")).redact(url)
+        assertEquals(expected, withSecret)
+        // An unknown host behind such credentials gets a label too.
+        val unknown = ReportRedactor(emptyList(), emptyList()).redact("https://u:p@ss@intranet.example.org:8443/x")
+        assertEquals("https://<redacted>@<host-1>:8443/<redacted>", unknown)
+    }
+
+    /** Every URL host but loopback is labelled, also one that free text would not take for a host (review). */
+    @Test
+    fun singleLabelUrlHosts() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        assertEquals("[Info] GET http://<host-1>:8080/<redacted> -> 200", r.redact("[Info] GET http://gateway:8080/status -> 200"))
+        assertEquals("[Info] GET http://<host-2>/<redacted>", r.redact("[Info] GET http://router.lan.example/admin"))
+        assertEquals("[Info] GET http://<host-1>/<redacted>", r.redact("[Info] GET http://GATEWAY/"))
+        // Loopback stays readable (LogRedactor's own "host:" rule takes the port after "localhost" — not this pass).
+        val localhost = r.redact("[Info] GET http://localhost:9090/ui")
+        assertTrue(localhost, localhost.startsWith("[Info] GET http://localhost:"))
+        assertFalse(localhost, localhost.contains("<host-"))
+        assertEquals("[Info] GET http://[::1]:9090/<redacted>", r.redact("[Info] GET http://[::1]:9090/ui"))
+    }
+
     @Test
     fun escapedJsonIsCleanedAndStillParses() {
         val line = redactor().redact(report[16])

@@ -70,10 +70,11 @@ class ReportRedactor(
             "$quote$key$quote$separator" + if (value.startsWith("[")) "[\"<redacted>\"]" else "\"<redacted>\""
         }
         secretPattern?.let { pattern -> s = pattern.replace(s, "<redacted>") }
-        val cleaned = s
-        s = URL.replace(cleaned) { m ->
-            val host = m.groups[HOST]!!
-            cleaned.substring(m.range.first, host.range.first) + labelFor(host.value)
+        // The URL up to its host is rebuilt, never copied: a password with an "@" (`user:pa@ssword@host`) is cut by
+        // LogRedactor at its first "@", and the rest of it would otherwise stay before the host.
+        s = URL.replace(s) { m ->
+            val credentials = if (m.groups[CREDENTIALS] != null) "<redacted>@" else ""
+            m.groupValues[1] + "://" + credentials + labelFor(m.groups[HOST]!!.value)
         }
         names?.let { pattern -> s = pattern.replace(s) { m -> labels[normalize(m.groupValues[2])] ?: m.value } }
         return s
@@ -120,13 +121,18 @@ class ReportRedactor(
         else -> value
     }
 
+    /**
+     * The label of a URL's host. Every host but loopback gets one, also a name free text would not take for a host
+     * (a single label such as "gateway" in `http://gateway:8080/`): inside a URL it is a host for sure.
+     */
     private fun labelFor(host: String): String {
-        val name = normalize(host) ?: return host
-        if (isLoopback(name)) return host
+        val name = normalize(host) ?: host.trim().removePrefix("[").removeSuffix("]").trimEnd('.').lowercase()
+        if (name.isEmpty() || isLoopback(name)) return host
         return labels.getOrPut(name) { "<host-${++hosts}>" }
     }
 
     companion object {
+        private const val CREDENTIALS = 2
         private const val HOST = 3
 
         /** Shorter values ("/ws", "none") are words of the config, not secrets: replacing them would blur the report. */
@@ -142,10 +148,11 @@ class ReportRedactor(
         )
 
         /**
-         * A URL's host (group 3): LogRedactor leaves `scheme://<redacted>@host/<redacted>`, so the credentials may hold
-         * the label's angle brackets. A host is a bracketed IPv6 address or a name / IPv4 address up to the port.
+         * A URL's credentials (group 2, up to the last "@" before the host) and host (group 3): LogRedactor leaves
+         * `scheme://<redacted>@host/<redacted>`, so the credentials may hold the label's angle brackets, and the rest of a
+         * password with an "@" in it. A host is a bracketed IPv6 address or a name / IPv4 address up to the port.
          */
-        private val URL = Regex("""\b([a-zA-Z][a-zA-Z0-9+.\-]*)://([^\s/"']*@)?(\[[0-9A-Fa-f:.%]+\]|[^\s/?#"'<>:@\[\]\\]+)""")
+        private val URL = Regex("""\b([a-zA-Z][a-zA-Z0-9+.\-]*)://([^\s/?#"']*@)?(\[[0-9A-Fa-f:.%]+\]|[^\s/?#"'<>:@\[\]\\]+)""")
 
         /** The keys whose values the line patterns clean (LogRedactor's SECRET, SERVER and Wi-Fi keys, and [SECRET]). */
         private val SECRET_KEY = Regex(
