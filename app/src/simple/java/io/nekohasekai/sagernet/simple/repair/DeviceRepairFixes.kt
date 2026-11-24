@@ -15,7 +15,6 @@ import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 
 /**
@@ -41,10 +40,11 @@ object RepairReloads {
     )
 
     /**
-     * A call to `:bg` whose wait can end (a stop, a time limit) without waiting for the blocking binder call itself: the
-     * call runs on in [scope] (binding to the service has no deadline of its own).
+     * A call to `:bg` within [limitMs] ([detachedCall]): binding to the service has no deadline of its own, so a wait
+     * over the limit or a stop gives the binding up and nothing is submitted after it. Throws when it did not happen.
      */
-    suspend fun <T> detached(block: suspend () -> T): T = scope.async { block() }.await()
+    suspend fun <T> detached(limitMs: Long, block: suspend (live: () -> Boolean) -> T): T =
+        detachedCall(scope, limitMs, block) ?: throw IllegalStateException("the service did not answer in time")
 }
 
 /**
@@ -225,10 +225,13 @@ class DeviceRepairFixes(
         subscriptionsUpdated = true
         val wait = SubscriptionWait(
             // Returns once `:bg`'s queue holds the update (SubscriptionQueue.refreshGroup enqueues synchronously).
-            submit = { gid -> RepairReloads.detached { CoreServiceClient.call { it.refreshGroup(gid, false) } } },
+            // Bound to a bind of SUBMIT_MS; a late bind after a stop or the limit submits nothing (`live`).
+            submit = { gid ->
+                RepairReloads.detached(SUBMIT_MS) { live -> CoreServiceClient.call { if (live()) it.refreshGroup(gid, false) } }
+            },
             // A no-op queued behind them in the same FIFO queue: returns once every update before it has run.
             barrier = {
-                RepairReloads.detached { CoreServiceClient.call { it.resolveProfiles(LongArray(0)) } }
+                RepairReloads.detached(BARRIER_MS) { CoreServiceClient.call { it.resolveProfiles(LongArray(0)) } }
                 // The lists of this process learn about the writes of `:bg`.
                 for (gid in groups) {
                     GroupRepo.postUpdate(gid)
@@ -331,5 +334,11 @@ class DeviceRepairFixes(
         val REMOTE_DNS_ALTERNATIVES = listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query")
 
         const val RECONNECT_MS = 60_000L
+
+        /** Binding to `:bg` and handing it one subscription update. */
+        const val SUBMIT_MS = 15_000L
+
+        /** The queue barrier; the subscription wait bounds the whole of it again (SubscriptionWait.limitMs). */
+        const val BARRIER_MS = 90_000L
     }
 }

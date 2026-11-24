@@ -144,15 +144,10 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
             unrestored.retryUnlessCancelled()
             if (unrestored.pending) Logs.w("simple repair: a change of an earlier run is still not put back")
             // What this run changes, to be put back when a fix does not help or the run is stopped.
-            fun name(entry: RepairJournal.Entry) = entry.kind?.name?.lowercase() ?: "the VPN started for the checks"
             val journal = RepairJournal(
-                onRestoreFailed = { entry, e -> Logs.w("simple repair: could not put back ${name(entry)}", e) },
-                onSuperseded = { entry ->
-                    Logs.i("simple repair: ${name(entry)} was changed since; the newer value is kept, not put back")
-                },
-                // The settings live in this database: a write transaction excludes every other writer (`:bg` too)
-                // between the check and the restore.
-                atomically = { block -> SagerDatabase.instance.runInTransaction(Runnable { block() }) },
+                onRestoreFailed = RepairLog::restoreFailed,
+                onSuperseded = RepairLog::superseded,
+                atomically = RepairLog::inSettingsTransaction,
             )
             val checks = DeviceRepairChecks(getApplication(), environment, journal)
             val engine = RepairEngine(checks, journal)
@@ -178,8 +173,8 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
 
     private var runs = 0
 
-    /** Changes earlier runs could not put back, retried before the next run (they outlive their run). */
-    private val unrestored = UnrestoredChanges()
+    /** Changes earlier runs could not put back, retried before the next run: process-wide, they outlive any screen. */
+    private val unrestored get() = RepairLog.unrestored
 
     /** The runs, one after another (each after the previous one's rollback). */
     private val serial = SerialRuns(viewModelScope)
@@ -352,3 +347,21 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
 
 /** How long an unanswered VPN consent dialog counts as open; after that a request shows a new one. */
 private const val CONSENT_DIALOG_STALE_MS = 120_000L
+
+/** What every journal of «Починка» shares on the device, and the changes carried from run to run. */
+private object RepairLog {
+
+    private fun name(entry: RepairJournal.Entry) = entry.kind?.name?.lowercase() ?: "the VPN started for the checks"
+
+    fun restoreFailed(entry: RepairJournal.Entry, e: Exception) =
+        Logs.w("simple repair: could not put back ${name(entry)}", e)
+
+    fun superseded(entry: RepairJournal.Entry) =
+        Logs.i("simple repair: ${name(entry)} was changed since; the newer value is kept, not put back")
+
+    /** The settings live in this database: a write transaction excludes every other writer (`:bg` too). */
+    fun inSettingsTransaction(block: () -> Unit) = SagerDatabase.instance.runInTransaction(Runnable { block() })
+
+    /** One carry for the process: the chain rule of a setting holds across runs. */
+    val unrestored = UnrestoredChanges(::inSettingsTransaction, ::restoreFailed, ::superseded)
+}

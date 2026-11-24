@@ -4,9 +4,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The service as «Починка» waits for it while it changes settings (design.md D8). Pure: the device side is the home
@@ -273,4 +275,32 @@ class SubscriptionUpdateFix(
 
     // Provider content and the update's own selection stay.
     override fun restore() = Unit
+}
+
+/**
+ * A call to `:bg` that a wait may give up on (a stop, a time limit): [block] runs in [scope], since a binder call
+ * cannot be interrupted, and the caller waits at most [limitMs] (null then). A wait that ends early cancels the call
+ * too — a service binding that never answered is given up (and unbound) — and turns [block]'s `live()` false: a late
+ * callback checks it before it submits anything, so nothing is submitted after the wait is over. A call already in
+ * the service runs on (its work was accepted).
+ */
+suspend fun <T> detachedCall(
+    scope: CoroutineScope,
+    limitMs: Long,
+    block: suspend (live: () -> Boolean) -> T,
+): T? {
+    val live = AtomicBoolean(true)
+    val call = scope.async { block { live.get() } }
+    try {
+        val result = withTimeoutOrNull(limitMs) { call.await() }
+        if (result == null) {
+            live.set(false)
+            call.cancel()
+        }
+        return result
+    } catch (e: CancellationException) {
+        live.set(false)
+        call.cancel()
+        throw e
+    }
 }

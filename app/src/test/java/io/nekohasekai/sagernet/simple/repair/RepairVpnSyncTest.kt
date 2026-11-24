@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.simple.repair
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -395,5 +397,41 @@ class RepairVpnSyncTest {
         delay(200)
         assertEquals(0, reloads.get())
         assertFalse(pending.armed)
+    }
+
+    // ------------------------------------------------------------------------------------------------ detached calls
+
+    @Test
+    fun aLateBindAfterTheWaitWasStoppedSubmitsNothing() = runBlocking {
+        // The binding answers only after the run was stopped (a binder wait cannot be interrupted): nothing is
+        // submitted then.
+        val submitted = AtomicInteger()
+        val waiter = launch {
+            detachedCall(scope, 5_000L) { live ->
+                withContext(NonCancellable) { delay(300) }
+                if (live()) submitted.incrementAndGet()
+            }
+        }
+        delay(100)
+        waiter.cancel()
+        delay(500)
+        assertEquals(0, submitted.get())
+    }
+
+    @Test
+    fun aBindOverTheLimitIsGivenUpAndSubmitsNothing() = runBlocking {
+        val submitted = AtomicInteger()
+        val result = detachedCall(scope, 100L) { live ->
+            withContext(NonCancellable) { delay(300) }
+            if (live()) submitted.incrementAndGet()
+        }
+        assertNull(result)
+        delay(400)
+        assertEquals(0, submitted.get())
+    }
+
+    @Test
+    fun aCallInTimeReturnsItsResult() = runBlocking {
+        assertEquals(42, detachedCall(scope, 1_000L) { live -> if (live()) 42 else 0 })
     }
 }

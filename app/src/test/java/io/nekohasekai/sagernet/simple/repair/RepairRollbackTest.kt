@@ -578,11 +578,12 @@ class RepairRollbackTest {
         val fix = FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8", failingRestores = 2)
         fix.apply()
         val superseded = mutableListOf<RepairStep>()
-        val journal = RepairJournal(onSuperseded = { superseded += it.step })
+        val journal = RepairJournal()
         journal.record(RepairStep.DNS_DIRECT, fix.kind, stillOurs = fix::stillApplied, restore = fix::restore)
         assertTrue(journal.restoreAll().isEmpty())
         val checks = FakeChecks(settings)
-        val unrestored = UnrestoredChanges()
+        // The carry reports the superseded change (the run journal handed it over).
+        val unrestored = UnrestoredChanges(onSuperseded = { superseded += it.step })
         unrestored.keep(journal, checks)
         unrestored.retry()
         assertTrue(unrestored.pending)
@@ -1075,5 +1076,38 @@ class RepairRollbackTest {
         unrestored.retryUnlessCancelled()
         assertFalse(unrestored.pending)
         assertEquals("local", settings.values["dns"])
+    }
+
+    @Test
+    fun aChainOfOneSettingAcrossRunsIsPutBackInOrder() = runBlocking {
+        // Run 1 wrote A → B and could not put it back; run 2 then wrote B → C and could not either. The older change
+        // must not be dropped as superseded while the newer one is still in place: both are carried in one journal.
+        var value = "A"
+        var firstFails = true
+        var secondFails = true
+        val carry = UnrestoredChanges()
+        val first = RepairJournal()
+        value = "B"
+        first.record(RepairStep.DNS_DIRECT, FixKind.DIRECT_DNS_WHITELISTED, stillOurs = { value == "B" }, key = "dns") {
+            if (firstFails) error("cannot write") else value = "A"
+        }
+        first.restoreAll()
+        carry.keep(first, FakeChecks(Settings()))
+        val second = RepairJournal()
+        value = "C"
+        second.record(RepairStep.DNS_VPN, FixKind.VPN_DNS_ALTERNATIVE, stillOurs = { value == "C" }, key = "dns") {
+            if (secondFails) error("cannot write") else value = "B"
+        }
+        second.restoreAll()
+        carry.keep(second, FakeChecks(Settings()))
+        // Run 1's change could be put back now, run 2's still not: run 1's waits (it would see C and be dropped).
+        firstFails = false
+        carry.retry()
+        assertEquals("C", value)
+        assertTrue(carry.pending)
+        secondFails = false
+        carry.retry()
+        assertEquals("A", value)
+        assertFalse(carry.pending)
     }
 }
