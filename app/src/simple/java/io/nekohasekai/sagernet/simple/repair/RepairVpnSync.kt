@@ -290,9 +290,12 @@ class SubscriptionUpdateFix(
 suspend fun <T> detachedCall(
     scope: CoroutineScope,
     limitMs: Long,
+    gate: RepairStopGate = RepairStopGate(),
     block: suspend (claim: () -> Boolean) -> T,
 ): T? {
     val state = AtomicInteger(LIVE)
+    // A run already stopped gives the call up before it starts.
+    gate.register(state)
     val call = scope.async { block { state.compareAndSet(LIVE, CLAIMED) } }
     // A claimed call goes on (its work is part of the run); one not claimed yet is given up and submits nothing.
     fun giveUp() {
@@ -306,6 +309,37 @@ suspend fun <T> detachedCall(
     } catch (e: CancellationException) {
         giveUp()
         throw e
+    } finally {
+        gate.unregister(state)
+    }
+}
+
+/**
+ * The stop of one run of «Починка», seen by its calls to `:bg` at once: [close] is called by «Остановить» itself,
+ * before the run is cancelled, and gives every call of the run that has not claimed yet up in the same moment (the
+ * cancellation reaches the waiting coroutine only later — a callback in that gap must not be able to claim). The order
+ * is therefore always: stop → give up → cancel. A call made after the close starts given up.
+ */
+class RepairStopGate {
+    private val calls = HashSet<AtomicInteger>()
+    private var closed = false
+
+    val isClosed: Boolean @Synchronized get() = closed
+
+    @Synchronized
+    fun close() {
+        closed = true
+        for (state in calls) state.compareAndSet(LIVE, GIVEN_UP)
+    }
+
+    @Synchronized
+    internal fun register(state: AtomicInteger) {
+        if (closed) state.compareAndSet(LIVE, GIVEN_UP) else calls += state
+    }
+
+    @Synchronized
+    internal fun unregister(state: AtomicInteger) {
+        calls -= state
     }
 }
 

@@ -86,11 +86,13 @@ class DeviceRepairChecks(
     private val context: Context,
     private val env: RepairEnvironment,
     private val journal: RepairJournal,
+    /** The stop of this run, closed by «Остановить» before the run is cancelled ([RepairStopGate]). */
+    private val gate: RepairStopGate = RepairStopGate(),
 ) : RepairChecks {
 
     private val config: SimpleConfig = SimpleConfigRepo.current()
 
-    private val fixes = DeviceRepairFixes(env, config) { id -> urlTest(listOf(id))?.get(id) }
+    private val fixes = DeviceRepairFixes(env, config, gate) { id -> urlTest(listOf(id))?.get(id) }
 
     /** Why the VPN could not be had for the checks through it; both checks share the answer (one consent request). */
     private var vpnProblem: SkipReason? = null
