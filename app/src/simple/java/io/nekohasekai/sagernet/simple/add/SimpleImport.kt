@@ -190,10 +190,12 @@ object SimpleImport {
         } finally {
             listener.cancel()
             // Done, failed (the group is gone then), cancelled or thrown: a group that is still there updates itself.
+            // The entry is forgotten only once that worked; otherwise the next start of the interface tries again.
             withContext(NonCancellable) {
-                runCatching { if (gid > 0L) updateItself(listOfNotNull(GroupRepo.get(gid))) }
-                    .onFailure { Logs.w("simple add: automatic updates of subscription $gid", it) }
-                forgetPending(pending)
+                val entry = pending.copy(gid = gid.coerceAtLeast(0L))
+                if (PendingImports.settle(records, pendingLock, listOf(entry), ::restore).isEmpty()) {
+                    Logs.w("simple add: automatic updates of subscription $gid not turned on yet, kept for the next start")
+                }
             }
         }
     }
@@ -202,18 +204,24 @@ object SimpleImport {
 
     private val pendingLock = Any()
 
-    private fun recordPending(entry: PendingImports.Entry, gid: Long = 0L) = synchronized(pendingLock) {
-        val store = SimpleUi.store(app)
-        val entries = PendingImports.parse(store.getString(KEY_PENDING_IMPORTS))
-            .filterNot { it.since == entry.since && it.url == entry.url } + entry.copy(gid = gid)
-        store.putString(KEY_PENDING_IMPORTS, PendingImports.format(entries))
+    private val records = object : PendingImports.Records {
+        override fun load() = PendingImports.parse(SimpleUi.store(app).getString(KEY_PENDING_IMPORTS))
+        override fun save(entries: List<PendingImports.Entry>) =
+            SimpleUi.store(app).putString(KEY_PENDING_IMPORTS, PendingImports.format(entries))
     }
 
-    private fun forgetPending(entry: PendingImports.Entry) = synchronized(pendingLock) {
-        val store = SimpleUi.store(app)
-        val entries = PendingImports.parse(store.getString(KEY_PENDING_IMPORTS))
-            .filterNot { it.since == entry.since && it.url == entry.url }
-        store.putString(KEY_PENDING_IMPORTS, PendingImports.format(entries))
+    private fun recordPending(entry: PendingImports.Entry, gid: Long = 0L) =
+        PendingImports.record(records, pendingLock, entry.copy(gid = gid))
+
+    /**
+     * Turns automatic updates back on for the group of an import: by its id, else (the id never reached this process)
+     * by its URL among the groups still flagged. Idempotent: a group already cleared, or gone, needs nothing.
+     */
+    private suspend fun restore(entry: PendingImports.Entry): Boolean {
+        val groups = if (entry.gid > 0L) listOfNotNull(GroupRepo.get(entry.gid))
+        else GroupRepo.all().filter { it.url.trim() == entry.url }
+        updateItself(groups)
+        return true
     }
 
     /** Clears the «skip automatic updates» flag the import set on [groups]; reschedules when one changed. */
@@ -231,28 +239,20 @@ object SimpleImport {
     /**
      * Imports that never reached their end (the process died during the first download, or before it heard the new
      * group's id): their groups would otherwise never update automatically. Called on every start of the interface;
-     * an import still running in this process is left alone. A group without a known id is found by its URL among the
-     * groups still flagged.
+     * an import still running in this process is left alone. An entry is forgotten only after its group's flag is
+     * cleared (PendingImports.settle), so a failure or another interruption is retried on the next start.
      */
     suspend fun healInterrupted() {
         val stale = synchronized(pendingLock) {
-            val store = SimpleUi.store(app)
-            val entries = PendingImports.parse(store.getString(KEY_PENDING_IMPORTS))
+            val entries = records.load()
             if (entries.isEmpty()) return
             val now = System.currentTimeMillis()
             val processStart = now - (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime())
-            PendingImports.stale(entries, now, processStart).also { stale ->
-                if (stale.isNotEmpty()) store.putString(KEY_PENDING_IMPORTS, PendingImports.format(entries - stale.toSet()))
-            }
+            PendingImports.stale(entries, now, processStart)
         }
         if (stale.isEmpty()) return
-        val groups = GroupRepo.all()
-        val healed = stale.flatMap { entry ->
-            if (entry.gid > 0L) groups.filter { it.id == entry.gid }
-            else groups.filter { it.url.trim() == entry.url }
-        }.distinctBy { it.id }
-        updateItself(healed)
-        Logs.i("simple add: ${stale.size} interrupted import(s), automatic updates turned on for ${healed.count { it.skipAutoUpdate }} group(s)")
+        val done = PendingImports.settle(records, pendingLock, stale, ::restore)
+        Logs.i("simple add: ${stale.size} interrupted import(s), automatic updates turned on for ${done.size}")
     }
 
     private const val KEY_PENDING_IMPORTS = "pending_subscription_imports"
