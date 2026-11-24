@@ -6,16 +6,16 @@ import org.json.JSONObject
 import java.net.IDN
 
 /**
- * The cleaning of the «Починка» report (design.md D8, connection-repair "Отчёт без секретов"): every line goes through
- * the log export's [LogRedactor] with the destinations hidden, then through a pass of its own that the log export does
- * not have: the addresses and domains of the user's servers ([servers], anywhere in the text), the host of any URL
- * (LogRedactor keeps it) and the subscription links ([subscriptions], replaced whole before anything else) become
- * labels: `<server-1>`, `<host-1>`, `<subscription-1>`, `<subscription-1-host>`. A name gets the same label everywhere
- * in one report, so the specialist still sees which lines speak of the same server.
+ * The cleaning of the «Починка» report (design.md D8, connection-repair "Отчёт без секретов"): every line goes through a
+ * pass of its own that the log export does not have and then through the log export's [LogRedactor] with the
+ * destinations hidden (see [redact]). The own pass turns the addresses and domains of the user's servers ([servers],
+ * anywhere in the text), the host of any URL and the subscription links ([subscriptions]) into labels: `<server-1>`,
+ * `<host-1>`, `<subscription-1>`, `<subscription-1-host>`. A name gets the same label everywhere in one report, so the
+ * specialist still sees which lines speak of the same server.
  *
  * The secret values of the user's profiles ([secrets]: passwords, UUIDs, keys, gRPC service names… — [secretValues])
- * become `<redacted>` wherever they are left after the patterns, whatever the text around them: the cores also print
- * them in their own words (Xray: ``service name: `…` ``).
+ * become `<redacted>` wherever they are, whatever the text around them: the cores also print them in their own words
+ * (Xray: ``service name: `…` ``).
  *
  * One instance per report: the labels of the hosts not known in advance are given out as they are met.
  */
@@ -63,12 +63,6 @@ class ReportRedactor(
     /** All known secrets, for the span pass of [redact]. */
     private val secretPatterns: List<Regex> = secretPatternsOf(knownSecrets)
 
-    /**
-     * The secrets LogRedactor itself would rewrite in part — an IP-like piece becomes "<ip>", a UUID "<uuid>", a long
-     * base64 run "<key>" — and so must be masked before it runs; the rest wait for the span pass.
-     */
-    private val earlySecretPatterns: List<Regex> = secretPatternsOf(knownSecrets.filter { log.redact(it) != it })
-
     init {
         // Every spelling of a server gets its label: IPv6 compressed / full / zero-padded, IDN as Unicode and punycode.
         servers.mapNotNull { normalize(it) ?: singleLabel(it) }.distinct().forEachIndexed { i, name ->
@@ -93,24 +87,26 @@ class ReportRedactor(
     }
 
     /**
-     * One line: LogRedactor first (with the subscription links and the secrets it would cut masked before it), then
-     * every matcher of this pass over the SAME text — the labels already there, URLs (scheme, credentials, host), IPv6
-     * addresses (also after a network prefix), the known names, the destinations Xray names in its own words, the known
-     * secrets — and one replacement of the collected spans from right to left ([resolve]). No matcher sees text another
-     * one rewrote, so a secret that is part of a server name, or spelled like a URL scheme, cannot hide that name or URL.
+     * One line. First this pass, on the ORIGINAL text: every matcher — the subscription links, the labels already there,
+     * whole URLs (scheme, credentials, host, port, the rest), IPv6 addresses (also after a network prefix), the known
+     * names, the destinations Xray names in its own words, the known secrets — collects spans of the same text, the
+     * overlaps are resolved ([resolve]) and each span becomes an opaque placeholder ([placeholder]). Then LogRedactor on
+     * what is left, which cannot alter a placeholder; then the placeholders become their labels. No matcher sees text
+     * another one rewrote, so a secret that is part of a server name, spelled like a URL scheme or shaped like an IP or
+     * a UUID cannot hide a name, a URL or itself.
      */
     fun redact(line: String): String {
         // org.json writes "/" as "\/" on Android: URLs in JSON must look like URLs to the patterns.
-        var s = line.replace("\\/", "/")
-        for ((link, label) in links) s = s.replace(link, label)
-        // The mask has no angle brackets: LogRedactor still sees credentials of a URL as credentials.
-        for (pattern in earlySecretPatterns) s = pattern.replace(s, MASK)
-        s = log.redact(s).replace(MASK, "<redacted>")
+        val original = line.replace("\\/", "/")
+        val replacements = ArrayList<String>()
+        var s = resolve(original, spans(original)) { text -> placeholder(replacements.size).also { replacements += text } }
+        s = log.redact(s)
         s = SECRET.replace(s) { m ->
             val (_, quote, key, separator, value) = m.groupValues
             "$quote$key$quote$separator" + if (value.startsWith("[")) "[\"<redacted>\"]" else "\"<redacted>\""
         }
-        return resolve(s, spans(s))
+        if (replacements.isEmpty()) return s
+        return PLACEHOLDER.replace(s) { m -> replacements.getOrNull(indexOf(m.groupValues[1])) ?: "<redacted>" }
     }
 
     private enum class Kind { LABEL, IP, HOST, SERVER, SECRET }
@@ -127,18 +123,28 @@ class ReportRedactor(
         fun add(range: IntRange, kind: Kind, text: String) {
             out += Span(range.first, range.last + 1, kind, text)
         }
+        // A subscription link whole (it is a secret: its path holds the token).
+        for ((link, label) in links) {
+            var at = s.indexOf(link)
+            while (at >= 0) {
+                add(at until at + link.length, Kind.SECRET, label)
+                at = s.indexOf(link, at + link.length)
+            }
+        }
         // The labels already in the line stay as they are; nothing inside them is matched (a server "x", a secret
         // "redacted").
         for (m in LABEL_PATTERN.findAll(s)) add(m.range, Kind.LABEL, m.value)
-        // The URL up to its host is rebuilt, never copied: a password with an "@" (user:pa@ssword@host) is cut by
-        // LogRedactor at its first "@", and the rest of it would otherwise stay before the host. A scheme that is a
-        // secret ("https", "foo.bar") is masked with it.
+        // A URL is rebuilt whole, never copied, as LogRedactor would write it: the credentials (up to the last "@"
+        // before the host — a password may hold one) become "<redacted>@", the host its label, the port stays, anything
+        // after it "/<redacted>". A scheme that is a secret ("https", "foo.bar", "pw-1.2.3.4") is masked with it.
         for (m in URL.findAll(s)) {
             val scheme = m.groupValues[1].let { if (isSecret(it)) "<redacted>" else it }
             val credentials = if (m.groups[CREDENTIALS] != null) "<redacted>@" else ""
             val host = m.groups[HOST]!!.value
             val label = labelFor(host)
-            add(m.range, if (label == host) Kind.LABEL else kindOf(label), "$scheme://$credentials$label")
+            val port = m.groups[PORT]?.value.orEmpty()
+            val rest = if (m.groupValues[REST].isNotEmpty()) "/<redacted>" else ""
+            add(m.range, if (label == host) Kind.LABEL else kindOf(label), "$scheme://$credentials$label$port$rest")
         }
         // An IPv6 address in any spelling, also after a network prefix ("tcp:fd00:0::1"); "fdab:beef::1" is an address
         // as a whole. After such a prefix LogRedactor's IPv6 rule does not see an address at all, so a public one is
@@ -171,7 +177,7 @@ class ReportRedactor(
      * the secret that is its scheme, a server name over the secret that is part of it, a label over a name inside it);
      * spans that overlap in part become one, replaced as the more sensitive of the two (secret > server > host > IP).
      */
-    private fun resolve(s: String, found: List<Span>): String {
+    private fun resolve(s: String, found: List<Span>, wrap: (String) -> String): String {
         if (found.isEmpty()) return s
         val sorted = found.sortedWith(
             compareBy<Span> { it.start }.thenByDescending { it.end - it.start }.thenByDescending { it.kind.ordinal },
@@ -189,10 +195,31 @@ class ReportRedactor(
                 }
             }
         }
-        val out = StringBuilder(s)
-        for (span in chosen.asReversed()) out.replace(span.start, span.end, span.text)
-        return out.toString()
+        // Left to right, so the placeholders are numbered in reading order; built in one pass.
+        val out = StringBuilder(s.length)
+        var last = 0
+        for (span in chosen) {
+            out.append(s, last, span.start).append(wrap(span.text))
+            last = span.end
+        }
+        return out.append(s, last, s.length).toString()
     }
+
+    /**
+     * The placeholder of replacement [index] while LogRedactor runs: private-use characters around letters g–z only —
+     * no digit, no hex letter, nothing shaped like an IP, a UUID, a key or a domain that a LogRedactor rule could take.
+     */
+    private fun placeholder(index: Int): String {
+        val letters = StringBuilder()
+        var n = index
+        do {
+            letters.append('g' + n % PLACEHOLDER_BASE)
+            n /= PLACEHOLDER_BASE
+        } while (n > 0)
+        return "\uE000" + letters.reverse() + "\uE001"
+    }
+
+    private fun indexOf(letters: String): Int = letters.fold(0) { n, c -> n * PLACEHOLDER_BASE + (c - 'g') }
 
     /** As LogRedactor counts them: unspecified, loopback, link-local, unique local and multicast are not public. */
     private fun isPrivateIpv6(canonical: String): Boolean = canonical == "::" || canonical == "::1" ||
@@ -258,9 +285,14 @@ class ReportRedactor(
     companion object {
         private const val CREDENTIALS = 2
         private const val HOST = 3
+        private const val PORT = 4
+        private const val REST = 5
 
-        /** What a known secret becomes until the end of [redact]: private-use characters, no angle brackets. */
-        private const val MASK = "\uE000redacted\uE000"
+        /** An opaque placeholder of [redact] (see [placeholder]); group 1: the letters of its index. */
+        private val PLACEHOLDER = Regex("\uE000([g-z]+)\uE001")
+
+        /** Letters g–z: the placeholder index in base 20. */
+        private const val PLACEHOLDER_BASE = 20
 
         /** The labels LogRedactor and this pass put in the text; kept whole, nothing inside them is matched. */
         private val LABEL_PATTERN =
@@ -379,11 +411,13 @@ class ReportRedactor(
         )
 
         /**
-         * A URL's credentials (group 2, up to the last "@" before the host) and host (group 3): LogRedactor leaves
-         * `scheme://<redacted>@host/<redacted>`, so the credentials may hold the label's angle brackets, and the rest of a
-         * password with an "@" in it. A host is a bracketed IPv6 address or a name / IPv4 address up to the port.
+         * A URL: scheme (group 1, RFC 3986), credentials (group 2, up to the last "@" before the host — a password may
+         * hold one), host (group 3: a bracketed IPv6 address or a name / IPv4 address), port (group 4) and the rest
+         * (group 5: path, query, fragment — what LogRedactor writes as "/<redacted>").
          */
-        private val URL = Regex("""\b([a-zA-Z][a-zA-Z0-9+.\-]*)://([^\s/?#"']*@)?(\[[0-9A-Fa-f:.%]+\]|[^\s/?#"'<>:@\[\]\\]+)""")
+        private val URL = Regex(
+            """\b([a-zA-Z][a-zA-Z0-9+.\-]*)://([^\s/?#"']*@)?(\[[0-9A-Fa-f:.%]+\]|[^\s/?#"'<>:@\[\]\\]+)(:\d{1,5})?([^\s"'<>]*)"""
+        )
 
         /** The keys whose values the line patterns clean (LogRedactor's SECRET, SERVER and Wi-Fi keys, and [SECRET]). */
         private val SECRET_KEY = Regex(

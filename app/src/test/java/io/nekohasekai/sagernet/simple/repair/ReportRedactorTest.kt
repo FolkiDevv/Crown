@@ -397,6 +397,28 @@ class ReportRedactorTest {
         assertEquals("[Info] cdn <server-1> up", r.redact("[Info] cdn cdn.$server up"))
     }
 
+    /**
+     * No early masking any more (review): a UUID secret that is the first label of a server name, and an IP-like
+     * secret used as a URL scheme, neither hide the name / URL — in free text and in JSON.
+     */
+    @Test
+    fun shapedSecretsInsideNamesAndSchemes() {
+        val server = "$uuid.customer-42.example.net"
+        val profile = """{"type":"vless","server":"$server","uuid":"$uuid","password":"pw-1.2.3.4"}"""
+        val r = ReportRedactor(ReportRedactor.serverNames(server, profile), emptyList(), ReportRedactor.secretValues(profile))
+        assertEquals("[Debug] dialing to tcp:<server-1>:443", r.redact("[Debug] dialing to tcp:$server:443"))
+        assertEquals("[Warn] bad uuid <redacted> for <server-1>", r.redact("[Warn] bad uuid $uuid for $server"))
+        val url = r.redact("GET pw-1.2.3.4://unlisted.example.net/account/opaque-access-value")
+        assertEquals("GET <redacted>://<host-1>/<redacted>", url)
+        val json = JSONObject(
+            r.redactJson("""{"note":"dial $server:443 via pw-1.2.3.4://unlisted.example.net/account/opaque-access-value"}"""),
+        )
+        assertEquals("dial <server-1>:443 via <redacted>://<host-1>/<redacted>", json.getString("note"))
+        for (out in listOf(url, json.toString())) {
+            for (gone in listOf(uuid, "customer-42", "pw-1", "1.2.3.4", "unlisted", "opaque")) assertFalse(out, out.contains(gone))
+        }
+    }
+
     /** A configured IPv6 server in a spelling none of its listed forms has: compared by value in free text (review). */
     @Test
     fun ipv6ServerByValueInFreeText() {
