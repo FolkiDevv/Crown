@@ -43,8 +43,8 @@ object RepairReloads {
      * A call to `:bg` within [limitMs] ([detachedCall]): binding to the service has no deadline of its own, so a wait
      * over the limit or a stop gives the binding up and nothing is submitted after it. Throws when it did not happen.
      */
-    suspend fun <T> detached(limitMs: Long, block: suspend (claim: () -> Boolean) -> T): T =
-        detachedCall(scope, limitMs, block) ?: throw IllegalStateException("the service did not answer in time")
+    suspend fun <T> detached(limitMs: Long, gate: RepairStopGate, block: suspend (claim: () -> Boolean) -> T): T =
+        detachedCall(scope, limitMs, gate, block) ?: throw IllegalStateException("the service did not answer in time")
 }
 
 /**
@@ -66,6 +66,8 @@ object RepairReloads {
 class DeviceRepairFixes(
     private val env: RepairEnvironment,
     private val config: SimpleConfig,
+    /** The stop of this run: «Остановить» gives up its calls to `:bg` that have not claimed yet, at once. */
+    private val gate: RepairStopGate,
     /** A light check of one server: the delay, or null when it does not answer. */
     private val testServer: suspend (Long) -> Int?,
 ) {
@@ -228,11 +230,11 @@ class DeviceRepairFixes(
             // Bound to a bind of SUBMIT_MS. The claim and a stop/limit are one compare-and-set: a late bind after them
             // submits nothing; a submission claimed before them is part of the run (the update is not rolled back).
             submit = { gid ->
-                RepairReloads.detached(SUBMIT_MS) { claim -> CoreServiceClient.call { if (claim()) it.refreshGroup(gid, false) } }
+                RepairReloads.detached(SUBMIT_MS, gate) { claim -> CoreServiceClient.call { if (claim()) it.refreshGroup(gid, false) } }
             },
             // A no-op queued behind them in the same FIFO queue: returns once every update before it has run.
             barrier = {
-                RepairReloads.detached(BARRIER_MS) { CoreServiceClient.call { it.resolveProfiles(LongArray(0)) } }
+                RepairReloads.detached(BARRIER_MS, gate) { CoreServiceClient.call { it.resolveProfiles(LongArray(0)) } }
                 // The lists of this process learn about the writes of `:bg`.
                 for (gid in groups) {
                     GroupRepo.postUpdate(gid)

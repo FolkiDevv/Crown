@@ -117,6 +117,16 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
 
     private var job: Job? = null
 
+    /** The stop gate of the newest run ([stop] closes it). */
+    @Volatile
+    private var runGate: RepairStopGate? = null
+
+    /** The scope is cancelled after this: the run's calls to `:bg` are given up first, as by «Остановить». */
+    override fun onCleared() {
+        runGate?.close()
+        super.onCleared()
+    }
+
     /** Opens the screen and starts a run, unless one runs already. */
     fun open(environment: RepairEnvironment) {
         mutableState.update { it.copy(open = true) }
@@ -138,6 +148,8 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         // A stopped run is no longer active while it still puts its changes back (not cancellable): the new run reads
         // and changes the settings only after that, so it never takes a value about to be restored as its "before" —
         // also when it is itself stopped while it waits ([SerialRuns]).
+        // This run's stop gate: «Остановить» closes it before it cancels the run.
+        val gate = RepairStopGate().also { runGate = it }
         job = serial.launch {
             // A change an earlier run could not put back is tried again before this run reads any setting — unless this
             // run was stopped while it waited (it ends at once, as stopped; the next run retries).
@@ -149,7 +161,7 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
                 onSuperseded = RepairLog::superseded,
                 atomically = RepairLog::inSettingsTransaction,
             )
-            val checks = DeviceRepairChecks(getApplication(), environment, journal)
+            val checks = DeviceRepairChecks(getApplication(), environment, journal, gate)
             val engine = RepairEngine(checks, journal)
             try {
                 val progress = engine.run { progress -> publish { it.copy(progress = progress) } }
@@ -230,6 +242,9 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         val running = job ?: return
         // Shown at once: the run may first wait for a subscription update it started before it can roll back.
         if (running.isActive) mutableState.update { if (it.running) it.copy(stopping = true) else it }
+        // Stop → give up → cancel: the run's calls to `:bg` that have not claimed yet are given up here, before the
+        // cancellation reaches the coroutine that waits for them.
+        runGate?.close()
         running.cancel()
     }
 

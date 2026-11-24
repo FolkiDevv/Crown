@@ -453,4 +453,51 @@ class RepairVpnSyncTest {
     fun aCallInTimeReturnsItsResult() = runBlocking {
         assertEquals(42, detachedCall(scope, 1_000L) { claim -> if (claim()) 42 else 0 })
     }
+
+    @Test
+    fun theStopGivesUpBeforeTheCancellationReachesTheWait() = runBlocking {
+        // The service callback comes while the stop has been pressed but the waiting coroutine has not processed its
+        // cancellation yet (it is not cancelled at all here): the closed gate makes the claim fail.
+        val gate = RepairStopGate()
+        val inCallback = java.util.concurrent.CountDownLatch(1)
+        val stopped = java.util.concurrent.CountDownLatch(1)
+        val submitted = AtomicInteger()
+        val waiter = launch(Dispatchers.Default) {
+            detachedCall(scope, 5_000L, gate) { claim ->
+                inCallback.countDown()
+                stopped.await() // the callback is about to claim when the stop comes
+                if (claim()) submitted.incrementAndGet()
+            }
+        }
+        inCallback.await()
+        gate.close() // «Остановить»: give up first …
+        stopped.countDown()
+        delay(200)
+        assertEquals(0, submitted.get())
+        waiter.cancel() // … and only then the cancellation
+    }
+
+    @Test
+    fun aClaimBeforeTheStopIsKeptAndACallAfterItStartsGivenUp() = runBlocking {
+        val gate = RepairStopGate()
+        val submitted = AtomicInteger()
+        // Claimed before the close: part of the run.
+        val claimed = CompletableDeferred<Unit>()
+        val proceed = java.util.concurrent.CountDownLatch(1)
+        val first = launch(Dispatchers.Default) {
+            detachedCall(scope, 5_000L, gate) { claim ->
+                val mine = claim()
+                claimed.complete(Unit)
+                proceed.await()
+                if (mine) submitted.incrementAndGet()
+            }
+        }
+        claimed.await()
+        gate.close()
+        proceed.countDown()
+        first.join()
+        assertEquals(1, submitted.get())
+        // A call made after the close is given up from the start.
+        assertEquals(0, detachedCall(scope, 1_000L, gate) { claim -> if (claim()) 1 else 0 })
+    }
 }
