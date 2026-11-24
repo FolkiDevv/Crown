@@ -226,7 +226,8 @@ class SagerNet : Application(),
         var underlyingNetwork: Network? = null
 
         var appVersionNameForDisplay = {
-            var n = BuildConfig.VERSION_NAME
+            // Crown: the fork version and the Throne version it is based on
+            var n = "${BuildConfig.VERSION_NAME} (Throne ${BuildConfig.UPSTREAM_VERSION_NAME})"
             if (!isOss) {
                 n += " ${BuildConfig.FLAVOR}"
             }

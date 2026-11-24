@@ -142,20 +142,24 @@ fun Project.setupAppCommon() {
 
 fun Project.setupApp() {
     val metadata = requireMetadata()
-    val pkgName = metadata.getProperty("PACKAGE_NAME")
-    val baseVersion = metadata.getProperty("VERSION_NAME")
-    val versionIndex = metadata.getProperty("VERSION_CODE").toInt()
+    // Crown: package name and version come from fork.properties (Fork.kt); nb4a.properties is the upstream base.
+    val fork = forkIdentity()
+    val pkgName = fork.packageName
+    val baseVersion = fork.versionName
     val coreRef = metadata.getProperty("THRONE_CORE_REF")
     val preview = buildChannel() == "preview"
     val build = buildNumber()
     android.apply {
         defaultConfig {
             applicationId = pkgName
-            versionCode = versionIndex * 1000 + build
+            versionCode = fork.versionCode(build)
             versionName = if (preview) "$baseVersion-pre.$build" else baseVersion
             buildConfigField("String", "THRONE_CORE_REF", "\"$coreRef\"")
             buildConfigField("boolean", "PREVIEW", preview.toString())
             buildConfigField("String", "UPDATE_SIGNER_SHA256", "\"${updateSignerPin()}\"")
+            buildConfigField("String", "UPSTREAM_VERSION_NAME", "\"${metadata.getProperty("VERSION_NAME")}\"")
+            buildConfigField("String", "UPDATE_REPOSITORY", "\"${fork.updateRepository}\"")
+            buildConfigField("String", "CHANGELOG_FILE", "\"${fork.changelog}\"")
         }
     }
     setupAppCommon()
@@ -192,12 +196,12 @@ fun Project.setupApp() {
             }
         }
 
-        // Throne-<versionName>[-<flavor>]-<abi>[-<buildType>][-unsigned].apk; oss release = Throne-<versionName>-<abi>.apk
+        // <ARTIFACT_NAME>-<versionName>[-<flavor>]-<abi>[-<buildType>][-unsigned].apk; oss release = Crown-<versionName>-<abi>.apk
         applicationVariants.all {
             val variant = this
             outputs.all {
                 this as BaseVariantOutputImpl
-                outputFileName = "Throne-${variant.versionName}" + outputFileName.removePrefix(project.name)
+                outputFileName = "${fork.artifactName}-${variant.versionName}" + outputFileName.removePrefix(project.name)
                     .replace("-release", "")
                     .replace("-oss", "")
             }

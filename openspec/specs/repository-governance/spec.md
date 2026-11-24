@@ -66,31 +66,50 @@ throne 核心 MUST 以 `nb4a.properties` 的 `THRONE_CORE_REF` 为唯一真实�
 - **THEN** 先向用户说明所需仓库及参考目的并等待其提供具体路径
 - **AND** 仅访问用户明确提供的路径
 
-### Requirement: 应用版本来源唯一
+### Requirement: Идентичность форка Crown
 
-应用版本 MUST 以 `nb4a.properties` 的 `VERSION_NAME`（及 `VERSION_CODE`）为唯一真实来源；包名 MUST 以 `PACKAGE_NAME` 为准。发布物（tag、Release 标题、预览版本号）MUST 随该值派生，避免构建与发布版本错位。
+Форк MUST собираться как отдельное приложение Crown: идентификатор `PACKAGE_NAME`, версия `VERSION_NAME`, репозиторий обновлений `UPDATE_REPOSITORY`, файл истории изменений `CHANGELOG` и префикс имён APK `ARTIFACT_NAME` MUST браться из `fork.properties`. `nb4a.properties` MUST оставаться совпадающим с upstream (`THRONE_CORE_REF` по-прежнему задаёт ядро, его `VERSION_NAME` — версия Throne, на которой основана сборка); MUST NOT вносить в него правки форка. Название приложения («Crown», в русской локали «Корона») MUST задаваться ресурсами `app/src/oss/res/`, не правкой `strings.xml` upstream. Отображаемая версия MUST содержать версию Throne (`1.0.0 (Throne 2.0.7)`), а User-Agent запросов MUST сообщать версию Throne, а не форка. Правки файлов upstream ради идентичности форка MUST ограничиваться перечнем `FORK_IDENTITY_POINTS` в `tools/diagnostics/upstream_touch_points.py`; новые файлы форка — `fork.properties`, `CROWN_CHANGELOG.md`, `CROWN.md`, `buildSrc/src/main/kotlin/Fork.kt`, `app/src/oss/res/`.
 
-#### Scenario: 升级应用版本
+#### Scenario: Установка рядом с оригиналом
 
-- **WHEN** 维护者修改 `nb4a.properties` 的 `VERSION_NAME` 并发布
-- **THEN** 构建产物、发布 tag 与标题均使用新版本号
+- **WHEN** на устройстве установлен оригинальный Throne (`com.nb4a.throne`)
+- **THEN** Crown (`dev.folki.crown`) устанавливается отдельно, со своими данными и подписью
 
-### Requirement: 发布与预览工作流分离
+#### Scenario: Слияние upstream
 
-GitHub Actions MUST 通过 `release.yml` 与 `preview.yml` 分离正式发布与预览构建。正式发布 MUST 仅允许手动触发，MUST 从 `nb4a.properties` 的 `VERSION_NAME` 派生 tag `v${VERSION_NAME}`；当该 tag 已存在时 MUST 构建失败并提示提升版本号，而不复用旧 tag。发布入口 MUST 支持仅产出 workflow artifact 不创建 Release 的模式。预览 MUST 在推送到主分支时自动构建，版本号 MUST 为 `v${VERSION_NAME}-pre.${N}`（N 为自最近一个正式 tag 起的提交数，上限 998，保证预览排序低于对应正式版），HEAD 恰为正式 tag 时 MUST 跳过预览，且 MUST 以 pre-release 形式发布。
+- **WHEN** upstream меняет `VERSION_NAME`/`VERSION_CODE` в `nb4a.properties` и изменения сливаются в форк
+- **THEN** слияние не конфликтует с версией форка, а отображаемая версия Throne обновляется
+- **AND** `uv run tools/diagnostics/upstream_touch_points.py` не находит правок вне перечней
 
-#### Scenario: 手动发布正式版本
+### Requirement: Версия приложения выводится из fork.properties
 
-- **WHEN** 维护者手动运行 Release 工作流且允许发布
-- **THEN** 工作流构建签名 APK 并创建 `v${VERSION_NAME}` 的 GitHub Release 并附加产物
+Версия MUST задаваться только `VERSION_NAME` из `fork.properties` в виде `MAJOR.MINOR.PATCH` (MAJOR 0..20, MINOR и PATCH 0..99); сборка с другим значением MUST падать. `versionCode` MUST вычисляться как `((MAJOR·100 + MINOR)·100 + PATCH)·1000 + N`, где N = 999 для стабильного релиза, 1..998 для preview и 0 для локальной сборки, — так любая следующая версия и стабильный релиз старше всех preview своей версии без отдельно поддерживаемого `VERSION_CODE`. Tag, заголовок релиза и версия preview MUST выводиться из того же значения.
 
-#### Scenario: 版本号未提升时拒绝发布
+#### Scenario: Preview следующей версии старше предыдущего релиза
 
-- **WHEN** 目标 `v${VERSION_NAME}` tag 已存在于远端
-- **THEN** 工作流失败并提示提升 `VERSION_NAME`，不覆盖旧 Release
+- **WHEN** выпущен `v1.0.0` (versionCode 10000999) и `VERSION_NAME` поднят до `1.0.1`
+- **THEN** `1.0.1-pre.1` получает versionCode 10001001 и устанавливается поверх `1.0.0`
 
-#### Scenario: 主分支推送触发预览
+### Requirement: Стабильные релизы и preview публикуются для встроенного обновления
 
-- **WHEN** 提交推送到主分支且 HEAD 不是正式 tag
-- **THEN** 工作流按提交数生成预览版本并发布 pre-release
-- **AND** HEAD 为正式 tag 时不发布预览
+GitHub Actions MUST разделять релизы (`release.yml`) и preview (`preview.yml`). Обе сборки MUST подписываться ключом из секретов `SIGNING_*`, без них MUST падать; SHA-256 сертификата MUST закрепляться в `BuildConfig.UPDATE_SIGNER_SHA256`. Каждый релиз и preview MUST содержать APK по ABI, `SHA256SUMS` и манифест `throne-update.json`, по которому встроенный механизм обновления скачивает и проверяет APK того же пакета.
+
+Релиз MUST запускаться только вручную и публиковать `v${VERSION_NAME}` как latest; если tag уже есть, MUST падать без перезаписи. Режим без публикации MUST выкладывать только workflow artifact. Заметки MUST браться из раздела `#### ${VERSION_NAME}` файла `CHANGELOG`, при его отсутствии — из списка коммитов с предыдущего релиза. После публикации с ветки по умолчанию workflow MUST поднять PATCH в `fork.properties` этой ветки, если там всё ещё выпущенная версия.
+
+Preview MUST собираться при каждом push в ветку по умолчанию и публиковаться как pre-release `v${VERSION_NAME}-pre.${N}` того же пакета, что и релизы; N = 1 + число first-parent коммитов с последнего изменения `VERSION_NAME` в `fork.properties`, не больше 998. Если `v${VERSION_NAME}` уже выпущен, preview MUST пропускаться с предупреждением о необходимости поднять версию. Ручной запуск с другой ветки MUST выкладывать только workflow artifact. На GitHub MUST оставаться не более 10 последних pre-release (механизм обновления читает 20 последних релизов).
+
+#### Scenario: Push в main
+
+- **WHEN** коммит попадает в `main` и `v${VERSION_NAME}` ещё не выпущен
+- **THEN** публикуется pre-release с манифестом, и приложения с включёнными бета-обновлениями предлагают его установить
+
+#### Scenario: Стабильный релиз
+
+- **WHEN** владелец запускает Release с публикацией
+- **THEN** публикуется `v${VERSION_NAME}`, его получают и стабильный, и бета-канал
+- **AND** `VERSION_NAME` в `main` поднимается до следующей patch-версии
+
+#### Scenario: Версия не поднята после релиза
+
+- **WHEN** `v${VERSION_NAME}` уже существует, а в `main` приходит push
+- **THEN** preview не публикуется, в запуске появляется предупреждение поднять `VERSION_NAME`
