@@ -95,13 +95,19 @@ class ReportRedactor(
         for ((link, label) in links) s = s.replace(link, label)
         // Known secrets first, before LogRedactor rewrites anything inside them (an IP-like part becomes "<ip>"). The
         // mask has no angle brackets: LogRedactor still sees credentials of a URL as credentials.
-        // A secret that is also a scheme or network word right before ":" ("https://…", "tcp:host") is left for the end:
-        // masked here it would hide the URL / address from the passes below, which then could not clean it.
+        // A secret that is also a URL scheme right before "://" ("https://…", "foo.bar://…") or a network prefix right
+        // before ":" ("tcp:host") is left for the end: masked here it would hide the URL / address from the passes
+        // below, which then could not clean it. Anything else before ":" ("pw-1.2.3.4:") is masked now.
         for (pattern in secretPatterns) {
             val text = s
             s = pattern.replace(text) { m ->
-                val beforeColon = m.range.last + 1 < text.length && text[m.range.last + 1] == ':'
-                if (beforeColon && SCHEME_WORD.matches(m.value)) m.value else MASK
+                val end = m.range.last + 1
+                val keep = when {
+                    text.startsWith("://", end) -> URL_SCHEME.matches(m.value)
+                    text.startsWith(":", end) -> m.value.lowercase() in NETWORK_PREFIXES
+                    else -> false
+                }
+                if (keep) m.value else MASK
             }
         }
         s = log.redact(s)
@@ -218,11 +224,15 @@ class ReportRedactor(
         /** The labels LogRedactor and this pass put in the text; the name pass skips them whole. */
         private const val LABEL = """<(?:redacted|uuid|ip|key|domain|(?:server|host|subscription)-\d+(?:-host)?)>"""
 
-        /**
-         * A word that can be a URL scheme or a network prefix before ":" ("https", "tcp", "vless+ws"). No dot: a secret
-         * with an IP-like part ("pw-1.2.3.4") must be masked before LogRedactor turns that part into "<ip>".
-         */
-        private val SCHEME_WORD = Regex("""[a-zA-Z][a-zA-Z0-9+\-]*""")
+        /** A URL scheme (RFC 3986): letters, digits, "+", "-", "." after a letter. */
+        private val URL_SCHEME = Regex("""[A-Za-z][A-Za-z0-9+.\-]*""")
+
+        /** The network prefixes the cores write before an address ("tcp:host:443", "udp:[fd00::1]:53"). */
+        private val NETWORK_PREFIXES = setOf(
+            "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6", "ip", "ip4", "ip6", "unix", "unixgram", "unixpacket", "quic",
+            "tls", "ws", "wss", "grpc", "h2", "h3", "http", "https", "socks", "socks5", "kcp", "mkcp", "xhttp",
+            "splithttp", "httpupgrade", "dns",
+        )
 
         private val SINGLE_LABEL = Regex("[\\p{L}\\p{N}](?:[\\p{L}\\p{N}_\\-]*[\\p{L}\\p{N}])?")
 
@@ -312,7 +322,8 @@ class ReportRedactor(
 
         /** An IPv6-looking token of free text (the colon-hex run between non-word characters). */
         private val IPV6_TOKEN = Regex(
-            """(?<![\p{L}\p{N}_:.])(?:([a-zA-Z][a-zA-Z0-9+\-]{0,10}):)?([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?![\p{L}\p{N}_:])"""
+            // The prefix is a network word ("tcp") or a label a secret became ("<redacted>:fd00:0::1").
+            """(?<![\p{L}\p{N}_:.])(?:([a-zA-Z][a-zA-Z0-9+\-]{0,10}|<[a-z0-9\-]{1,30}>):)?([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?![\p{L}\p{N}_:])"""
         )
 
         /** Xray's lines that name where a connection goes (its own wording, beyond LogRedactor's destination lines). */

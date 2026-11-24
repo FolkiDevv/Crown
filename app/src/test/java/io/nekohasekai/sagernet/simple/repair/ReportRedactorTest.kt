@@ -370,6 +370,14 @@ class ReportRedactorTest {
         // Labels are never touched by the second pass, and an IP-like secret before ":" is still masked first.
         val ipLike = ReportRedactor(emptyList(), emptyList(), listOf("pw-1.2.3.4"))
         assertEquals("[Warn] bad <redacted>: denied", ipLike.redact("[Warn] bad pw-1.2.3.4: denied"))
+        // A dotted scheme (RFC 3986) before "://" is left for the URL pass as well (review).
+        val dotted = ReportRedactor(emptyList(), emptyList(), listOf("foo.bar"))
+        val dottedUrl = dotted.redact("GET foo.bar://unlisted.example.net/account/opaque-access-value")
+        assertEquals("GET <redacted>://<host-1>/<redacted>", dottedUrl)
+        for (gone in listOf("foo.bar", "unlisted", "opaque")) assertFalse(dottedUrl, dottedUrl.contains(gone))
+        // A secret that is no network word, masked first right before an address: the address is still recognized.
+        val before = ReportRedactor(ReportRedactor.serverNames("fd00::1", "{}"), emptyList(), listOf("pw-x"))
+        assertEquals("[Debug] via <redacted>:<server-1>", before.redact("[Debug] via pw-x:fd00:0::1"))
     }
 
     /** A configured IPv6 server in a spelling none of its listed forms has: compared by value in free text (review). */
