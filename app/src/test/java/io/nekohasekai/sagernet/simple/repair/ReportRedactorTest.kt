@@ -238,6 +238,77 @@ class ReportRedactorTest {
         assertEquals("[Info] GET http://[::1]:9090/<redacted>", r.redact("[Info] GET http://[::1]:9090/ui"))
     }
 
+    /** A secret with an IP-like part: masked before LogRedactor turns that part into "<ip>" (review). */
+    @Test
+    fun secretWithAnIpInside() {
+        val secret = "pw-203.0.113.9-Zq"
+        val profile = """{"type":"shadowsocks","server":"$serverDomain","password":"$secret"}"""
+        val r = ReportRedactor(ReportRedactor.serverNames(serverDomain, profile), emptyList(), ReportRedactor.secretValues(profile))
+        for (line in listOf(
+            "[Warn] auth failed for $secret",
+            "[Info] ss://aes:$secret@$serverDomain:8388 failed",
+            """{"note":"bad $secret here"}""",
+        )) {
+            val out = r.redact(line)
+            for (part in listOf(secret, "pw-", "-Zq", "203.0.113.9")) assertFalse(out, out.contains(part))
+            assertTrue(out, out.contains("<redacted>"))
+            assertFalse(out, out.contains(""))
+        }
+    }
+
+    /** A server with a single-label name ("gateway"): labelled where it stands as a host, the word itself stays (review). */
+    @Test
+    fun singleLabelServer() {
+        val profile = """{"type":"vless","server":"gateway","server_port":443,"uuid":"$uuid","transport":{"type":"ws","host":"none"}}"""
+        val names = ReportRedactor.serverNames("gateway:443", profile)
+        assertEquals(setOf("gateway"), names)
+        val r = ReportRedactor(names + ReportRedactor.serverNames("vpn", "{}"), emptyList())
+        assertEquals("[Debug] dialing to tcp:<server-1>:443", r.redact("[Debug] dialing to tcp:gateway:443"))
+        assertEquals("[Info] connect to <server-1>:8443 failed", r.redact("[Info] connect to GATEWAY:8443 failed"))
+        assertEquals("[Info] GET http://<server-1>/<redacted>", r.redact("[Info] GET http://gateway/status"))
+        assertTrue(r.redact("[Info] import vless://$uuid@gateway:443?type=ws#gw").contains("vless://<redacted>@<server-1>:443"))
+        assertTrue(r.redact("[Info] user@vpn connected").contains("user@<server-2>"))
+        // As plain words they are no hosts: «VPN service», «the gateway is down» stay readable.
+        assertEquals("[Info] the gateway is down, VPN service on", r.redact("[Info] the gateway is down, VPN service on"))
+        // Words a profile writes for "no address" are no servers.
+        assertEquals(emptySet<String>(), ReportRedactor.serverNames("none", """{"address":"auto","endpoint":"8080"}"""))
+    }
+
+    /** An IPv6 server in any spelling — compressed, full, zero-padded, with brackets and port (neighbouring case). */
+    @Test
+    fun ipv6ServerInAnySpelling() {
+        val names = ReportRedactor.serverNames("[fd00:0:0:0::1]:443", """{"type":"vless"}""")
+        val r = ReportRedactor(names, emptyList())
+        for (spelling in listOf("fd00::1", "fd00:0:0:0:0:0:0:1", "fd00:0000:0000:0000:0000:0000:0000:0001")) {
+            val out = r.redact("[Debug] dial tcp [$spelling]:443: connection refused")
+            assertEquals("[Debug] dial tcp [<server-1>]:443: connection refused", out)
+        }
+        assertEquals("http://<server-1>:8080/<redacted>", r.redact("http://[fd00:0::1]:8080/x"))
+        assertEquals(setOf("fd00::1", "fd00:0:0:0:0:0:0:1", "fd00:0000:0000:0000:0000:0000:0000:0001"), ReportRedactor.forms("fd00::1"))
+    }
+
+    /** An IDN server: the cores print punycode, the profile may hold Unicode, or the other way round (neighbouring case). */
+    @Test
+    fun idnServer() {
+        val r = ReportRedactor(ReportRedactor.serverNames("сервер.пример.рф", "{}"), emptyList())
+        val punycode = java.net.IDN.toASCII("сервер.пример.рф")
+        assertEquals("[Debug] dialing to tcp:<server-1>:443", r.redact("[Debug] dialing to tcp:$punycode:443"))
+        assertEquals("[Info] connect to <server-1>:443", r.redact("[Info] connect to СЕРВЕР.пример.рф:443"))
+        assertEquals("https://<server-1>/<redacted>", r.redact("https://$punycode/x"))
+        val fromPunycode = ReportRedactor(ReportRedactor.serverNames(punycode, "{}"), emptyList())
+        assertEquals("[Info] connect to <server-1>:443", fromPunycode.redact("[Info] connect to сервер.пример.рф:443"))
+    }
+
+    /** Servers written with their port, and endpoint lists (neighbouring case). */
+    @Test
+    fun serversWithPorts() {
+        val profile = """{"type":"wireguard","server":"vpn.example.org:8443","peers":[{"endpoint":"wg1.example.org:51820,wg2.example.org:51820"}]}"""
+        val names = ReportRedactor.serverNames("vpn.example.org:8443", profile)
+        assertEquals(setOf("vpn.example.org", "wg1.example.org", "wg2.example.org"), names)
+        val out = ReportRedactor(names, emptyList()).redact("[Info] peer wg2.example.org:51820 and vpn.example.org:8443")
+        assertEquals("[Info] peer <server-3>:51820 and <server-1>:8443", out)
+    }
+
     @Test
     fun escapedJsonIsCleanedAndStillParses() {
         val line = redactor().redact(report[16])

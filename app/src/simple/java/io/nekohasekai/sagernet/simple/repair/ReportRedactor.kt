@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.simple.repair
 import moe.matsuri.nb4a.utils.LogRedactor
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.IDN
 
 /**
  * The cleaning of the «Починка» report (design.md D8, connection-repair "Отчёт без секретов"): every line goes through
@@ -33,30 +34,45 @@ class ReportRedactor(
     /** The subscription links, longest first so that a link that is the start of another is not cut out of it. */
     private val links: List<Pair<String, String>>
 
-    /** The known names in free text, the longest first. */
+    /** The known dotted names and addresses in free text, the longest first. */
     private val names: Regex?
+
+    /**
+     * The known single-label server names ("gateway"), only where they stand as a host — after "@" or "//", before
+     * ":<port>": as plain words ("vpn") they are everywhere in a log.
+     */
+    private val singleNames: Regex?
 
     /** The known secret values, anywhere, the longest first. */
     private val secretPattern: Regex? = secrets.map { it.trim() }.filter { it.length >= MIN_SECRET }.distinct()
         .sortedByDescending { it.length }.takeIf { it.isNotEmpty() }
-        ?.let { known -> Regex(known.joinToString("|") { Regex.escape(it) }, RegexOption.IGNORE_CASE) }
+        ?.let { known -> Regex("(?iu)" + known.joinToString("|") { Regex.escape(it) }) }
 
     init {
-        servers.mapNotNull(::normalize).distinct().forEachIndexed { i, name -> labels[name] = "<server-${i + 1}>" }
+        // Every spelling of a server gets its label: IPv6 compressed / full / zero-padded, IDN as Unicode and punycode.
+        servers.mapNotNull { normalize(it) ?: singleLabel(it) }.distinct().forEachIndexed { i, name ->
+            for (form in forms(name)) labels.putIfAbsent(form, "<server-${i + 1}>")
+        }
         val distinctLinks = subscriptions.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         links = distinctLinks.mapIndexed { i, link -> link to "<subscription-${i + 1}>" }.sortedByDescending { it.first.length }
         distinctLinks.forEachIndexed { i, link ->
-            hostOf(link)?.let(::normalize)?.let { labels.putIfAbsent(it, "<subscription-${i + 1}-host>") }
+            hostOf(link)?.let(::normalize)?.let { host ->
+                for (form in forms(host)) labels.putIfAbsent(form, "<subscription-${i + 1}-host>")
+            }
         }
+        val (single, dotted) = labels.keys.partition(::isSingleLabel)
         // A subdomain of a server's domain names the server too: "cdn.vpn.example.com" becomes the label of
         // "vpn.example.com" (group 1 is dropped).
-        names = labels.keys.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
+        names = dotted.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
+            // A colon may come before a name ("dialing to tcp:host:443"): only a letter, digit, dot or dash may not.
             Regex(
-                // A colon may come before a name ("dialing to tcp:host:443"): only a letter, digit, dot or dash may not.
-                "(?<![\\w.\\-])((?:[a-z0-9_\\-]+\\.)*)(" + known.joinToString("|") { Regex.escape(it) } +
+                "(?iu)(?<![\\w.\\-])((?:[a-z0-9_\\-]+\\.)*)(" + known.joinToString("|") { Regex.escape(it) } +
                     ")(?![\\w\\-]|\\.[\\w\\-])",
-                RegexOption.IGNORE_CASE,
             )
+        }
+        singleNames = single.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
+            val alternatives = known.joinToString("|") { Regex.escape(it) }
+            Regex("(?iu)(?<=@|//)($alternatives)(?![\\w.\\-])|(?<![\\w.\\-])($alternatives)(?=:\\d)")
         }
     }
 
@@ -64,12 +80,14 @@ class ReportRedactor(
         // org.json writes "/" as "\/" on Android: URLs in JSON must look like URLs to the patterns.
         var s = line.replace("\\/", "/")
         for ((link, label) in links) s = s.replace(link, label)
+        // Known secrets first, before LogRedactor rewrites anything inside them (an IP-like part becomes "<ip>"). The
+        // mask has no angle brackets: LogRedactor still sees credentials of a URL as credentials.
+        secretPattern?.let { pattern -> s = pattern.replace(s, MASK) }
         s = log.redact(s)
         s = SECRET.replace(s) { m ->
             val (_, quote, key, separator, value) = m.groupValues
             "$quote$key$quote$separator" + if (value.startsWith("[")) "[\"<redacted>\"]" else "\"<redacted>\""
         }
-        secretPattern?.let { pattern -> s = pattern.replace(s, "<redacted>") }
         // The URL up to its host is rebuilt, never copied: a password with an "@" (`user:pa@ssword@host`) is cut by
         // LogRedactor at its first "@", and the rest of it would otherwise stay before the host.
         s = URL.replace(s) { m ->
@@ -77,7 +95,10 @@ class ReportRedactor(
             m.groupValues[1] + "://" + credentials + labelFor(m.groups[HOST]!!.value)
         }
         names?.let { pattern -> s = pattern.replace(s) { m -> labels[normalize(m.groupValues[2])] ?: m.value } }
-        return s
+        singleNames?.let { pattern ->
+            s = pattern.replace(s) { m -> labels[(m.groups[1] ?: m.groups[2])!!.value.lowercase()] ?: m.value }
+        }
+        return s.replace(MASK, "<redacted>")
     }
 
     /** Every line of [text]. */
@@ -128,12 +149,95 @@ class ReportRedactor(
     private fun labelFor(host: String): String {
         val name = normalize(host) ?: host.trim().removePrefix("[").removeSuffix("]").trimEnd('.').lowercase()
         if (name.isEmpty() || isLoopback(name)) return host
+        // Another spelling of a known address or name (IPv6 written otherwise, punycode) has its label already.
+        labels[name]?.let { return it }
+        forms(name).firstNotNullOfOrNull { labels[it] }?.let { return it }
         return labels.getOrPut(name) { "<host-${++hosts}>" }
     }
 
     companion object {
         private const val CREDENTIALS = 2
         private const val HOST = 3
+
+        /** What a known secret becomes until the end of [redact]: private-use characters, no angle brackets. */
+        private const val MASK = "redacted"
+
+        private val SINGLE_LABEL = Regex("[\\p{L}\\p{N}](?:[\\p{L}\\p{N}\\-]*[\\p{L}\\p{N}])?")
+
+        /** Words a profile writes where an address would be, which are no host. */
+        private val NOT_HOSTS = setOf(
+            "localhost", "none", "auto", "direct", "block", "local", "any", "true", "false", "null", "default",
+        )
+
+        /** The keys whose single-label value ("gateway") is a server; a transport's "host" or an SNI is not that sure. */
+        private val PRIMARY_SERVER_KEYS = setOf(
+            "server", "address", "endpoint", "peer", "remote", "remote_address", "server_address", "serveraddress",
+            "hostname",
+        )
+
+        private fun isSingleLabel(name: String) = !name.contains('.') && !name.contains(':')
+
+        /**
+         * A single-label host name ("gateway", "vpn"; also "gateway:8080"), lowercase, or null: not a number, not one of
+         * [NOT_HOSTS].
+         */
+        fun singleLabel(raw: String): String? {
+            var s = raw.trim()
+            if (s.contains("://")) s = hostOf(s) ?: return null
+            s = s.substringBefore('/')
+            if (s.count { it == ':' } == 1) s = s.substringBefore(':')
+            s = s.trimEnd('.').lowercase()
+            if (s.length !in 2..63 || s in NOT_HOSTS || s.all(Char::isDigit)) return null
+            return s.takeIf { SINGLE_LABEL.matches(it) }
+        }
+
+        /** The spellings of one name: IPv6 compressed (RFC 5952), full and zero-padded; IDN as punycode and Unicode. */
+        fun forms(name: String): Set<String> {
+            val out = linkedSetOf(name)
+            if (name.contains(':')) {
+                out += ipv6Forms(name)
+            } else {
+                runCatching { IDN.toASCII(name, IDN.ALLOW_UNASSIGNED).lowercase() }.getOrNull()
+                    ?.takeIf { it.isNotEmpty() }?.let(out::add)
+                runCatching { IDN.toUnicode(name, IDN.ALLOW_UNASSIGNED).lowercase() }.getOrNull()
+                    ?.takeIf { it.isNotEmpty() }?.let(out::add)
+            }
+            return out
+        }
+
+        private fun ipv6Forms(s: String): Set<String> {
+            if (s.count { it == ':' } < 2 || s.any { !(it.isDigit() || it in 'a'..'f' || it == ':') }) return emptySet()
+            val halves = s.split("::")
+            if (halves.size > 2) return emptySet()
+            val head = halves[0].split(':').filter { it.isNotEmpty() }
+            val tail = if (halves.size == 2) halves[1].split(':').filter { it.isNotEmpty() } else emptyList()
+            val missing = 8 - head.size - tail.size
+            if (if (halves.size == 1) missing != 0 else missing < 1) return emptySet()
+            val groups = (head + List(missing) { "0" } + tail).map { group ->
+                group.takeIf { it.length <= 4 }?.toIntOrNull(16) ?: return emptySet()
+            }
+            fun hex(list: List<Int>) = list.joinToString(":") { it.toString(16) }
+            var bestStart = -1
+            var bestLength = 1
+            var i = 0
+            while (i < 8) {
+                if (groups[i] != 0) {
+                    i++
+                    continue
+                }
+                var j = i
+                while (j < 8 && groups[j] == 0) j++
+                if (j - i > bestLength) {
+                    bestStart = i
+                    bestLength = j - i
+                }
+                i = j
+            }
+            val compressed = if (bestStart < 0) hex(groups) else {
+                hex(groups.subList(0, bestStart)) + "::" + hex(groups.subList(bestStart + bestLength, 8))
+            }
+            return setOf(hex(groups), groups.joinToString(":") { it.toString(16).padStart(4, '0') }, compressed)
+        }
 
         /** Shorter values ("/ws", "none") are words of the config, not secrets: replacing them would blur the report. */
         private const val MIN_SECRET = 6
@@ -225,23 +329,28 @@ class ReportRedactor(
 
         /**
          * The server names of one profile as the app stores it ([outboundJson], the desktop's profile JSON): every string
-         * under a [SERVER_KEYS] key at any depth (also "host:port" lists and arrays), plus [server] itself.
+         * under a [SERVER_KEYS] key at any depth (also "host:port" lists and arrays), plus [server] itself. A single-label
+         * name ("gateway") counts as the server's address itself or under [PRIMARY_SERVER_KEYS].
          */
         fun serverNames(server: String, outboundJson: String): Set<String> {
             val out = LinkedHashSet<String>()
-            normalize(server)?.let(out::add)
+            (normalize(server) ?: singleLabel(server))?.let(out::add)
             val root = runCatching { JSONObject(outboundJson) }.getOrNull() ?: return out
-            fun addValue(value: Any?) {
+            fun addValue(value: Any?, primary: Boolean) {
                 when (value) {
-                    is String -> value.split(',', ' ', '\n').forEach { part -> normalize(part)?.let(out::add) }
-                    is JSONArray -> for (i in 0 until value.length()) addValue(value.opt(i))
+                    is String -> value.split(',', ' ', '\n').forEach { part ->
+                        (normalize(part) ?: if (primary) singleLabel(part) else null)?.let(out::add)
+                    }
+
+                    is JSONArray -> for (i in 0 until value.length()) addValue(value.opt(i), primary)
                 }
             }
             fun walk(node: Any?) {
                 when (node) {
                     is JSONObject -> node.keys().forEach { key ->
                         val value = node.opt(key)
-                        if (key.lowercase() in SERVER_KEYS) addValue(value)
+                        val lower = key.lowercase()
+                        if (lower in SERVER_KEYS) addValue(value, lower in PRIMARY_SERVER_KEYS)
                         walk(value)
                     }
 
