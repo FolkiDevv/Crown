@@ -419,6 +419,33 @@ class ReportRedactorTest {
         }
     }
 
+    /**
+     * A known secret in the text a replacement keeps — a loopback host, a port, the top-level domain of a destination,
+     * a network prefix — is masked too; the labels stay whole, and loopback without a secret stays readable (review).
+     */
+    @Test
+    fun secretsInKeptText() {
+        val r = ReportRedactor(emptyList(), emptyList(), listOf("localhost", "com", "8443", "udp"))
+        assertEquals("[Info] GET http://<redacted>/<redacted>", r.redact("[Info] GET http://localhost/x"))
+        assertEquals(
+            "xray: [Info] [1] proxy/socks: TCP Connect request to tcp:<domain>.<redacted>:443",
+            r.redact("xray: [Info] [1] proxy/socks: TCP Connect request to tcp:www.example.com:443"),
+        )
+        assertEquals("GET https://<host-1>:<redacted>/<redacted>", r.redact("GET https://vpn.example.org:8443/x"))
+        assertEquals("dialing to <redacted>:<ip>", r.redact("dialing to udp:2a00:1450::1"))
+        val plain = ReportRedactor(emptyList(), emptyList())
+        assertEquals("[Info] GET http://localhost:9/<redacted>", plain.redact("[Info] GET http://localhost:9/x"))
+    }
+
+    /** Loopback is an address in 127/8, localhost or ::1 — not a host name that starts with "127." (review). */
+    @Test
+    fun loopbackIsAnAddress() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        assertEquals("GET http://<host-1>/<redacted>", r.redact("GET http://127.customer.example/support"))
+        assertEquals("GET http://127.0.0.1:9090/<redacted>", r.redact("GET http://127.0.0.1:9090/ui"))
+        assertEquals("GET http://<host-2>/<redacted>", r.redact("GET http://127.0.0.999/x"))
+    }
+
     /** A configured IPv6 server in a spelling none of its listed forms has: compared by value in free text (review). */
     @Test
     fun ipv6ServerByValueInFreeText() {

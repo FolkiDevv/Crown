@@ -47,21 +47,35 @@ class ReportRedactor(
      * "1.7", "10.0.0.7" stay). A user with a one-character password sees that character standing alone in the log
      * masked as well: privacy first.
      */
-    private fun secretPatternsOf(values: List<String>): List<Regex> {
+    private fun secretSourcesOf(values: List<String>): List<String> {
         fun alternatives(range: IntRange) = values.filter { it.length in range }.joinToString("|") { Regex.escape(it) }
         return listOfNotNull(
-            alternatives(MIN_ANYWHERE..Int.MAX_VALUE).takeIf { it.isNotEmpty() }?.let { Regex("(?iu)$it") },
+            alternatives(MIN_ANYWHERE..Int.MAX_VALUE).takeIf { it.isNotEmpty() },
             alternatives(1 until MIN_ANYWHERE).takeIf { it.isNotEmpty() }?.let {
-                Regex("(?iu)(?<![\\p{L}\\p{N}_]|\\p{N}\\.)(?:$it)(?![\\p{L}\\p{N}_]|\\.\\p{N})")
+                "(?<![\\p{L}\\p{N}_]|\\p{N}\\.)(?:$it)(?![\\p{L}\\p{N}_]|\\.\\p{N})"
             },
         )
     }
+
+    private fun secretPatternsOf(values: List<String>): List<Regex> = secretSourcesOf(values).map { Regex("(?iu)$it") }
 
     private val knownSecrets: List<String> = secrets.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         .sortedByDescending { it.length }
 
     /** All known secrets, for the span pass of [redact]. */
     private val secretPatterns: List<Regex> = secretPatternsOf(knownSecrets)
+
+    /** The secrets in the text a replacement keeps (a loopback host, a port, a top-level domain), labels skipped. */
+    private val keptSecretPatterns: List<Regex> =
+        secretSourcesOf(knownSecrets).map { Regex("(?iu)(${LABEL_PATTERN.pattern})|(?:$it)") }
+
+    /**
+     * A replacement with the known secrets in the text it keeps masked: a URL keeps its scheme, a loopback host and its
+     * port, a destination its top-level domain, an IPv6 address its network prefix — none of them may be a secret.
+     */
+    private fun maskKept(text: String): String = keptSecretPatterns.fold(text) { s, pattern ->
+        pattern.replace(s) { m -> if (m.groups[1] != null) m.value else "<redacted>" }
+    }
 
     init {
         // Every spelling of a server gets its label: IPv6 compressed / full / zero-padded, IDN as Unicode and punycode.
@@ -121,7 +135,9 @@ class ReportRedactor(
     private fun spans(s: String): List<Span> {
         val out = ArrayList<Span>()
         fun add(range: IntRange, kind: Kind, text: String) {
-            out += Span(range.first, range.last + 1, kind, text)
+            // A label already in the line is kept as it is; any other replacement has the secrets in its kept text masked.
+            val kept = kind == Kind.LABEL && text == s.substring(range)
+            out += Span(range.first, range.last + 1, kind, if (kept) text else maskKept(text))
         }
         // A subscription link whole (it is a secret: its path holds the token).
         for ((link, label) in links) {
@@ -485,7 +501,11 @@ class ReportRedactor(
             return s
         }
 
-        private fun isLoopback(name: String) = name == "localhost" || name == "::1" || name.startsWith("127.")
+        /** localhost, ::1 or an IPv4 address in 127/8 — not a host name that merely starts with "127." (review). */
+        private fun isLoopback(name: String) = name == "localhost" || name == "::1" ||
+            LOOPBACK_V4.matchEntire(name)?.groupValues?.drop(1)?.all { it.toInt() <= 255 } == true
+
+        private val LOOPBACK_V4 = Regex("""127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})""")
 
         /** The host of a URL, null when it has none. */
         fun hostOf(url: String): String? = URL.find(url)?.groups?.get(HOST)?.value
