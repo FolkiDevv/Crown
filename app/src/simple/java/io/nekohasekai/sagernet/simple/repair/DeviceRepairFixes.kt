@@ -212,6 +212,7 @@ class DeviceRepairFixes(
                 }
             },
             profileExists = { id -> ProfileManager.getProfile(id) != null },
+            runningNow = { DataStore.currentProfile },
             vpn = vpn,
             log = { Logs.i("simple repair: $it") },
         )

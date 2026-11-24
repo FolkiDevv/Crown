@@ -148,12 +148,12 @@ class RepairEngine(
         result: StepResult,
         done: Map<RepairStep, StepResult>,
         tried: Set<FixKind>,
-    ): List<RepairFix> = try {
+    ): List<RepairFix>? = try {
         checks.fixesFor(step, result, done).filter { it.kind !in tried }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        emptyList()
+        null
     }
 
     /**
@@ -167,7 +167,7 @@ class RepairEngine(
         tried: Set<FixKind> = emptySet(),
         fixedFrom: MutableMap<RepairStep, StepResult>,
     ): StepResult {
-        for (fix in candidates(step, failed, done, tried)) {
+        for (fix in candidates(step, failed, done, tried).orEmpty()) {
             val entry = journal.record(
                 step, fix.kind, stillOurs = fix::stillApplied, reversible = fix.reversible, restore = fix::restore,
             )
@@ -189,9 +189,12 @@ class RepairEngine(
                 // them makes it pass; this change stays either way.
                 if (recheck.status == StepStatus.WARN) {
                     val tried2 = tried + fix.kind
-                    if (candidates(step, recheck, done, tried2).isNotEmpty()) {
+                    val partial = recheck.copy(values = failed.values + recheck.values)
+                    // The follow-up fixes could not be looked up: the warning stays, it is no fix.
+                    val more = candidates(step, recheck, done, tried2) ?: return partial
+                    if (more.isNotEmpty()) {
                         val further = tryFixes(step, recheck, done, tried2, fixedFrom)
-                        return if (further.status == StepStatus.FIXED) further else recheck.copy(values = failed.values + recheck.values)
+                        return if (further.status == StepStatus.FIXED) further else partial
                     }
                 }
                 fixedFrom[step] = failed

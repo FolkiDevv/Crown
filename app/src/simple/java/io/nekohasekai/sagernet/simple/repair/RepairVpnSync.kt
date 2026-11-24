@@ -129,25 +129,43 @@ class PendingReload(
      */
     @Synchronized
     fun arm(connects: () -> Int = { 0 }): Owed {
-        current?.let { return it }
+        current?.let { owed ->
+            // Owed already; a watcher that is gone (it cannot end while owed, but if it did) is started again.
+            if (job?.isActive != true) watch(owed)
+            return owed
+        }
         val owed = Owed(connects)
         current = owed
         log("a reload is owed to the service; it is sent once it is connected")
-        job = scope.launch {
-            val sent = withTimeoutOrNull(lifetimeMs) { watch(owed) } ?: false
-            if (!sent) finish(owed, ReloadOutcome.DROPPED)
-        }
+        watch(owed)
         return owed
     }
 
-    /** Until the service is connected (then the reload goes) or off; true when the reload was sent. */
-    private suspend fun watch(owed: Owed): Boolean {
+    private fun watch(owed: Owed) {
+        job = scope.launch {
+            val sent = withTimeoutOrNull(lifetimeMs) { watchUntilResolved(owed) } ?: false
+            if (!sent) finish(owed, ReloadOutcome.DROPPED)
+        }
+    }
+
+    /**
+     * Until the service is connected (then the reload goes) or off; true when the reload was sent. A look that fails
+     * (the state cannot be read, the reload cannot be sent) is tried again at the next poll: the reload stays owed.
+     */
+    private suspend fun watchUntilResolved(owed: Owed): Boolean {
         while (true) {
-            when (phase()) {
-                ServicePhase.CONNECTED -> return sendIfOwed(owed)
-                ServicePhase.OFF -> return false
-                ServicePhase.STARTING -> delay(pollMs)
+            try {
+                when (phase()) {
+                    ServicePhase.CONNECTED -> return sendIfOwed(owed)
+                    ServicePhase.OFF -> return false
+                    ServicePhase.STARTING -> Unit
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("the owed reload is tried again: ${e.message}")
             }
+            delay(pollMs)
         }
     }
 
@@ -188,27 +206,44 @@ class SubscriptionWait(
     private val barrier: suspend () -> Unit,
     private val profileExists: (Long) -> Boolean,
     private val vpn: RepairVpn,
+    /** The profile the service runs now. */
+    private val runningNow: () -> Long = { 0L },
     private val successorMs: Long = 17_000L,
+    private val pollMs: Long = 200L,
     private val log: (String) -> Unit = {},
 ) {
 
     /**
-     * True when every update ran; false when the queue could not be reached (nothing submitted runs then either).
-     * [running]: the profile the service ran before, null when it was off.
+     * True when every update was submitted and ran; false when a submission or the queue failed. Even then the barrier
+     * is waited for: a group submitted before the failure still runs before it, so nothing submitted can come after
+     * the return (if the queue itself cannot be reached, `:bg` is gone and its queue with it). [running]: the profile
+     * the service ran before, null when it was off.
      */
     suspend fun await(groups: List<Long>, running: Long?): Boolean {
-        val connects = vpn.connects()
+        var failure: Exception? = null
         try {
             for (gid in groups) submit(gid)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failure = e
+        }
+        try {
             barrier()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            log("the subscription queue could not be reached: ${e.message}")
-            return false
+            failure = failure ?: e
         }
-        if (running != null && !profileExists(running)) vpn.awaitConnected(connects, successorMs)
-        return true
+        // The successor start of a replaced running profile: the service runs another profile and is connected — not
+        // just any connect, which a reload meanwhile could have made — or the window `:bg` gives it is over.
+        if (running != null && !profileExists(running)) {
+            withTimeoutOrNull(successorMs) {
+                while (!(vpn.connected() && runningNow() != running)) delay(pollMs)
+            }
+        }
+        failure?.let { log("the subscription update could not be submitted: ${it.message}") }
+        return failure == null
     }
 }
 
@@ -255,7 +290,7 @@ class SubscriptionUpdateFix(
         val before = if (vpn.off()) null else running()
         val finished = withContext(NonCancellable) { wait.await(groups, before) }
         selection().takeIf { it != saved }?.let { movedTo = it }
-        if (!finished) throw IllegalStateException("the subscription update did not run")
+        if (!finished) throw IllegalStateException("the subscription update could not be submitted")
         // The update removed the profile the VPN ran and nothing took over: the user's VPN is off now — no fix.
         if (before != null && vpn.off()) throw IllegalStateException("the update stopped the VPN")
         if (!vpn.off() && reloadAllowed() && !reloader.reloadWhenConnected("subscriptions updated")) {
