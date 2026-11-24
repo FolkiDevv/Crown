@@ -195,12 +195,23 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
     @Volatile
     private var consent: CompletableDeferred<Boolean>? = null
 
+    /**
+     * `SystemClock.elapsedRealtime()` when the consent dialog was shown and not answered yet; 0 when none is open.
+     * One dialog at a time: its answer goes to the request waiting when it comes (the user answers the question every
+     * request asks — this app's VPN consent); a request while it is open waits for that answer instead of a second
+     * dialog, whose result could be taken for the first one's.
+     */
+    @Volatile
+    private var dialogShownAt = 0L
+
     /** Asks the activity for the VPN consent and waits for the answer; kept here, so a rotation does not lose it. */
     suspend fun requestConsent(): Boolean {
         val waiter = CompletableDeferred<Boolean>()
         consent?.complete(false)
         consent = waiter
-        consentChannel.trySend(Unit)
+        // A dialog left open longer than this is taken as gone (the activity finished without a result).
+        val open = dialogShownAt != 0L && SystemClock.elapsedRealtime() - dialogShownAt < CONSENT_DIALOG_STALE_MS
+        if (!open) consentChannel.trySend(Unit)
         return try {
             waiter.await()
         } finally {
@@ -208,8 +219,14 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** The activity shows the consent dialog now. */
+    fun consentDialogShown() {
+        dialogShownAt = SystemClock.elapsedRealtime()
+    }
+
     /** The user's answer to the consent dialog (false also when the dialog could not open). */
     fun consentAnswered(granted: Boolean) {
+        dialogShownAt = 0L
         consent?.complete(granted)
     }
 
@@ -332,3 +349,6 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         const val ACTION_TARGET_CHOSEN = BuildConfig.APPLICATION_ID + ".REPAIR_SHARE_TARGET_CHOSEN"
     }
 }
+
+/** How long an unanswered VPN consent dialog counts as open; after that a request shows a new one. */
+private const val CONSENT_DIALOG_STALE_MS = 120_000L

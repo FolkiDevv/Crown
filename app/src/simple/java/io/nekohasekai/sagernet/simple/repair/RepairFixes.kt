@@ -95,6 +95,11 @@ class RepairJournal(
          * such as the VPN it started: a retry later could stop a VPN the user started since.
          */
         val retriable: Boolean,
+        /**
+         * The setting the change wrote, when one is known. Changes of one setting form a chain (A → B → C): they are
+         * put back newest first, and an older one waits while a newer one of the same setting is not put back.
+         */
+        val key: String?,
         val restore: () -> Unit,
     ) {
         /** The change was put back by a restore that reversed it (not superseded, not provider content). */
@@ -127,8 +132,9 @@ class RepairJournal(
         stillOurs: () -> Boolean = { true },
         reversible: Boolean = true,
         retriable: Boolean = true,
+        key: String? = null,
         restore: () -> Unit,
-    ): Entry = Entry(step, kind, keepIf, stillOurs, reversible, retriable, restore)
+    ): Entry = Entry(step, kind, keepIf, stillOurs, reversible, retriable, key, restore)
         .also { synchronized(entries) { entries += it } }
 
     /** Puts [entry] back; true when it was in effect and is put back now (a failed restore keeps it in effect). */
@@ -148,8 +154,18 @@ class RepairJournal(
     private fun restoreWhere(predicate: (Entry) -> Boolean): List<Entry> {
         val chosen = synchronized(entries) { entries.filter(predicate) }
         // Newest first: a later change may stand on an earlier one (the server chosen for the VPN raised after it). A
-        // restore that throws stops none of the others.
-        val restored = chosen.asReversed().filter(::run)
+        // restore that throws stops none of the others — but an older change of the same setting waits for it (its
+        // compare would see the newer value and drop it as superseded); it is kept as not put back, for a retry.
+        val blocked = HashSet<String>()
+        val restored = ArrayList<Entry>()
+        for (entry in chosen.asReversed()) {
+            val key = entry.key
+            if (key != null && key in blocked) {
+                synchronized(entries) { failed += entry }
+                continue
+            }
+            if (run(entry)) restored += entry else if (key != null) blocked += key
+        }
         synchronized(entries) { entries.removeAll(restored.toSet()) }
         return restored
     }

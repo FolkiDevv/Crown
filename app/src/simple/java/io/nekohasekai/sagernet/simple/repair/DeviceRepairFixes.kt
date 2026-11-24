@@ -15,6 +15,7 @@ import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 
 /**
@@ -22,6 +23,9 @@ import kotlinx.coroutines.withContext
  * run and the screen. It watches the state `:bg` stores, as the server choice of the traffic modes does.
  */
 object RepairReloads {
+    /** Work that outlives a run: the owed reload's watcher, binder calls a wait gave up on. */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val pending = PendingReload(
         phase = {
             val state = DataStore.serviceState
@@ -32,9 +36,15 @@ object RepairReloads {
             }
         },
         sendReload = { SagerNet.reloadService() },
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        scope = scope,
         log = { Logs.i("simple repair: $it") },
     )
+
+    /**
+     * A call to `:bg` whose wait can end (a stop, a time limit) without waiting for the blocking binder call itself: the
+     * call runs on in [scope] (binding to the service has no deadline of its own).
+     */
+    suspend fun <T> detached(block: suspend () -> T): T = scope.async { block() }.await()
 }
 
 /**
@@ -122,6 +132,19 @@ class DeviceRepairFixes(
      * becomes of this run. A service that is off reads the value at its next start.
      */
     private fun owe() {
+        owePending = true
+    }
+
+    /**
+     * A value was put back inside the restore's write transaction; the reload is armed only after it committed
+     * ([settle] runs after every restore, the stop's too), so the service never reloads with the old value.
+     */
+    @Volatile
+    private var owePending = false
+
+    private fun armOwed() {
+        if (!owePending) return
+        owePending = false
         if (vpnStopped || env.serviceOff()) return
         owed = RepairReloads.pending.arm { env.connects() }
     }
@@ -132,6 +155,7 @@ class DeviceRepairFixes(
      * ends. Without [wait] (the stop) nothing is waited for: the reload stays owed. Cancelling this never loses it.
      */
     suspend fun settle(wait: Boolean) {
+        armOwed()
         val o = owed ?: return
         if (!wait) return
         val outcome = o.await(RECONNECT_MS) ?: return
@@ -201,10 +225,10 @@ class DeviceRepairFixes(
         subscriptionsUpdated = true
         val wait = SubscriptionWait(
             // Returns once `:bg`'s queue holds the update (SubscriptionQueue.refreshGroup enqueues synchronously).
-            submit = { gid -> withContext(Dispatchers.IO) { CoreServiceClient.call { it.refreshGroup(gid, false) } } },
+            submit = { gid -> RepairReloads.detached { CoreServiceClient.call { it.refreshGroup(gid, false) } } },
             // A no-op queued behind them in the same FIFO queue: returns once every update before it has run.
             barrier = {
-                withContext(Dispatchers.IO) { CoreServiceClient.call { it.resolveProfiles(LongArray(0)) } }
+                RepairReloads.detached { CoreServiceClient.call { it.resolveProfiles(LongArray(0)) } }
                 // The lists of this process learn about the writes of `:bg`.
                 for (gid in groups) {
                     GroupRepo.postUpdate(gid)
@@ -223,14 +247,6 @@ class DeviceRepairFixes(
             reloader = reloader,
             running = { DataStore.currentProfile },
             reloadAllowed = { !vpnStopped },
-            selection = { DataStore.selectedProxy },
-            putBack = { saved ->
-                // A deleted profile was replaced by the update; its successor stays.
-                if (ProfileManager.getProfile(saved) != null) {
-                    DataStore.selectedProxy = saved
-                    owe()
-                }
-            },
             log = { Logs.i("simple repair: $it") },
         )
     }

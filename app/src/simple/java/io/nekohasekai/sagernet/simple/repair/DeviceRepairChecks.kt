@@ -18,6 +18,7 @@ import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.outbound.config.AutoSelectorPlanner
 import io.nekohasekai.sagernet.outbound.types.AutoSelector
+import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import io.nekohasekai.sagernet.simple.modes.TrafficMode
@@ -475,17 +476,30 @@ class DeviceRepairChecks(
         }
         val selected = DataStore.selectedProxy
         val connects = env.connects()
+        // The connection «Починка» starts, by its start time: `:bg` keeps it across restarts in place (the fixes'
+        // reloads) and drops it when the service stops, so a VPN the user stopped and started again meanwhile (the
+        // quick toggle) has another one and is never stopped by this rollback. Null while the start is in flight.
+        var session: Long? = null
         // Bound to this run (not retriable): a later retry could stop a VPN the user started since.
-        val entry = journal.record(step, kind = null, keepIf = RepairStep.SITES_VPN, retriable = false) {
-            Logs.i("simple repair: stopping the VPN started for the checks")
-            fixes.vpnStopped()
-            env.stopVpn()
+        val entry = journal.record(step, kind = null, keepIf = RepairStep.SITES_VPN, retriable = false, key = "server") {
+            val running = DataStore.configurationStore.getLong(SimpleHooks.KEY_CONNECTED_SINCE)
+            if (!env.serviceOff() && (session == null || running == session)) {
+                Logs.i("simple repair: stopping the VPN started for the checks")
+                fixes.vpnStopped()
+                env.stopVpn()
+            } else {
+                Logs.i("simple repair: the VPN started for the checks is gone; the one running now is left alone")
+            }
+            // The server selected for it goes back while it is still the one «Починка» wrote (compare and set).
             if (selected != chosen && DataStore.selectedProxy == chosen) DataStore.selectedProxy = selected
         }
         if (selected != chosen) withContext(Dispatchers.IO) { DataStore.selectedProxy = chosen }
         Logs.i("simple repair: starting the VPN on server $chosen for the checks through it")
         env.startVpn()
-        if (env.awaitConnected(connects, VPN_START_MS)) return null
+        if (env.awaitConnected(connects, VPN_START_MS)) {
+            session = withContext(Dispatchers.IO) { DataStore.configurationStore.getLong(SimpleHooks.KEY_CONNECTED_SINCE) }
+            return null
+        }
         Logs.w("simple repair: the VPN started for the checks did not connect")
         journal.restore(entry)
         return SkipReason.VPN_START_FAILED.also { vpnProblem = it }
