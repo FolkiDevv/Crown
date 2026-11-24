@@ -723,7 +723,8 @@ class RepairRollbackTest {
      * Servers: none answers; the subscription update makes B answer but not the selected A ([switchWorks]: whether
      * the switch to B then answers).
      */
-    private class PartialServers(val switchWorks: Boolean) : RepairChecks {
+    private class PartialServers(val switchWorks: Boolean, val blockAt: RepairStep? = null) : RepairChecks {
+        val reached = CompletableDeferred<Unit>()
         var updated = false
         var switched = false
         val restored = mutableListOf<FixKind>()
@@ -732,6 +733,11 @@ class RepairRollbackTest {
         var seenByVpnCheck: ServersSummary? = null
 
         override suspend fun run(step: RepairStep, done: Map<RepairStep, StepResult>): StepResult = when (step) {
+            blockAt -> {
+                reached.complete(Unit)
+                awaitCancellation()
+            }
+
             RepairStep.SERVERS -> if (updated) {
                 StepResult(StepStatus.WARN, setOf(Finding.CURRENT_SERVER_DOWN), servers = onlyB)
             } else {
@@ -801,6 +807,29 @@ class RepairRollbackTest {
         assertNull(servers.fix)
         assertEquals(listOf(FixKind.SWITCHED_SERVER), checks.restored)
         assertEquals(RepairVerdict.Cause.CURRENT_SERVER_DOWN, (RepairVerdict.of(results) as RepairVerdict.CauseFound).cause)
+    }
+
+    @Test
+    fun anUndoneSwitchShowsTheStateItActedOnAgain() = runBlocking {
+        // The update made B answer, the switch to B fixed the check; a stop puts the switch back: the row shows the
+        // partial state again — the selected server does not answer (not «текущий тоже» from the switch's recheck).
+        val checks = PartialServers(switchWorks = true, blockAt = RepairStep.DNS_VPN)
+        val published = mutableListOf<RepairProgress>()
+        val run = async(Dispatchers.Default) { engine(checks).run { published += it } }
+        checks.reached.await()
+        run.cancel()
+        try {
+            run.await()
+        } catch (e: CancellationException) {
+            Unit
+        }
+        val servers = published.last().results.getValue(RepairStep.SERVERS)
+        assertEquals(StepStatus.WARN, servers.status)
+        assertEquals(FixKind.SWITCHED_SERVER, servers.undoneFix)
+        assertTrue(servers.has(Finding.CURRENT_SERVER_DOWN))
+        assertFalse(servers.servers!!.currentAnswers)
+        assertEquals(1, servers.servers!!.answering)
+        assertEquals(listOf(FixKind.SWITCHED_SERVER, FixKind.SUBSCRIPTION_UPDATED), checks.restored)
     }
 
     @Test
