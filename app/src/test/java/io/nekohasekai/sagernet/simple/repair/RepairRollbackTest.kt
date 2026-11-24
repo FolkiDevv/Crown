@@ -413,8 +413,95 @@ class RepairRollbackTest {
         assertFalse(published.last().undoing)
         // The DNS change is still in effect and recorded, so it can be put back by a later rollback.
         assertEquals(listOf(RepairStep.DNS_DIRECT), journal.applied.map { it.step })
+        assertEquals(listOf(RepairStep.DNS_DIRECT), journal.unrestored.map { it.step })
+        // The screen and the report do not claim it undone: it is still «исправлено»; the MTU fix (put back) is gone.
+        val dns = published.last().results.getValue(RepairStep.DNS_DIRECT)
+        assertEquals(StepStatus.FIXED, dns.status)
+        assertEquals(FixKind.DIRECT_DNS_WHITELISTED, dns.fix)
+        assertNull(dns.undoneFix)
         journal.restoreAll()
         assertEquals("local", settings.values["dns"])
+    }
+
+    @Test
+    fun aChangeAStoppedRunCouldNotPutBackIsPutBackBeforeTheNextRun() = runBlocking {
+        // The view model's lifecycle: a run stops, one restore throws, the run ends; the next run first retries it.
+        val settings = Settings()
+        val unrestored = UnrestoredChanges()
+        val inFix = CompletableDeferred<Unit>()
+        val firstChecks = FakeChecks(
+            settings,
+            pass = { step, values ->
+                when (step) {
+                    RepairStep.DNS_DIRECT -> values["dns"] == "77.88.8.8"
+                    RepairStep.SITES_VPN -> false
+                    else -> true
+                }
+            },
+            fixes = { step ->
+                when (step) {
+                    RepairStep.DNS_DIRECT -> listOf(
+                        FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8", failingRestores = 1),
+                    )
+
+                    RepairStep.SITES_VPN -> listOf(
+                        FakeFix(settings, FixKind.MTU_LOWERED, "mtu", "1280") {
+                            inFix.complete(Unit)
+                            awaitCancellation()
+                        },
+                    )
+
+                    else -> emptyList()
+                }
+            },
+        )
+        val firstJournal = RepairJournal()
+        val first = async(Dispatchers.Default) {
+            try {
+                engine(firstChecks, firstJournal, fixTimeout = 60_000L).run { }
+            } finally {
+                unrestored.keep(firstJournal, firstChecks)
+            }
+        }
+        inFix.await()
+        first.cancel()
+        try {
+            first.await()
+        } catch (e: CancellationException) {
+            Unit
+        }
+        assertTrue(unrestored.pending)
+        assertEquals("77.88.8.8", settings.values["dns"])
+
+        // The next run: the retry comes first, the values reach the VPN through the checks that made the change.
+        unrestored.retry()
+        assertTrue(!unrestored.pending)
+        assertEquals("local", settings.values["dns"])
+        assertEquals(listOf(false, true), firstChecks.settles)
+        // Nothing left: a second retry does nothing.
+        unrestored.retry()
+        assertEquals(listOf(false, true), firstChecks.settles)
+    }
+
+    @Test
+    fun aFinishedRunKeepsItsFixesAndCarriesNothingOver() = runBlocking {
+        val settings = Settings()
+        val journal = RepairJournal()
+        val checks = FakeChecks(
+            settings,
+            pass = { step, values -> step != RepairStep.DNS_DIRECT || values["dns"] == "77.88.8.8" },
+            fixes = { step ->
+                if (step == RepairStep.DNS_DIRECT) listOf(FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8"))
+                else emptyList()
+            },
+        )
+        engine(checks, journal).run { }
+        val unrestored = UnrestoredChanges()
+        unrestored.keep(journal, checks)
+        // A kept fix is no failed restore: nothing to retry, the fix stays.
+        assertTrue(!unrestored.pending)
+        unrestored.retry()
+        assertEquals("77.88.8.8", settings.values["dns"])
     }
 
     @Test

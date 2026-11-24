@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.simple.repair
 
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
@@ -11,14 +12,30 @@ import io.nekohasekai.sagernet.group.RemoteRouteUpdater
 import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+
+/**
+ * The reload a run of «Починка» could not send before it ended ([PendingReload]): one per process, so it outlives the
+ * run and the screen. It watches the state `:bg` stores, as the server choice of the traffic modes does.
+ */
+object RepairReloads {
+    val pending = PendingReload(
+        phase = {
+            val state = DataStore.serviceState
+            when {
+                state == BaseService.State.Connected -> ServicePhase.CONNECTED
+                !state.started && state != BaseService.State.Stopping -> ServicePhase.OFF
+                else -> ServicePhase.STARTING
+            }
+        },
+        sendReload = { SagerNet.reloadService() },
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        log = { Logs.i("simple repair: $it") },
+    )
+}
 
 /**
  * The automatic fixes of «Починки» on the device (design.md D8, connection-repair "Безопасные автоматические
@@ -32,9 +49,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   has its own DNS: the global setting does not apply then);
  * - «Сайты через VPN» do not open → the routing profiles are updated, then the VPN's MTU is lowered to 1280.
  *
- * A running VPN takes each change up at once (a reload, waited for), so the check after it sees the change. Updates of
- * subscriptions and routing profiles change no setting: their content is the provider's current one and stays; only
- * the server selection they may have moved is put back.
+ * A running VPN takes each change up at once (a reload, waited for): a fix whose VPN does not connect again is no fix
+ * and is put back. Updates of subscriptions and routing profiles change no setting: their content is the provider's
+ * current one and stays; only the server selection they may have moved is put back.
  */
 class DeviceRepairFixes(
     private val env: RepairEnvironment,
@@ -53,6 +70,16 @@ class DeviceRepairFixes(
 
     /** The subscriptions were updated in this run already. */
     private var subscriptionsUpdated = false
+
+    private val vpn = object : RepairVpn {
+        override fun connected() = env.vpnConnected()
+        override fun off() = env.serviceOff()
+        override fun connects() = env.connects()
+        override suspend fun awaitConnected(after: Int, timeoutMs: Long) = env.awaitConnected(after, timeoutMs)
+        override fun sendReload() = SagerNet.reloadService()
+    }
+
+    private val reloader = VpnReloader(vpn, log = { Logs.i("simple repair: $it") }, reconnectMs = RECONNECT_MS)
 
     /** Reads the settings and the database: call it off the main thread. */
     fun fixesFor(step: RepairStep, result: StepResult): List<RepairFix> {
@@ -87,26 +114,21 @@ class DeviceRepairFixes(
     /**
      * After values were put back: a running VPN reloads once to take them up; [wait] until it is connected again. A
      * service that is off reads them at its next start. One still starting or reloading may have read the replaced
-     * values already, so it reloads once it is connected (a reload that reaches a start in flight would stop it); if it
-     * does not connect in time the reload stays pending for the next settle.
+     * values already: it reloads once it is connected (a reload that reaches a start in flight would stop it) — here
+     * when [wait] and it connects in time, otherwise through the process-wide [RepairReloads] that outlives the run.
      */
     suspend fun settle(wait: Boolean) {
         if (!reloadPending) return
-        if (vpnStopped) {
-            reloadPending = false
+        reloadPending = false
+        if (vpnStopped || env.serviceOff()) return
+        val connects = env.connects()
+        if (!env.vpnConnected() && !(wait && env.awaitConnected(connects, RECONNECT_MS))) {
+            if (!vpnStopped && !env.serviceOff()) RepairReloads.pending.arm()
             return
         }
-        val connects = env.connects()
-        if (!env.vpnConnected()) {
-            if (env.serviceOff()) {
-                reloadPending = false
-                return
-            }
-            if (!env.awaitConnected(connects, RECONNECT_MS) || vpnStopped) return
-        }
-        reloadPending = false
+        if (vpnStopped) return
         if (wait) {
-            reload("settings put back")
+            reloader.reload("settings put back")
         } else {
             Logs.i("simple repair: settings put back, reload of the running service")
             SagerNet.reloadService()
@@ -159,35 +181,36 @@ class DeviceRepairFixes(
         }
     }
 
-    /** Updates every subscription now and waits for the queue to finish them. */
+    /** Updates every subscription now ([SubscriptionUpdateFix]), once per run. */
     private fun subscriptionUpdate(): RepairFix? {
         if (subscriptionsUpdated) return null
         val groups = GroupRepo.all().filter { it.isSubscription && !it.archive && it.url.isNotBlank() }.map { it.id }
         if (groups.isEmpty()) return null
+        subscriptionsUpdated = true
         val selected = DataStore.selectedProxy
-        return object : RepairFix {
-            override val kind = FixKind.SUBSCRIPTION_UPDATED
-
-            override suspend fun apply() {
-                subscriptionsUpdated = true
-                Logs.i("simple repair: fix subscription_updated: ${groups.size} subscription(s)")
-                // Not cancellable: a stop puts the selection back only once the update can no longer move it or
-                // start the service (`:bg` replaces a running profile by its successor).
-                withContext(NonCancellable) { awaitSubscriptions(groups) }
-                // A running VPN takes the update up before the recheck, as it does every fix: a running profile that
-                // kept its id but took new content is otherwise only applied at its next start
-                // (allow_stopping_active_profile is about the updater restarting it on its own, not about «Починка»).
-                if (!env.serviceOff()) reloadWhenConnected("subscriptions updated")
-            }
-
-            override fun restore() {
-                // The servers are the provider's current ones and stay; a selection the update moved goes back.
+        val wait = SubscriptionWait(
+            states = SubscriptionClient.states,
+            request = { gid -> SubscriptionClient.refreshGroup(gid, false) },
+            lastUpdate = { gid -> GroupRepo.get(gid)?.subLastUpdate ?: 0L },
+            profileExists = { id -> ProfileManager.getProfile(id) != null },
+            vpn = vpn,
+        )
+        return SubscriptionUpdateFix(
+            groups = groups,
+            wait = wait,
+            vpn = vpn,
+            reloader = reloader,
+            running = { DataStore.currentProfile },
+            reloadAllowed = { !vpnStopped },
+            restoreSelection = {
+                // A selection the update moved goes back while its profile exists (a deleted one is replaced).
                 if (DataStore.selectedProxy != selected && ProfileManager.getProfile(selected) != null) {
                     DataStore.selectedProxy = selected
                     reloadPending = true
                 }
-            }
-        }
+            },
+            log = { Logs.i("simple repair: $it") },
+        )
     }
 
     /** Updates the remote routing profiles now; the running VPN reloads with them. */
@@ -201,7 +224,7 @@ class DeviceRepairFixes(
                 val (updated, failures) = withContext(Dispatchers.IO) { RemoteRouteUpdater.updateAll(onlyAutoUpdate = false) }
                 Logs.i("simple repair: fix routes_updated: $updated updated, ${failures.size} failed")
                 if (updated == 0) throw IllegalStateException("no routing profile was updated")
-                reload("routing profiles updated")
+                if (!reload("routing profiles updated")) throw IllegalStateException("the VPN did not reconnect")
             }
 
             // The rules are the provider's current ones; no setting was changed.
@@ -211,7 +234,10 @@ class DeviceRepairFixes(
 
     // ------------------------------------------------------------------------------------------------ helpers
 
-    /** A setting changed from [before] to [after] through [write]; a running VPN reloads to take it up. */
+    /**
+     * A setting changed from [before] to [after] through [write]; a running VPN reloads to take it up, and the fix
+     * fails when it does not connect again.
+     */
     private fun <T> setting(fixKind: FixKind, name: String, before: T, after: T, write: (T) -> Unit): RepairFix =
         object : RepairFix {
             override val kind = fixKind
@@ -220,7 +246,7 @@ class DeviceRepairFixes(
             override suspend fun apply() {
                 Logs.i("simple repair: fix ${kind.name.lowercase()}: $name ${describe(before)} -> ${describe(after)}")
                 withContext(Dispatchers.IO) { write(after) }
-                if (env.vpnConnected()) reload("$name changed")
+                if (env.vpnConnected() && !reload("$name changed")) throw IllegalStateException("the VPN did not reconnect")
             }
 
             override fun restore() {
@@ -236,44 +262,8 @@ class DeviceRepairFixes(
         else -> value.toString()
     }
 
-    /** Reloads the running VPN and waits until it is connected again. */
-    private suspend fun reload(why: String) {
-        if (vpnStopped) return
-        val before = env.connects()
-        Logs.i("simple repair: $why, reload of the running service")
-        SagerNet.reloadService()
-        if (!env.awaitConnected(before, RECONNECT_MS)) Logs.w("simple repair: the service did not reconnect after the reload")
-    }
-
-    /**
-     * A reload once the service is connected: the update may have restarted it already, and a reload that reaches a
-     * start in flight would stop it.
-     */
-    private suspend fun reloadWhenConnected(why: String) {
-        delay(RESTART_SHOW_MS)
-        val connects = env.connects()
-        if (!env.vpnConnected() && !env.awaitConnected(connects, RECONNECT_MS)) {
-            Logs.w("simple repair: the service did not connect; $why without a reload")
-            return
-        }
-        reload(why)
-    }
-
-    /**
-     * Asks the `:bg` queue to update [groups] and waits until none of them is queued or running any more: first until
-     * the queue reports one of them (a registration replays what is pending), then until all are through.
-     */
-    private suspend fun awaitSubscriptions(groups: List<Long>) = coroutineScope {
-        // Collecting the states keeps the queue's callback registered while the updates run.
-        val watch = launch { SubscriptionClient.states.collect { } }
-        try {
-            for (gid in groups) SubscriptionClient.refreshGroup(gid, false)
-            withTimeoutOrNull(QUEUE_START_MS) { SubscriptionClient.states.first { states -> groups.any { it in states } } }
-            withTimeoutOrNull(SUBSCRIPTION_MS) { SubscriptionClient.states.first { states -> groups.none { it in states } } }
-        } finally {
-            watch.cancel()
-        }
-    }
+    /** Reloads the running VPN and waits until it is connected again; true without a reload once it was stopped. */
+    private suspend fun reload(why: String): Boolean = vpnStopped || reloader.reload(why)
 
     private companion object {
         /** connection-repair: «снижение MTU до 1280». */
@@ -283,12 +273,5 @@ class DeviceRepairFixes(
         val REMOTE_DNS_ALTERNATIVES = listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query")
 
         const val RECONNECT_MS = 60_000L
-        const val QUEUE_START_MS = 15_000L
-
-        /** A download times out after about 10 s; several subscriptions and their URL tests after it. */
-        const val SUBSCRIPTION_MS = 90_000L
-
-        /** How long a restart `:bg` sent may take to show as a state change. */
-        const val RESTART_SHOW_MS = 2_000L
     }
 }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -139,11 +140,17 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         val previous = job
         job = viewModelScope.launch {
             previous?.join()
+            // A change an earlier run could not put back is tried again before this run reads any setting.
+            if (unrestored.pending) {
+                withContext(NonCancellable) { unrestored.retry() }
+                if (unrestored.pending) Logs.w("simple repair: a change of an earlier run still could not be put back")
+            }
             // What this run changes, to be put back when a fix does not help or the run is stopped.
             val journal = RepairJournal { entry, e ->
                 Logs.w("simple repair: could not put back ${entry.kind?.name?.lowercase() ?: "the VPN started for the checks"}", e)
             }
-            val engine = RepairEngine(DeviceRepairChecks(getApplication(), environment, journal), journal)
+            val checks = DeviceRepairChecks(getApplication(), environment, journal)
+            val engine = RepairEngine(checks, journal)
             try {
                 val progress = engine.run { progress -> publish { it.copy(progress = progress) } }
                 val verdict = RepairVerdict.of(progress.results)
@@ -152,17 +159,22 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
                 Logs.i("simple repair: finished, verdict ${describe(verdict)}")
                 publish { it.copy(running = false, stopping = false, progress = progress, verdict = verdict) }
             } catch (e: CancellationException) {
-                journal.applied.takeIf { it.isNotEmpty() }?.let {
-                    Logs.w("simple repair: ${it.size} change(s) could not be put back")
+                journal.unrestored.takeIf { it.isNotEmpty() }?.let {
+                    Logs.w("simple repair: ${it.size} change(s) could not be put back; tried again before the next run")
                 }
                 Logs.i("simple repair: stopped by the user")
                 publish { it.copy(running = false, stopping = false, stopped = true) }
                 throw e
+            } finally {
+                unrestored.keep(journal, checks)
             }
         }
     }
 
     private var runs = 0
+
+    /** Changes earlier runs could not put back, retried before the next run (they outlive their run). */
+    private val unrestored = UnrestoredChanges()
 
     private val consentChannel = Channel<Unit>(Channel.CONFLATED)
 

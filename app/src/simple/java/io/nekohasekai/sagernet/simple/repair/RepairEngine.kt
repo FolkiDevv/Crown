@@ -116,10 +116,12 @@ class RepairEngine(
                     journal.restoreAll()
                     settle(wait = false)
                 }
-                // A check fixed in this run is no longer fixed: it shows what it found and that the fix was undone.
+                // A check whose fix was put back is no longer fixed: it shows what it found and that the fix was undone.
+                // A fix whose restore failed is still in effect and stays «исправлено» (UnrestoredChanges retries it).
+                val stillApplied = journal.applied.map { it.step to it.kind }.toSet()
                 for ((step, status) in fixedFrom) {
                     val result = (steps[step] as? StepState.Done)?.result ?: continue
-                    if (result.status != StepStatus.FIXED) continue
+                    if (result.status != StepStatus.FIXED || (step to result.fix) in stillApplied) continue
                     steps[step] = StepState.Done(result.copy(status = status, fix = null, undoneFix = result.fix))
                 }
                 publish()

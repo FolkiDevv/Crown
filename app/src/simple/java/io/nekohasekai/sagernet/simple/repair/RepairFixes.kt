@@ -59,8 +59,17 @@ class RepairJournal(
 
     private val entries = ArrayList<Entry>()
 
+    /** Entries whose last restore threw: still in effect, to be tried again. */
+    private val failed = LinkedHashSet<Entry>()
+
     /** The changes in effect, oldest first. */
     val applied: List<Entry> get() = synchronized(entries) { entries.toList() }
+
+    /** The changes a rollback tried to put back and could not, oldest first (still in effect). */
+    val unrestored: List<Entry> get() = synchronized(entries) { entries.filter { it in failed } }
+
+    /** Tries the [unrestored] changes again, newest first; returns those put back now. */
+    fun retryFailed(): List<Entry> = restoreWhere { it in failed }
 
     fun record(step: RepairStep, kind: FixKind?, keepIf: RepairStep = step, restore: () -> Unit): Entry =
         Entry(step, kind, keepIf, restore).also { synchronized(entries) { entries += it } }
@@ -90,9 +99,38 @@ class RepairJournal(
 
     private fun run(entry: Entry): Boolean = try {
         entry.restore()
+        synchronized(entries) { failed -= entry }
         true
     } catch (e: Exception) {
+        synchronized(entries) { failed += entry }
         onRestoreFailed(entry, e)
         false
+    }
+}
+
+/**
+ * The changes of earlier runs of «Починка» that could not be put back ([RepairJournal.unrestored]): kept with the
+ * checks that made them (whose [RepairChecks.settle] lets the VPN take a restored value up) and tried again before the
+ * next run reads or changes any setting. Pure, like the engine.
+ */
+class UnrestoredChanges {
+
+    private val left = ArrayList<Pair<RepairJournal, RepairChecks>>()
+
+    /** Whether some change is still waiting to be put back. */
+    val pending: Boolean get() = synchronized(left) { left.isNotEmpty() }
+
+    /** After a run: keeps its journal when a change of it could not be put back. */
+    fun keep(journal: RepairJournal, checks: RepairChecks) {
+        if (journal.unrestored.isNotEmpty()) synchronized(left) { left += journal to checks }
+    }
+
+    /** Before a run: tries every kept change again, the newest run first; the VPN takes what was put back up. */
+    suspend fun retry() {
+        val runs = synchronized(left) { left.toList() }.asReversed()
+        for ((journal, checks) in runs) {
+            if (journal.retryFailed().isNotEmpty()) checks.settle(true)
+            if (journal.unrestored.isEmpty()) synchronized(left) { left.remove(journal to checks) }
+        }
     }
 }
