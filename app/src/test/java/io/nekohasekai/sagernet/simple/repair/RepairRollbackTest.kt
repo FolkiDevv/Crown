@@ -106,7 +106,7 @@ class RepairRollbackTest {
     private fun engine(checks: RepairChecks, journal: RepairJournal = RepairJournal(), fixTimeout: Long = 5_000L) =
         RepairEngine(checks, journal, timeoutMs = { 60_000L }, fixTimeoutMs = fixTimeout)
 
-    @Test
+    @Test(timeout = 20_000)
     fun aFixThatHelpsMarksTheCheckFixedAndStays() = runBlocking {
         val settings = Settings()
         val journal = RepairJournal()
@@ -135,7 +135,7 @@ class RepairRollbackTest {
         assertEquals(RepairVerdict.Fixed(listOf(RepairStep.DNS_DIRECT to FixKind.DIRECT_DNS_WHITELISTED)), verdict)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aFixThatDoesNotHelpIsPutBackBeforeTheNextOneIsTried() = runBlocking {
         val settings = Settings()
         val checks = FakeChecks(
@@ -161,7 +161,7 @@ class RepairRollbackTest {
         assertEquals(listOf(true), checks.settles)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun whenNoFixHelpsEverySettingIsBackAndTheCheckStaysFailed() = runBlocking {
         // connection-repair "Снижение MTU не помогло": the MTU goes back to what it was.
         val settings = Settings()
@@ -184,7 +184,7 @@ class RepairRollbackTest {
         assertTrue(RepairVerdict.of(results).fixes.isEmpty())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aFixThatThrowsOrTakesTooLongIsPutBack() = runBlocking {
         val settings = Settings()
         val checks = FakeChecks(
@@ -218,7 +218,7 @@ class RepairRollbackTest {
         assertEquals(StepStatus.OK, results.getValue(RepairStep.BACKGROUND).status)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun stopPutsBackEveryChangeNewestFirstIncludingTheFixesThatHelped() = runBlocking {
         val settings = Settings()
         val journal = RepairJournal()
@@ -278,7 +278,7 @@ class RepairRollbackTest {
         assertTrue(dns.has(Finding.DNS_NO_ANSWER))
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aStopWithNothingChangedHasNoRollback() = runBlocking {
         val settings = Settings()
         val reached = CompletableDeferred<Unit>()
@@ -318,7 +318,7 @@ class RepairRollbackTest {
         },
     )
 
-    @Test
+    @Test(timeout = 20_000)
     fun theVpnStartedForTheChecksStaysWhenTheSitesOpen() = runBlocking {
         val settings = Settings()
         val journal = RepairJournal()
@@ -330,7 +330,7 @@ class RepairRollbackTest {
         assertTrue(RepairVerdict.of(results).fixes.isEmpty())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun theVpnStartedForTheChecksIsStoppedWhenTheSitesStillFail() = runBlocking {
         val settings = Settings()
         val journal = RepairJournal()
@@ -342,7 +342,7 @@ class RepairRollbackTest {
         assertTrue(journal.applied.isEmpty())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun theJournalPutsEachChangeBackOnce() {
         val journal = RepairJournal()
         val log = mutableListOf<String>()
@@ -357,7 +357,7 @@ class RepairRollbackTest {
         assertEquals(listOf("dns", "vpn", "server"), log)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aRestoreThatThrowsStopsNoneOfTheOthersAndIsTriedAgainLater() {
         val failed = mutableListOf<RepairStep>()
         val journal = RepairJournal(onRestoreFailed = { entry, _ -> failed += entry.step })
@@ -379,7 +379,7 @@ class RepairRollbackTest {
         assertEquals(listOf("mtu", "dns", "server"), log)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aFailedRestoreDuringTheStopStillSettlesThePutBackValuesAndEndsTheRun() = runBlocking {
         val settings = Settings()
         val journal = RepairJournal()
@@ -437,7 +437,7 @@ class RepairRollbackTest {
         assertEquals("local", settings.values["dns"])
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aChangeAStoppedRunCouldNotPutBackIsPutBackBeforeTheNextRun() = runBlocking {
         // The view model's lifecycle: a run stops, one restore throws, the run ends; the next run first retries it.
         val settings = Settings()
@@ -548,13 +548,13 @@ class RepairRollbackTest {
         return events
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aRunCancelledBeforeItStartedStillHoldsTheNextRunBackUntilTheRollback() {
         // B is cancelled while queued, before its body could start: C must still wait for A's rollback.
         assertEquals(listOf("A rolled back", "B ended stopped", "C started"), serialRunsOrder { b, _ -> b.cancel() })
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aRunStoppedWhileItWaitsKeepsTheRollbackItWaitedFor() {
         // B is let run until it waits for A (A's rollback held), and is stopped there.
         val order = serialRunsOrder { b, dispatcher ->
@@ -565,12 +565,12 @@ class RepairRollbackTest {
         assertEquals(listOf("A rolled back", "B ended stopped", "C started"), order)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aRunNotStoppedStartsAfterTheRollbackToo() {
         assertEquals(listOf("A rolled back", "B started", "C started"), serialRunsOrder { _, _ -> })
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aSupersededChangeIsNotPutBackOverANewerValue() = runBlocking {
         // The stop's restore and the first retry both fail; the next run then sets the same setting; the later retry
         // must not write the old value over the newer one (compare and set).
@@ -595,7 +595,7 @@ class RepairRollbackTest {
         assertTrue(settings.log.none { it.startsWith("restore dns=") })
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aChangeStillInPlaceIsPutBackByTheRetry() = runBlocking {
         val settings = Settings()
         val fix = FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8", failingRestores = 2)
@@ -611,7 +611,7 @@ class RepairRollbackTest {
         assertTrue(!unrestored.pending)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aFinishedRunKeepsItsFixesAndCarriesNothingOver() = runBlocking {
         val settings = Settings()
         val journal = RepairJournal()
@@ -632,7 +632,7 @@ class RepairRollbackTest {
         assertEquals("77.88.8.8", settings.values["dns"])
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aFixedCheckCarriesTheServersOfItsRecheck() = runBlocking {
         // No server answered, the subscription update made them answer: the checks through the VPN get the server the
         // recheck chose, not the «none» of the first look.
@@ -675,7 +675,7 @@ class RepairRollbackTest {
         assertEquals(7L, seenByVpnCheck)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aLightRecheckKeepsTheServersFound() = runBlocking {
         val found = ServersSummary(total = 5, answering = 3, whitelistTotal = 0, whitelistAnswering = 0, chosenId = 2L)
         val checks = object : RepairChecks {
@@ -696,7 +696,7 @@ class RepairRollbackTest {
         assertEquals(found, servers.servers)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aSwitchPublishesTheNewCurrentServerAsAnswering() = runBlocking {
         // The switch's light recheck keeps the URL test's counts and says the new current server answers.
         val found = ServersSummary(total = 5, answering = 3, whitelistTotal = 0, whitelistAnswering = 0, chosenId = 2L)
@@ -786,7 +786,7 @@ class RepairRollbackTest {
         }
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun anUpdateThatLeavesTheSelectedServerDownIsFollowedByTheSwitch() = runBlocking {
         val checks = PartialServers(switchWorks = true)
         val servers = engine(checks).run { }.results.getValue(RepairStep.SERVERS)
@@ -798,7 +798,7 @@ class RepairRollbackTest {
         assertTrue(checks.seenByVpnCheck!!.currentAnswers)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun anUpdateThatLeavesTheSelectedServerDownIsNoFixWithoutTheSwitch() = runBlocking {
         // Partial progress only: other servers answer now, the selected one does not and the switch did not help.
         val checks = PartialServers(switchWorks = false)
@@ -811,7 +811,7 @@ class RepairRollbackTest {
         assertEquals(RepairVerdict.Cause.CURRENT_SERVER_DOWN, (RepairVerdict.of(results) as RepairVerdict.CauseFound).cause)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun anUndoneSwitchShowsTheStateItActedOnAgain() = runBlocking {
         // The update made B answer, the switch to B fixed the check; a stop puts the switch back: the row shows the
         // partial state again — the selected server does not answer (not «текущий тоже» from the switch's recheck).
@@ -834,7 +834,7 @@ class RepairRollbackTest {
         assertEquals(listOf(FixKind.SWITCHED_SERVER, FixKind.SUBSCRIPTION_UPDATED), checks.restored)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aStopUndoesOnlyFixesItReversedNotProviderContent() = runBlocking {
         // Routes refreshed (provider content, stays) fixed «Сайты через VPN»; the MTU fixed «DNS через VPN». A stop
         // during a later check reverses the MTU only: that row reads «отменено», the routes row stays «исправлено».
@@ -890,7 +890,7 @@ class RepairRollbackTest {
         assertEquals("new", settings.values["routes"])
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aChangeThatCannotBePutBackStopsFurtherFixesOfTheCheck() = runBlocking {
         // The first fix does not help and its restore fails (twice in the fix loop, once more when the check ends
         // failed): the second fix is not tried on top of it, and the change stays recorded as not put back.
@@ -914,7 +914,7 @@ class RepairRollbackTest {
         assertEquals(listOf(RepairStep.SITES_VPN), journal.unrestored.map { it.step })
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aFailedLookupOfTheFollowUpFixesLeavesTheWarning() = runBlocking {
         // The update makes B answer, the selected A still does not; looking up the follow-up fixes throws: the step
         // stays a warning (the current server is down), it is not «исправлено».
@@ -948,7 +948,7 @@ class RepairRollbackTest {
         }
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aWriterBeforeTheCompareAndSetSupersedesTheRestore() {
         val setting = LockedSetting("77.88.8.8")
         val journal = RepairJournal(atomically = setting::atomically)
@@ -961,7 +961,7 @@ class RepairRollbackTest {
         assertEquals("9.9.9.9", setting.value)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aWriterDuringTheCompareAndSetWaitsAndKeepsItsValue() {
         // The other writer tries while the check and the restore run: it waits for the transaction and writes after
         // it, so the newer value is the one that stays — never the old one over it.
@@ -991,7 +991,7 @@ class RepairRollbackTest {
         assertEquals("9.9.9.9", setting.value)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun anOlderChangeOfTheSameSettingWaitsForTheNewerRestore() {
         // A → B (first fix) and B → C (second fix) on one setting; the C → B restore fails: the A → B change must not
         // be dropped as superseded (it would see C) — it stays pending, and once C → B works, B → A follows.
@@ -1015,7 +1015,7 @@ class RepairRollbackTest {
         assertTrue(journal.applied.isEmpty())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aWarningWithoutAFollowUpThatStillSaysTheProblemIsNoFix() = runBlocking {
         // The update makes B answer, A stays down, and no switch is offered (the selection already changed): the
         // step keeps the warning instead of falling through to «исправлено».
@@ -1034,7 +1034,7 @@ class RepairRollbackTest {
         assertNull(servers.fix)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aChangeBoundToItsRunIsNotRetriedByALaterRun() = runBlocking {
         // The VPN started for the checks could not be stopped by the stop: a later run must not stop the VPN the
         // user may have started since.
@@ -1054,7 +1054,7 @@ class RepairRollbackTest {
         assertTrue(stops.isEmpty())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aRunStoppedBeforeItsStartDoesNotRetryAnEarlierChange() = runBlocking {
         val settings = Settings()
         val fix = FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8", failingRestores = 1)
@@ -1078,7 +1078,7 @@ class RepairRollbackTest {
         assertEquals("local", settings.values["dns"])
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aChainOfOneSettingAcrossRunsIsPutBackInOrder() = runBlocking {
         // Run 1 wrote A → B and could not put it back; run 2 then wrote B → C and could not either. The older change
         // must not be dropped as superseded while the newer one is still in place: both are carried in one journal.
@@ -1111,7 +1111,7 @@ class RepairRollbackTest {
         assertFalse(carry.pending)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun theServerChainSurvivesARunBoundVpnStopThatCannotBeRetried() = runBlocking {
         // «Доступность серверов» switched A → B; the VPN for the checks selected C and started; on the stop the VPN
         // stop fails (bound to the run: never retried) and so does the selection's C → B. The selection is a change
@@ -1146,7 +1146,7 @@ class RepairRollbackTest {
         assertEquals(listOf("stop"), stops)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun clearingTheOwnerGivesTheRunsCallsUpBeforeTheRunIsCancelled() {
         // The view model is cleared while a run waits for a call to `:bg` whose callback is about to claim. The owner
         // closes the gate first; the run's cancellation is not even processed here (the manual dispatcher is not run),
