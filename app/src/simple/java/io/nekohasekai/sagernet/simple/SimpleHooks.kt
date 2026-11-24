@@ -15,6 +15,9 @@ object SimpleHooks {
     /** `SystemClock.elapsedRealtime()` of the first Connected of this connection, 0 = not connected. */
     const val KEY_CONNECTED_SINCE = "simple_connected_since"
 
+    /** Counts the starts of a core (also restarts in place), so the simple UI can tell one happened meanwhile. */
+    const val KEY_SERVICE_STARTS = "simple_service_starts"
+
     /** A restart in place is in flight: the connection goes on and keeps its start. Lives only in `:bg`. */
     @Volatile
     private var restarting = false
@@ -29,6 +32,7 @@ object SimpleHooks {
         )
         restarting = false
         DataStore.configurationStore.putLong(KEY_CONNECTED_SINCE, since)
+        countStart()
     }
 
     /**
@@ -39,6 +43,14 @@ object SimpleHooks {
     fun onServiceStopped(restart: Boolean) = guarded {
         restarting = restart
         if (!restart) DataStore.configurationStore.remove(KEY_CONNECTED_SINCE)
+        // The new core of a restart reads its settings after this, before it reports Connected: counting it here
+        // already lets an app list edit see that the core may have taken the edit's staged per-app keys.
+        if (restart) countStart()
+    }
+
+    private fun countStart() {
+        val store = DataStore.configurationStore
+        store.putLong(KEY_SERVICE_STARTS, (store.getLong(KEY_SERVICE_STARTS) ?: 0L) + 1)
     }
 
     /** The service must never fail because of the simple UI. */

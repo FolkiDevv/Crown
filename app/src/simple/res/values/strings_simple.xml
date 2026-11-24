@@ -49,7 +49,6 @@
     <string name="simple_latency_ms">%1$d ms</string>
     <string name="simple_card_mode">Traffic mode</string>
     <string name="simple_mode_smart">Smart</string>
-    <string name="simple_mode_coming">Choosing a traffic mode is coming in an upcoming update.</string>
 
     <!-- Home: problem banner -->
     <string name="simple_problem_lost_title">Connection lost</string>
@@ -62,4 +61,38 @@
     <string name="simple_repair_coming">Automatic checks and fixes are coming in an upcoming update.</string>
     <!-- %1$s: the error message of the service -->
     <string name="simple_repair_details">Details: %1$s</string>
+
+    <!-- Traffic modes: settings -->
+    <string name="simple_settings_mode">Traffic mode</string>
+    <string name="simple_mode_auto">Auto</string>
+    <string name="simple_mode_auto_summary">Picks the mode that suits the network. For now it works like Smart.</string>
+    <string name="simple_mode_smart_summary">Russian sites go directly, everything else through the VPN.</string>
+    <string name="simple_mode_whitelist">Whitelists</string>
+    <string name="simple_mode_whitelist_summary">Everything goes through the VPN except the local network and apps without VPN. For networks where only allowed sites open.</string>
+    <string name="simple_mode_apps">Selected apps only</string>
+    <string name="simple_mode_apps_summary">Only the apps you choose go through the VPN.</string>
+    <string name="simple_settings_apps_selected">Choose apps</string>
+    <plurals name="simple_apps_count">
+        <item quantity="one">%d app selected</item>
+        <item quantity="other">%d apps selected</item>
+    </plurals>
+    <string name="simple_settings_apps_bypass">Apps without VPN</string>
+    <string name="simple_settings_apps_bypass_none">All apps go through the VPN</string>
+    <string name="simple_mode_fallback_notice">No apps were left in «Selected apps only», so the traffic mode switched to Auto.</string>
+    <string name="simple_mode_fallback_auto">Switched to Auto: no apps are selected</string>
+    <string name="simple_mode_apps_none_chosen">Choose at least one app to turn this mode on.</string>
+    <string name="simple_mode_apply_failed">Could not apply the traffic mode.</string>
+    <string name="simple_settings_mode_custom">Custom routing from the classic interface is in effect. Choose a mode to switch back.</string>
+
+    <!-- Traffic modes: the mode card on the home screen -->
+    <string name="simple_mode_card_auto_smart">Auto · smart mode</string>
+    <string name="simple_mode_card_auto_whitelist">Auto · whitelists</string>
+    <string name="simple_mode_card_whitelist_hint">Through the VPN, except the local network and apps without VPN</string>
+    <string name="simple_mode_card_custom">Custom routing</string>
+    <string name="simple_mode_card_custom_hint">Set in the classic interface</string>
+
+    <!-- Names of the entities the traffic modes create; they also show in the classic interface -->
+    <string name="simple_route_whitelist_name">Whitelists (simple interface)</string>
+    <string name="simple_selector_auto_name">Auto</string>
+    <string name="simple_selector_auto_whitelist_name">Auto · whitelists</string>
 </resources>

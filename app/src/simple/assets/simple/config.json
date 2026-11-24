@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "probes": {
+    "allowed": [
+      "https://ya.ru/",
+      "https://vk.com/",
+      "https://www.gosuslugi.ru/",
+      "https://www.ozon.ru/"
+    ],
+    "blocked": [
+      "https://www.google.com/generate_204",
+      "https://github.com/",
+      "https://www.wikipedia.org/",
+      "https://www.microsoft.com/"
+    ]
+  },
+  "whitelistDns": [
+    "77.88.8.8",
+    "77.88.8.1"
+  ],
+  "wlKeywords": [
+    "БС",
+    "белые списки",
+    "белый список",
+    "белых списков",
+    "whitelist",
+    "white list",
+    "WL",
+    "LTE"
+  ],
+  "timeHosts": [
+    "ya.ru",
+    "vk.com"
+  ]
+}
