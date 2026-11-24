@@ -11,6 +11,7 @@ import android.os.Process
 import android.system.OsConstants
 import androidx.core.app.NotificationCompat
 import androidx.core.net.toUri
+import go.Seq
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
@@ -95,7 +96,7 @@ class NativeInterface : PlatformInterface {
     // Registered synchronously so DefaultInterface() is populated before the box's first dial.
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
         runBlocking {
-            DefaultNetworkListener.start(listener) { network ->
+            DefaultNetworkListener.start(defaultInterfaceMonitorKey(listener)) { network ->
                 checkDefaultInterfaceUpdate(listener, network)
             }
         }
@@ -103,7 +104,7 @@ class NativeInterface : PlatformInterface {
 
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
         runBlocking {
-            DefaultNetworkListener.stop(listener)
+            DefaultNetworkListener.stop(defaultInterfaceMonitorKey(listener))
         }
     }
 
@@ -273,6 +274,22 @@ class NativeInterface : PlatformInterface {
         SagerNet.notification.cancel(identifier, typeID)
     }
 
+}
+
+// gomobile wraps the same Go listener in a new proxy object on every call into Java (no equals/hashCode), so the proxy
+// passed to closeDefaultInterfaceMonitor never matched the one passed to startDefaultInterfaceMonitor and every box left
+// its listener registered. The proxy's refnum names the Go object; it stays the same while any proxy of it is alive,
+// and DefaultNetworkListener keeps the start proxy until stop.
+internal data class GoRefKey(val refnum: Int)
+
+internal fun defaultInterfaceMonitorKey(listener: Any): Any {
+    if (listener !is Seq.Proxy) return listener
+    return try {
+        // Public field of a package-private generated class
+        GoRefKey(listener.javaClass.getField("refnum").apply { isAccessible = true }.getInt(listener))
+    } catch (_: ReflectiveOperationException) {
+        listener
+    }
 }
 
 private fun Iterable<String>.toStringIterator(): StringIterator {
