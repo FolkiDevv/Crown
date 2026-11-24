@@ -1157,20 +1157,23 @@ class RepairRollbackTest {
         val external = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val atClaim = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)
+        val done = java.util.concurrent.CountDownLatch(1)
         val submitted = java.util.concurrent.atomic.AtomicInteger()
         SerialRuns(owner.scope).launch {
             detachedCall(external, 5_000L, gate) { claim ->
                 atClaim.countDown()
-                release.await()
+                check(release.await(5, java.util.concurrent.TimeUnit.SECONDS)) { "never released" }
                 if (claim()) submitted.incrementAndGet()
+                // After the claim and any submission: the test waits for this, not for time.
+                done.countDown()
             }
         }
         dispatcher.runAll()
-        atClaim.await()
+        assertTrue(atClaim.await(5, java.util.concurrent.TimeUnit.SECONDS))
         owner.close()
         assertTrue(gate.isClosed)
         release.countDown()
-        Thread.sleep(300)
+        assertTrue("the callback did not finish", done.await(5, java.util.concurrent.TimeUnit.SECONDS))
         assertEquals(0, submitted.get())
         dispatcher.runAll()
         external.cancel()
