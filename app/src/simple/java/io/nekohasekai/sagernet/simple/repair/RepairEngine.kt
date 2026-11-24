@@ -80,8 +80,8 @@ class RepairEngine(
         fun publish(undoing: Boolean = false) = RepairProgress(LinkedHashMap(steps), undoing).also(onProgress)
         publish()
         val done = LinkedHashMap<RepairStep, StepResult>()
-        // The checks fixed in this run, with their status before the fix (a stop puts the fix back).
-        val fixedFrom = LinkedHashMap<RepairStep, StepStatus>()
+        // The checks fixed in this run, with the result the fix acted on (a stop that reverses the fix shows it again).
+        val fixedFrom = LinkedHashMap<RepairStep, StepResult>()
         try {
             for (step in RepairPlan.ORDER) {
                 val started = now()
@@ -94,9 +94,7 @@ class RepairEngine(
                     runOne(step, done)
                 }
                 if (result.status == StepStatus.FAIL || result.status == StepStatus.WARN) {
-                    val before = result.status
-                    result = tryFixes(step, result, done)
-                    if (result.status == StepStatus.FIXED) fixedFrom[step] = before
+                    result = tryFixes(step, result, done, fixedFrom = fixedFrom)
                 }
                 // A change kept only while this check passes (the VPN raised for it) goes when it does not.
                 if (!result.status.passed && journal.restoreKeptBy(step).isNotEmpty()) settle(wait = true)
@@ -122,10 +120,20 @@ class RepairEngine(
                 // changed since was superseded, and an update of provider content (routes, subscription) stays: those
                 // stay «исправлено».
                 val reversed = restored.filter { it.reversed }.map { it.step to it.kind }.toSet()
-                for ((step, status) in fixedFrom) {
+                // The reversed row shows the state the fix acted on (its summary too: after an undone switch the
+                // current server is the one that does not answer again), plus that the fix was undone.
+                for ((step, before) in fixedFrom) {
                     val result = (steps[step] as? StepState.Done)?.result ?: continue
                     if (result.status != StepStatus.FIXED || (step to result.fix) !in reversed) continue
-                    steps[step] = StepState.Done(result.copy(status = status, fix = null, undoneFix = result.fix))
+                    steps[step] = StepState.Done(
+                        before.copy(
+                            fix = null,
+                            undoneFix = result.fix,
+                            fixChange = result.fixChange,
+                            startedAt = result.startedAt,
+                            elapsedMs = result.elapsedMs,
+                        )
+                    )
                 }
                 publish()
             }
@@ -148,12 +156,16 @@ class RepairEngine(
         emptyList()
     }
 
-    /** The fixes for the [failed] result of [step], one after another until one makes the check pass. */
+    /**
+     * The fixes for the [failed] result of [step], one after another until one makes the check pass; the result a
+     * successful fix acted on goes to [fixedFrom] (the original failure, or the partial progress before a second fix).
+     */
     private suspend fun tryFixes(
         step: RepairStep,
         failed: StepResult,
         done: Map<RepairStep, StepResult>,
         tried: Set<FixKind> = emptySet(),
+        fixedFrom: MutableMap<RepairStep, StepResult>,
     ): StepResult {
         for (fix in candidates(step, failed, done, tried)) {
             val entry = journal.record(
@@ -178,10 +190,11 @@ class RepairEngine(
                 if (recheck.status == StepStatus.WARN) {
                     val tried2 = tried + fix.kind
                     if (candidates(step, recheck, done, tried2).isNotEmpty()) {
-                        val further = tryFixes(step, recheck, done, tried2)
+                        val further = tryFixes(step, recheck, done, tried2, fixedFrom)
                         return if (further.status == StepStatus.FIXED) further else recheck.copy(values = failed.values + recheck.values)
                     }
                 }
+                fixedFrom[step] = failed
                 return failed.copy(
                     status = StepStatus.FIXED,
                     fix = fix.kind,
