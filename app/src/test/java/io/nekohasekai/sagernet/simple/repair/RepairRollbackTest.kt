@@ -30,6 +30,8 @@ class RepairRollbackTest {
         override val kind: FixKind,
         val key: String,
         val value: String,
+        /** How many restores throw before one works. */
+        var failingRestores: Int = 0,
         val onApply: suspend () -> Unit = {},
     ) : RepairFix {
         private val before = settings.values.getValue(key)
@@ -43,6 +45,11 @@ class RepairRollbackTest {
         }
 
         override fun restore() {
+            if (failingRestores > 0) {
+                failingRestores--
+                settings.log += "restore $key failed"
+                throw IllegalStateException("cannot write $key")
+            }
             settings.values[key] = before
             settings.log += "restore $key=$before"
         }
@@ -334,5 +341,143 @@ class RepairRollbackTest {
         assertEquals(1, journal.restoreAll().size)
         assertTrue(journal.restoreAll().isEmpty())
         assertEquals(listOf("dns", "vpn", "server"), log)
+    }
+
+    @Test
+    fun aRestoreThatThrowsStopsNoneOfTheOthersAndIsTriedAgainLater() {
+        val failed = mutableListOf<RepairStep>()
+        val journal = RepairJournal { entry, _ -> failed += entry.step }
+        val log = mutableListOf<String>()
+        var serverFails = 1
+        journal.record(RepairStep.DNS_DIRECT, FixKind.DIRECT_DNS_WHITELISTED) { log += "dns" }
+        journal.record(RepairStep.SERVERS, FixKind.SWITCHED_SERVER) {
+            if (serverFails-- > 0) error("cannot write the selection")
+            log += "server"
+        }
+        journal.record(RepairStep.SITES_VPN, FixKind.MTU_LOWERED) { log += "mtu" }
+        assertEquals(listOf(RepairStep.SITES_VPN, RepairStep.DNS_DIRECT), journal.restoreAll().map { it.step })
+        assertEquals(listOf("mtu", "dns"), log)
+        assertEquals(listOf(RepairStep.SERVERS), failed)
+        // The failed one is still in effect, so the next rollback tries it again.
+        assertEquals(listOf(RepairStep.SERVERS), journal.applied.map { it.step })
+        assertEquals(listOf(RepairStep.SERVERS), journal.restoreAll().map { it.step })
+        assertTrue(journal.applied.isEmpty())
+        assertEquals(listOf("mtu", "dns", "server"), log)
+    }
+
+    @Test
+    fun aFailedRestoreDuringTheStopStillSettlesThePutBackValuesAndEndsTheRun() = runBlocking {
+        val settings = Settings()
+        val journal = RepairJournal()
+        val inFix = CompletableDeferred<Unit>()
+        val checks = FakeChecks(
+            settings,
+            pass = { step, values ->
+                when (step) {
+                    RepairStep.DNS_DIRECT -> values["dns"] == "77.88.8.8"
+                    RepairStep.SITES_VPN -> false
+                    else -> true
+                }
+            },
+            fixes = { step ->
+                when (step) {
+                    RepairStep.DNS_DIRECT -> listOf(
+                        FakeFix(settings, FixKind.DIRECT_DNS_WHITELISTED, "dns", "77.88.8.8", failingRestores = 1),
+                    )
+
+                    RepairStep.SITES_VPN -> listOf(
+                        FakeFix(settings, FixKind.MTU_LOWERED, "mtu", "1280") {
+                            inFix.complete(Unit)
+                            awaitCancellation()
+                        },
+                    )
+
+                    else -> emptyList()
+                }
+            },
+        )
+        val published = mutableListOf<RepairProgress>()
+        val run = async(Dispatchers.Default) { engine(checks, journal, fixTimeout = 60_000L).run { published += it } }
+        inFix.await()
+        run.cancel()
+        val stopped = try {
+            run.await()
+            false
+        } catch (e: CancellationException) {
+            true
+        }
+        assertTrue(stopped)
+        // The MTU went back although the DNS restore threw after it; the VPN was asked to take it up.
+        assertEquals("9000", settings.values["mtu"])
+        assertEquals(listOf(false), checks.settles)
+        assertFalse(published.last().undoing)
+        // The DNS change is still in effect and recorded, so it can be put back by a later rollback.
+        assertEquals(listOf(RepairStep.DNS_DIRECT), journal.applied.map { it.step })
+        journal.restoreAll()
+        assertEquals("local", settings.values["dns"])
+    }
+
+    @Test
+    fun aFixedCheckCarriesTheServersOfItsRecheck() = runBlocking {
+        // No server answered, the subscription update made them answer: the checks through the VPN get the server the
+        // recheck chose, not the «none» of the first look.
+        val settings = Settings()
+        val none = ServersSummary(total = 5, answering = 0, whitelistTotal = 0, whitelistAnswering = 0)
+        val refreshed = ServersSummary(total = 6, answering = 4, whitelistTotal = 0, whitelistAnswering = 0, chosenId = 7L)
+        var seenByVpnCheck: Long? = null
+        val checks = object : RepairChecks {
+            var updated = false
+
+            override suspend fun run(step: RepairStep, done: Map<RepairStep, StepResult>): StepResult = when (step) {
+                RepairStep.SERVERS -> if (updated) {
+                    StepResult(StepStatus.WARN, setOf(Finding.CURRENT_SERVER_DOWN), servers = refreshed)
+                } else {
+                    StepResult(StepStatus.FAIL, setOf(Finding.NO_SERVER_ANSWERS), servers = none)
+                }
+
+                RepairStep.DNS_VPN -> {
+                    seenByVpnCheck = done[RepairStep.SERVERS]?.servers?.chosenId
+                    StepResult.ok()
+                }
+
+                else -> StepResult.ok()
+            }
+
+            override suspend fun fixesFor(step: RepairStep, result: StepResult, done: Map<RepairStep, StepResult>) =
+                if (step == RepairStep.SERVERS && !updated) listOf(object : RepairFix {
+                    override val kind = FixKind.SUBSCRIPTION_UPDATED
+                    override suspend fun apply() {
+                        updated = true
+                    }
+
+                    override fun restore() = Unit
+                }) else emptyList()
+        }
+        val servers = engine(checks).run { }.results.getValue(RepairStep.SERVERS)
+        assertEquals(StepStatus.FIXED, servers.status)
+        assertEquals(FixKind.SUBSCRIPTION_UPDATED, servers.fix)
+        assertEquals(refreshed, servers.servers)
+        assertEquals(7L, seenByVpnCheck)
+    }
+
+    @Test
+    fun aLightRecheckKeepsTheServersFound() = runBlocking {
+        val found = ServersSummary(total = 5, answering = 3, whitelistTotal = 0, whitelistAnswering = 0, chosenId = 2L)
+        val checks = object : RepairChecks {
+            override suspend fun run(step: RepairStep, done: Map<RepairStep, StepResult>): StepResult =
+                if (step == RepairStep.SERVERS) StepResult(StepStatus.WARN, setOf(Finding.CURRENT_SERVER_DOWN), servers = found)
+                else StepResult.ok()
+
+            override suspend fun fixesFor(step: RepairStep, result: StepResult, done: Map<RepairStep, StepResult>) =
+                if (step == RepairStep.SERVERS) listOf(object : RepairFix {
+                    override val kind = FixKind.SWITCHED_SERVER
+                    override suspend fun apply() = Unit
+                    override fun restore() = Unit
+                    override suspend fun recheck() = StepResult.ok()
+                }) else emptyList()
+        }
+        val servers = engine(checks).run { }.results.getValue(RepairStep.SERVERS)
+        assertEquals(StepStatus.FIXED, servers.status)
+        assertEquals(found, servers.servers)
     }
 }

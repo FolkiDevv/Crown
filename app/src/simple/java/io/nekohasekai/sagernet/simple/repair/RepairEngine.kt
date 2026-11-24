@@ -157,6 +157,9 @@ class RepairEngine(
                     status = StepStatus.FIXED,
                     fix = fix.kind,
                     fixChange = fix.change,
+                    // A full recheck brings the servers as they are now (after a subscription update, the server it
+                    // chose for the checks through the VPN); a light one has none, and the summary found stays.
+                    servers = recheck.servers ?: failed.servers,
                     values = failed.values + recheck.values,
                 )
             }

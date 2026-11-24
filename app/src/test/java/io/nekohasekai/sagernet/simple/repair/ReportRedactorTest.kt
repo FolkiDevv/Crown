@@ -552,8 +552,16 @@ class ReportRedactorTest {
         val r = ReportRedactor(listOf(serverIp), emptyList())
         val switched = r.redact("   fixed: switched to a working server (server was 67, now 21)")
         assertTrue(switched, switched.contains("server was 67, now 21"))
-        val dns = r.redact("   fixed: direct DNS changed to a whitelisted one (direct DNS was $serverIp, now 77.88.8.8)")
+        val line = "   fixed: direct DNS changed to a whitelisted one (direct DNS was $serverIp, now 77.88.8.8)"
+        val dns = r.redact(line)
         assertFalse(dns, dns.contains(serverIp))
+        assertFalse(dns, dns.contains("77.88.8.8"))
+        assertTrue(dns, dns.contains("direct DNS was "))
+        // The public IPs go by the log rules alone, without any server known.
+        val plain = ReportRedactor(emptyList(), emptyList()).redact(line)
+        assertFalse(plain, plain.contains(serverIp))
+        assertFalse(plain, plain.contains("77.88.8.8"))
+        assertTrue(plain, plain.contains("direct DNS was "))
     }
 
     @Test
