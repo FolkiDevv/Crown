@@ -11,11 +11,16 @@ import kotlinx.coroutines.CancellationException
  * while the id never reached the UI process); the user's «automatic updates off» stays off.
  *
  * Kept as text in the UI process's preferences (only that process imports): one entry per line,
- * `<start, ms since epoch>\t<group id, 0 while unknown>\t<subscription URL>`.
+ * `<start, ms since epoch>\t<group id, 0 while unknown>\t<session>\t<subscription URL>`. The session names the process
+ * that runs the import ([SESSION]); an entry of another session belongs to a process that is gone.
  */
 object PendingImports {
 
-    data class Entry(val since: Long, val gid: Long, val url: String) {
+    /**
+     * [session]: the process running the import; empty for an import that ended without turning automatic updates
+     * on (its restore is due at the next heal) and for entries written before sessions existed.
+     */
+    data class Entry(val since: Long, val gid: Long, val url: String, val session: String = "") {
         /** One import, before and after its group id is known. */
         fun sameImport(other: Entry) = since == other.since && url == other.url
     }
@@ -110,28 +115,24 @@ object PendingImports {
         return done
     }
 
-    /**
-     * An import still in progress has no reason to last longer than this: the first download gives up after
-     * two minutes. Older entries come from an import that was interrupted.
-     */
-    const val STALE_AFTER_MS = 5 * 60_000L
+    /** This process, as recorded in the entries of the imports it runs; another value means another process. */
+    val SESSION: String = java.util.UUID.randomUUID().toString()
 
     fun parse(text: String?): List<Entry> = text.orEmpty().lines().mapNotNull { line ->
-        val parts = line.split('\t', limit = 3)
-        if (parts.size != 3) return@mapNotNull null
+        // Four fields; three in entries written before sessions existed (no tab in a URL: format replaces them).
+        val parts = line.split('\t', limit = 4)
+        if (parts.size < 3) return@mapNotNull null
         val since = parts[0].toLongOrNull() ?: return@mapNotNull null
         val gid = parts[1].toLongOrNull() ?: return@mapNotNull null
-        val url = parts[2].trim()
-        if (url.isEmpty() || since <= 0L || gid < 0L) null else Entry(since, gid, url)
+        val session = if (parts.size == 4) parts[2] else ""
+        val url = parts.last().trim()
+        if (url.isEmpty() || since <= 0L || gid < 0L) null else Entry(since, gid, url, session)
     }
 
-    fun format(entries: List<Entry>): String =
-        entries.joinToString("\n") { "${it.since}\t${it.gid}\t${it.url.replace('\t', ' ').replace('\n', ' ')}" }
+    fun format(entries: List<Entry>): String = entries.joinToString("\n") {
+        "${it.since}\t${it.gid}\t${it.session.replace('\t', ' ')}\t${it.url.replace('\t', ' ').replace('\n', ' ')}"
+    }
 
-    /**
-     * The entries whose import is not running any more: begun before this process started (the process that ran it
-     * is gone) or longer ago than [staleAfterMs].
-     */
-    fun stale(entries: List<Entry>, now: Long, processStart: Long, staleAfterMs: Long = STALE_AFTER_MS): List<Entry> =
-        entries.filter { it.since < processStart || now - it.since > staleAfterMs }
+    /** The entries whose import is not running in this process ([session]): its process is gone, or it ended. */
+    fun stale(entries: List<Entry>, session: String = SESSION): List<Entry> = entries.filter { it.session != session }
 }

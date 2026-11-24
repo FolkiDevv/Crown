@@ -2,8 +2,6 @@ package io.nekohasekai.sagernet.simple.add
 
 import android.content.Context
 import android.net.Uri
-import android.os.Process
-import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.work.WorkInfo
 import androidx.work.WorkQuery
@@ -174,7 +172,7 @@ object SimpleImport {
         val listener = launch { SubscriptionClient.reports.collect { reports.trySend(it) } }
         // Recorded before the group exists: a process killed at any point after this leaves the entry, and the next
         // start of the interface turns automatic updates on for the group (healInterrupted).
-        val pending = PendingImports.Entry(System.currentTimeMillis(), 0L, plan.url.trim())
+        val pending = PendingImports.Entry(System.currentTimeMillis(), 0L, plan.url.trim(), PendingImports.SESSION)
         recordPending(pending)
         var gid = -1L
         try {
@@ -202,6 +200,8 @@ object SimpleImport {
             withContext(NonCancellable) {
                 val entry = pending.copy(gid = gid.coerceAtLeast(0L))
                 if (PendingImports.settle(records, pendingLock, listOf(entry), ::restore).isEmpty()) {
+                    // This import has ended: the next heal (in this process too) retries it.
+                    recordPending(entry.copy(session = ""), entry.gid)
                     Logs.w("simple add: automatic updates of subscription $gid not turned on yet, kept for the next start")
                 }
             }
@@ -212,10 +212,16 @@ object SimpleImport {
 
     private val pendingLock = Any()
 
+    // Written synchronously (commit): the entry is on disk before the group is created, so a process killed right after
+    // still leaves it for the next heal.
     private val records = object : PendingImports.Records {
-        override fun load() = PendingImports.parse(SimpleUi.store(app).getString(KEY_PENDING_IMPORTS))
-        override fun save(entries: List<PendingImports.Entry>) =
-            SimpleUi.store(app).putString(KEY_PENDING_IMPORTS, PendingImports.format(entries))
+        private val prefs get() = app.getSharedPreferences(SimpleUi.PREFS, Context.MODE_PRIVATE)
+        override fun load() = PendingImports.parse(prefs.getString(KEY_PENDING_IMPORTS, null))
+        override fun save(entries: List<PendingImports.Entry>) {
+            if (!prefs.edit().putString(KEY_PENDING_IMPORTS, PendingImports.format(entries)).commit()) {
+                Logs.w("simple add: the pending imports were not written")
+            }
+        }
     }
 
     private fun recordPending(entry: PendingImports.Entry, gid: Long = 0L) =
@@ -237,11 +243,7 @@ object SimpleImport {
 
         override suspend fun changed(id: Long) = GroupRepo.postUpdate(id)
 
-        override suspend fun globalOnIfNeverSet() {
-            if (DataStore.configurationStore.getInt(SettingsRegistry.SUB_AUTO_UPDATE.key) == null) {
-                DataStore.subAutoUpdate = DAILY_MINUTES
-            }
-        }
+        override suspend fun globalOnIfNeverSet() = autoUpdateOnIfNeverSet()
 
         /**
          * SubscriptionScheduler.schedule registers the poll asynchronously and only logs a failure, so the result is
@@ -295,17 +297,25 @@ object SimpleImport {
      * an import still running in this process is left alone. An entry is forgotten only after its group's flag is
      * cleared (PendingImports.settle), so a failure or another interruption is retried on the next start.
      */
-    suspend fun healInterrupted() {
-        val stale = synchronized(pendingLock) {
-            val entries = records.load()
-            if (entries.isEmpty()) return
-            val now = System.currentTimeMillis()
-            val processStart = now - (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime())
-            PendingImports.stale(entries, now, processStart)
-        }
-        if (stale.isEmpty()) return
+    suspend fun healInterrupted(): Boolean {
+        val stale = synchronized(pendingLock) { PendingImports.stale(records.load()) }
+        if (stale.isEmpty()) return false
         val done = PendingImports.settle(records, pendingLock, stale, ::restore)
         Logs.i("simple add: ${stale.size} interrupted import(s), automatic updates turned on for ${done.size}")
+        return done.isNotEmpty()
+    }
+
+    /**
+     * The global automatic updates go on while they were never set (an «off» the user chose stays off), read and
+     * written in one database transaction, so a change made meanwhile in Settings (either process) is never
+     * overwritten.
+     */
+    private fun autoUpdateOnIfNeverSet() {
+        SagerDatabase.instance.runInTransaction {
+            if (DataStore.configurationStore.getInt(SettingsRegistry.SUB_AUTO_UPDATE.key) == null) {
+                DataStore.subAutoUpdate = DAILY_MINUTES
+            }
+        }
     }
 
     private const val KEY_PENDING_IMPORTS = "pending_subscription_imports"
@@ -399,9 +409,7 @@ object SimpleImport {
         // The global switch is the user's (Settings › «Автообновление подписок», classic Settings › Subscriptions): it is
         // turned on here only while it was never set. An «off» the user chose stays off, and the interval below is then
         // 0, so the summary does not promise updates.
-        if (DataStore.configurationStore.getInt(SettingsRegistry.SUB_AUTO_UPDATE.key) == null) {
-            DataStore.subAutoUpdate = DAILY_MINUTES
-        }
+        autoUpdateOnIfNeverSet()
         GroupRepo.postUpdate(gid)
         SubscriptionScheduler.schedule()
         val seconds = GroupRepo.get(gid)?.let { SubscriptionScheduler.interval(it) } ?: 0L

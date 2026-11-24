@@ -269,8 +269,13 @@ class SimpleActivity : AppCompatActivity() {
         settings.refresh()
         clipboardCheck = true
         // A subscription whose import was interrupted (process killed during its first download) updates itself again.
-        lifecycleScope.launch(Dispatchers.IO) {
-            runCatching { SimpleImport.healInterrupted() }.onFailure { Logs.w("simple add: interrupted imports", it) }
+        lifecycleScope.launch {
+            val healed = withContext(Dispatchers.IO) {
+                runCatching { SimpleImport.healInterrupted() }
+                    .onFailure { Logs.w("simple add: interrupted imports", it) }.getOrDefault(false)
+            }
+            // The heal may have turned the global automatic updates on (an interrupted first import).
+            if (healed) settings.refresh()
         }
     }
 
