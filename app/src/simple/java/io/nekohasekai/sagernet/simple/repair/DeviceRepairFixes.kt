@@ -12,7 +12,9 @@ import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -82,11 +84,27 @@ class DeviceRepairFixes(
         vpnStopped = true
     }
 
-    /** After values were put back: a running VPN reloads once to take them up; [wait] until it is connected again. */
+    /**
+     * After values were put back: a running VPN reloads once to take them up; [wait] until it is connected again. A
+     * service that is off reads them at its next start. One still starting or reloading may have read the replaced
+     * values already, so it reloads once it is connected (a reload that reaches a start in flight would stop it); if it
+     * does not connect in time the reload stays pending for the next settle.
+     */
     suspend fun settle(wait: Boolean) {
         if (!reloadPending) return
+        if (vpnStopped) {
+            reloadPending = false
+            return
+        }
+        val connects = env.connects()
+        if (!env.vpnConnected()) {
+            if (env.serviceOff()) {
+                reloadPending = false
+                return
+            }
+            if (!env.awaitConnected(connects, RECONNECT_MS) || vpnStopped) return
+        }
         reloadPending = false
-        if (vpnStopped || !env.vpnConnected()) return
         if (wait) {
             reload("settings put back")
         } else {
@@ -153,8 +171,13 @@ class DeviceRepairFixes(
             override suspend fun apply() {
                 subscriptionsUpdated = true
                 Logs.i("simple repair: fix subscription_updated: ${groups.size} subscription(s)")
-                awaitSubscriptions(groups)
-                if (env.vpnConnected() && DataStore.selectedProxy != selected) reload("the update moved the server")
+                // Not cancellable: a stop puts the selection back only once the update can no longer move it or
+                // start the service (`:bg` replaces a running profile by its successor).
+                withContext(NonCancellable) { awaitSubscriptions(groups) }
+                // A running VPN takes the update up before the recheck, as it does every fix: a running profile that
+                // kept its id but took new content is otherwise only applied at its next start
+                // (allow_stopping_active_profile is about the updater restarting it on its own, not about «Починка»).
+                if (!env.serviceOff()) reloadWhenConnected("subscriptions updated")
             }
 
             override fun restore() {
@@ -222,7 +245,24 @@ class DeviceRepairFixes(
         if (!env.awaitConnected(before, RECONNECT_MS)) Logs.w("simple repair: the service did not reconnect after the reload")
     }
 
-    /** Asks the `:bg` queue to update [groups] and waits until none of them is queued or running any more. */
+    /**
+     * A reload once the service is connected: the update may have restarted it already, and a reload that reaches a
+     * start in flight would stop it.
+     */
+    private suspend fun reloadWhenConnected(why: String) {
+        delay(RESTART_SHOW_MS)
+        val connects = env.connects()
+        if (!env.vpnConnected() && !env.awaitConnected(connects, RECONNECT_MS)) {
+            Logs.w("simple repair: the service did not connect; $why without a reload")
+            return
+        }
+        reload(why)
+    }
+
+    /**
+     * Asks the `:bg` queue to update [groups] and waits until none of them is queued or running any more: first until
+     * the queue reports one of them (a registration replays what is pending), then until all are through.
+     */
     private suspend fun awaitSubscriptions(groups: List<Long>) = coroutineScope {
         // Collecting the states keeps the queue's callback registered while the updates run.
         val watch = launch { SubscriptionClient.states.collect { } }
@@ -243,7 +283,12 @@ class DeviceRepairFixes(
         val REMOTE_DNS_ALTERNATIVES = listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query")
 
         const val RECONNECT_MS = 60_000L
-        const val QUEUE_START_MS = 5_000L
-        const val SUBSCRIPTION_MS = 60_000L
+        const val QUEUE_START_MS = 15_000L
+
+        /** A download times out after about 10 s; several subscriptions and their URL tests after it. */
+        const val SUBSCRIPTION_MS = 90_000L
+
+        /** How long a restart `:bg` sent may take to show as a state change. */
+        const val RESTART_SHOW_MS = 2_000L
     }
 }

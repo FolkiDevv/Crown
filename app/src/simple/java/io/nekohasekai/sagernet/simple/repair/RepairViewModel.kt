@@ -130,9 +130,15 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
         fun publish(change: (RepairUiState) -> RepairUiState) {
             if (run == runs) mutableState.update(change)
         }
+        // A stopped run is no longer active while it still puts its changes back (not cancellable): the new run reads
+        // and changes the settings only after that, so it never takes a value about to be restored as its "before".
+        val previous = job
         job = viewModelScope.launch {
+            previous?.join()
             // What this run changes, to be put back when a fix does not help or the run is stopped.
-            val journal = RepairJournal()
+            val journal = RepairJournal { entry, e ->
+                Logs.w("simple repair: could not put back ${entry.kind?.name?.lowercase() ?: "the VPN started for the checks"}", e)
+            }
             val engine = RepairEngine(DeviceRepairChecks(getApplication(), environment, journal), journal)
             try {
                 val progress = engine.run { progress -> publish { it.copy(progress = progress) } }
@@ -142,6 +148,9 @@ class RepairViewModel(application: Application) : AndroidViewModel(application) 
                 Logs.i("simple repair: finished, verdict ${describe(verdict)}")
                 publish { it.copy(running = false, progress = progress, verdict = verdict) }
             } catch (e: CancellationException) {
+                journal.applied.takeIf { it.isNotEmpty() }?.let {
+                    Logs.w("simple repair: ${it.size} change(s) could not be put back")
+                }
                 Logs.i("simple repair: stopped by the user")
                 publish { it.copy(running = false, stopped = true) }
                 throw e

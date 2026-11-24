@@ -39,7 +39,13 @@ data class FixChange(val setting: String, val before: String, val after: String)
  * puts back everything left when the run is stopped. [keepIf] ties a change to the check that must pass for it to stay:
  * the fix's own check, or for the VPN raised for the checks through it, «Сайты через VPN».
  */
-class RepairJournal {
+class RepairJournal(
+    /**
+     * A restore that threw: the entry stays in the journal (a later rollback tries it again) and the others go on
+     * being restored.
+     */
+    private val onRestoreFailed: (Entry, Exception) -> Unit = { _, _ -> },
+) {
 
     class Entry(
         /** The check the change was made for. */
@@ -59,25 +65,34 @@ class RepairJournal {
     fun record(step: RepairStep, kind: FixKind?, keepIf: RepairStep = step, restore: () -> Unit): Entry =
         Entry(step, kind, keepIf, restore).also { synchronized(entries) { entries += it } }
 
-    /** Puts [entry] back; true when it was still in effect. */
+    /** Puts [entry] back; true when it was in effect and is put back now (a failed restore keeps it in effect). */
     fun restore(entry: Entry): Boolean {
-        val removed = synchronized(entries) { entries.remove(entry) }
-        if (removed) entry.restore()
-        return removed
+        if (synchronized(entries) { entry !in entries }) return false
+        if (!run(entry)) return false
+        synchronized(entries) { entries.remove(entry) }
+        return true
     }
 
-    /** Puts back the changes that stay only while [step] passes; returns them. */
+    /** Puts back the changes that stay only while [step] passes; returns those put back. */
     fun restoreKeptBy(step: RepairStep): List<Entry> = restoreWhere { it.keepIf == step }
 
-    /** Puts back every change, newest first (the stop); returns them. */
+    /** Puts back every change, newest first (the stop); returns those put back. */
     fun restoreAll(): List<Entry> = restoreWhere { true }
 
     private fun restoreWhere(predicate: (Entry) -> Boolean): List<Entry> {
-        val chosen = synchronized(entries) {
-            entries.filter(predicate).also { entries.removeAll(it.toSet()) }
-        }
-        // Newest first: a later change may stand on an earlier one (the server chosen for the VPN raised after it).
-        for (entry in chosen.asReversed()) entry.restore()
-        return chosen
+        val chosen = synchronized(entries) { entries.filter(predicate) }
+        // Newest first: a later change may stand on an earlier one (the server chosen for the VPN raised after it). A
+        // restore that throws stops none of the others.
+        val restored = chosen.asReversed().filter(::run)
+        synchronized(entries) { entries.removeAll(restored.toSet()) }
+        return restored
+    }
+
+    private fun run(entry: Entry): Boolean = try {
+        entry.restore()
+        true
+    } catch (e: Exception) {
+        onRestoreFailed(entry, e)
+        false
     }
 }
