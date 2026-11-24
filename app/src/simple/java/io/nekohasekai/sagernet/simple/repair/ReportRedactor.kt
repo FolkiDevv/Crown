@@ -42,21 +42,18 @@ class ReportRedactor(
     private val names: Regex?
 
     /**
-     * The known secret values, longest first, by length (every length is masked — a password "12345" or "7" too — but
-     * a short value is a common word or number, so where it counts differs): [MIN_ANYWHERE] characters and more
-     * anywhere; [MIN_TOKEN] and more as a whole token; shorter only right after a credential word ("password 7").
+     * The known secret values, longest first. Every length is masked — a password "12345" or "7" too: [MIN_ANYWHERE]
+     * characters and more anywhere, shorter ones as a whole token (not inside a word or a number: "17", "7ms", "v7",
+     * "1.7", "10.0.0.7" stay). A user with a one-character password sees that character standing alone in the log
+     * masked as well: privacy first.
      */
-    private val secretPatterns: List<Pair<Regex, String>> = secrets.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    private val secretPatterns: List<Regex> = secrets.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         .sortedByDescending { it.length }.let { known ->
             fun alternatives(range: IntRange) = known.filter { it.length in range }.joinToString("|") { Regex.escape(it) }
             listOfNotNull(
-                alternatives(MIN_ANYWHERE..Int.MAX_VALUE).takeIf { it.isNotEmpty() }?.let { Regex("(?iu)$it") to MASK },
-                alternatives(MIN_TOKEN until MIN_ANYWHERE).takeIf { it.isNotEmpty() }?.let {
-                    Regex("(?iu)(?<![\\p{L}\\p{N}_])(?:$it)(?![\\p{L}\\p{N}_])") to MASK
-                },
-                // The credential word and separator (group 1) stay.
-                alternatives(1 until MIN_TOKEN).takeIf { it.isNotEmpty() }?.let {
-                    Regex("(?iu)($CREDENTIAL_WORD[\"']?[\\s:=]{1,3}[\"']?)(?:$it)(?![\\p{L}\\p{N}_])") to "$1$MASK"
+                alternatives(MIN_ANYWHERE..Int.MAX_VALUE).takeIf { it.isNotEmpty() }?.let { Regex("(?iu)$it") },
+                alternatives(1 until MIN_ANYWHERE).takeIf { it.isNotEmpty() }?.let {
+                    Regex("(?iu)(?<![\\p{L}\\p{N}_]|\\p{N}\\.)(?:$it)(?![\\p{L}\\p{N}_]|\\.\\p{N})")
                 },
             )
         }
@@ -92,7 +89,7 @@ class ReportRedactor(
         for ((link, label) in links) s = s.replace(link, label)
         // Known secrets first, before LogRedactor rewrites anything inside them (an IP-like part becomes "<ip>"). The
         // mask has no angle brackets: LogRedactor still sees credentials of a URL as credentials.
-        for ((pattern, replacement) in secretPatterns) s = pattern.replace(s, replacement)
+        for (pattern in secretPatterns) s = pattern.replace(s, MASK)
         s = log.redact(s)
         // From here on a masked secret is a label like the others (protected from the name pass).
         s = s.replace(MASK, "<redacted>")
@@ -277,15 +274,8 @@ class ReportRedactor(
         /** An IPv6-looking token of free text (the colon-hex run between non-word characters). */
         private val IPV6_TOKEN = Regex("""(?<![\p{L}\p{N}_:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\p{L}\p{N}_:])""")
 
-        /** Secret values this long are replaced anywhere, even inside a longer word. */
+        /** Secret values this long are replaced anywhere, even inside a longer word; shorter ones as a whole token. */
         private const val MIN_ANYWHERE = 6
-
-        /** Secret values this long are replaced as a whole token; shorter ones only after a [CREDENTIAL_WORD]. */
-        private const val MIN_TOKEN = 4
-
-        /** A word that says a credential follows ("password 7", "token: ab"); the separator is up to three characters. */
-        private const val CREDENTIAL_WORD =
-            """(?<![\p{L}\p{N}_])(?:password|passwd|pass|secret|token|key|auth|psk|credentials?|user(?:name)?|login|id|uuid)"""
 
         /**
          * Secrets under the keys LogRedactor does not know: Xray writes them in camelCase (`shortId`, `serverName`, the

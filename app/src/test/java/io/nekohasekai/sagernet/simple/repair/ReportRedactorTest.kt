@@ -327,8 +327,8 @@ class ReportRedactorTest {
     }
 
     /**
-     * Short credentials are masked too (review): 4–5 characters as a whole token anywhere, 1–3 characters right after
-     * a credential word; numbers and parts of longer tokens stay.
+     * Short credentials are masked too (review): up to 5 characters as a whole token anywhere, with or without a
+     * credential word before; parts of longer words and numbers stay.
      */
     @Test
     fun shortCredentials() {
@@ -341,7 +341,9 @@ class ReportRedactorTest {
         assertEquals("[Info] port 123456 open, 12345ms", r.redact("[Info] port 123456 open, 12345ms"))
         assertEquals("[Warn] password <redacted> rejected", r.redact("[Warn] password 7 rejected"))
         assertEquals("[Warn] user=<redacted> ok, id: <redacted>", r.redact("[Warn] user=7 ok, id: 7"))
-        assertEquals("[Info] connected 7 times in 17 s", r.redact("[Info] connected 7 times in 17 s"))
+        assertEquals("[Warn] authentication failed for <redacted>", r.redact("[Warn] authentication failed for 7"))
+        assertEquals("[Info] connected <redacted> times in 17 s", r.redact("[Info] connected 7 times in 17 s"))
+        assertEquals("[Info] 17 7ms v7 x7y 1.7 7.5 10.0.0.7", r.redact("[Info] 17 7ms v7 x7y 1.7 7.5 10.0.0.7"))
         // A numeric credential in the profile JSON counts as well.
         assertTrue(ReportRedactor.secretValues("""{"type":"socks","password":4321}""").contains("4321"))
     }
