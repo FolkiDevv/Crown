@@ -356,8 +356,41 @@ class ReportRedactorTest {
         assertEquals("[Debug] peer <server-1> up", r.redact("[Debug] peer FD00:0:0::0:1 up"))
         // Unconfigured addresses, loopback and times stay.
         assertEquals("[Debug] fe80::1 and ::1 at 12:30:45", r.redact("[Debug] fe80::1 and ::1 at 12:30:45"))
+        // After a network prefix (Xray: "dialing to tcp:…"), with and without brackets.
+        assertEquals("[Debug] dialing to tcp:<server-1>", r.redact("[Debug] dialing to tcp:fd00:0::1"))
+        assertEquals("[Debug] dialing to tcp:[<server-1>]:443", r.redact("[Debug] dialing to tcp:[fd00:0::1]:443"))
+        assertEquals("[Debug] sent to udp:<server-1>", r.redact("[Debug] sent to udp:FD00::0:1"))
+        // An address that starts with letters is not taken for a prefix.
+        val letters = ReportRedactor(ReportRedactor.serverNames("fdab:beef::1", "{}"), emptyList())
+        assertEquals("peer <server-1> and tcp:<server-1>", letters.redact("peer fdab:beef:0::1 and tcp:fdab:beef::0:1"))
+        // A public address after a prefix, which LogRedactor's IPv6 rule does not see there, is masked; a private one stays.
+        assertEquals("dialing to tcp:<ip> and udp:fe80::5", r.redact("dialing to tcp:2a00:1450::1 and udp:fe80::5"))
+        // An unconfigured private address is not split into a "prefix" and a public-looking rest.
+        assertEquals("peer fd00:1234::5 up", r.redact("peer fd00:1234::5 up"))
         assertEquals("fd00::1", ReportRedactor.canonicalIpv6("fd00:0000:0::1"))
         assertEquals("2001:db8::1:0:0:1", ReportRedactor.canonicalIpv6("2001:db8:0:0:1:0:0:1"))
+    }
+
+    /**
+     * Xray names the destinations of connections in its own words, which LogRedactor's destination lines miss (seen in
+     * the device archives): their domains are hidden as LogRedactor hides them; other lines keep their file names.
+     */
+    @Test
+    fun xrayDestinationLines() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        assertEquals(
+            "xray: [Info] [123] proxy/socks: TCP Connect request to tcp:<domain>.com:443",
+            r.redact("xray: [Info] [123] proxy/socks: TCP Connect request to tcp:www.example.com:443"),
+        )
+        assertEquals(
+            "xray: [Info] [123] app/dispatcher: taking detour [proxy] for [tcp:<domain>.net:443]",
+            r.redact("xray: [Info] [123] app/dispatcher: taking detour [proxy] for [tcp:testingcf.jsdelivr.net:443]"),
+        )
+        assertEquals(
+            "xray: [Info] [123] transport/internet/grpc: creating connection to tcp:<domain>.org:443",
+            r.redact("xray: [Info] [123] transport/internet/grpc: creating connection to tcp:cdn.site.org:443"),
+        )
+        assertEquals("xray: [Info] loaded geosite.dat", r.redact("xray: [Info] loaded geosite.dat"))
     }
 
     /** An IPv6 server in any spelling — compressed, full, zero-padded, with brackets and port (neighbouring case). */

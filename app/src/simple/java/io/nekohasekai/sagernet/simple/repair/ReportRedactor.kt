@@ -111,13 +111,28 @@ class ReportRedactor(
             }
         }
         // A configured IPv6 server in a spelling not listed above ("fd00:0::1" for "fd00::1"): compared by value.
-        if (hasIpv6Servers) {
-            s = IPV6_TOKEN.replace(s) { m -> canonicalIpv6(m.value.lowercase())?.let { labels[it] } ?: m.value }
+        // A network prefix may come before it ("dialing to tcp:fd00:0::1"); "fdab:beef::1" is tried whole first. After
+        // such a prefix LogRedactor's IPv6 rule does not see an address at all, so a public one is masked here.
+        s = IPV6_TOKEN.replace(s) { m ->
+            // A token that is an address as a whole has no prefix ("fdab:beef::1", "fd00:1234::5").
+            val whole = canonicalIpv6(m.value.lowercase())
+            val prefix = if (whole != null) null else m.groups[1]?.value
+            val canonical = whole ?: canonicalIpv6(m.groupValues[2].lowercase()) ?: return@replace m.value
+            val label = labels[canonical] ?: if (prefix != null && !isPrivateIpv6(canonical)) "<ip>" else return@replace m.value
+            if (prefix != null) "$prefix:$label" else label
+        }
+        // The destinations Xray names in its own words, which LogRedactor's destination lines do not cover
+        // ("TCP Connect request to tcp:site:443", "taking detour [proxy] for [tcp:site:443]").
+        if (XRAY_DESTINATION_LINE.containsMatchIn(s)) {
+            s = DOMAIN.replace(s) { m -> "<domain>." + m.groupValues[1] }
         }
         return s
     }
 
-    private val hasIpv6Servers = labels.keys.any { it.contains(':') }
+    /** As LogRedactor counts them: unspecified, loopback, link-local, unique local and multicast are not public. */
+    private fun isPrivateIpv6(canonical: String): Boolean = canonical == "::" || canonical == "::1" ||
+        canonical.startsWith("fe8") || canonical.startsWith("fe9") || canonical.startsWith("fea") ||
+        canonical.startsWith("feb") || canonical.startsWith("fc") || canonical.startsWith("fd") || canonical.startsWith("ff")
 
     /** Every line of [text]. */
     fun redactText(text: String): String = text.lineSequence().joinToString("\n") { redact(it) }
@@ -272,7 +287,17 @@ class ReportRedactor(
         }
 
         /** An IPv6-looking token of free text (the colon-hex run between non-word characters). */
-        private val IPV6_TOKEN = Regex("""(?<![\p{L}\p{N}_:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\p{L}\p{N}_:])""")
+        private val IPV6_TOKEN = Regex(
+            """(?<![\p{L}\p{N}_:.])(?:([a-zA-Z][a-zA-Z0-9+\-]{0,10}):)?([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?![\p{L}\p{N}_:])"""
+        )
+
+        /** Xray's lines that name where a connection goes (its own wording, beyond LogRedactor's destination lines). */
+        private val XRAY_DESTINATION_LINE = Regex(
+            """(?i)connect request to|taking detour|dialing|creating connection to|tunnel(?:l)?ing request|received request for|sniffed domain|accepted (?:tcp|udp):"""
+        )
+
+        /** A domain name outside a label: the name is hidden, the top-level domain stays (as in LogRedactor). */
+        private val DOMAIN = Regex("""(?<![\w.\-<])(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+([a-z]{2,63})\.?(?![\w\-])""")
 
         /** Secret values this long are replaced anywhere, even inside a longer word; shorter ones as a whole token. */
         private const val MIN_ANYWHERE = 6
