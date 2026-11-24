@@ -326,6 +326,38 @@ class ReportRedactorTest {
         assertEquals("socks5://<server-1>:1080 http://127.0.0.2:9/<redacted>", loopback.redact("socks5://127.0.0.1:1080 http://127.0.0.2:9/x"))
     }
 
+    /**
+     * Short credentials are masked too (review): 4–5 characters as a whole token anywhere, 1–3 characters right after
+     * a credential word; numbers and parts of longer tokens stay.
+     */
+    @Test
+    fun shortCredentials() {
+        val profile = """{"type":"shadowsocks","server":"$serverDomain","password":"12345","users":[{"id":"7"}],"transport":{"path":"/ws"}}"""
+        val secrets = ReportRedactor.secretValues(profile)
+        assertTrue(secrets.toString(), secrets.containsAll(listOf("12345", "7")))
+        assertFalse(secrets.contains("/ws"))
+        val r = ReportRedactor(ReportRedactor.serverNames(serverDomain, profile), emptyList(), secrets)
+        assertEquals("[Warn] authentication failed for credential <redacted>", r.redact("[Warn] authentication failed for credential 12345"))
+        assertEquals("[Info] port 123456 open, 12345ms", r.redact("[Info] port 123456 open, 12345ms"))
+        assertEquals("[Warn] password <redacted> rejected", r.redact("[Warn] password 7 rejected"))
+        assertEquals("[Warn] user=<redacted> ok, id: <redacted>", r.redact("[Warn] user=7 ok, id: 7"))
+        assertEquals("[Info] connected 7 times in 17 s", r.redact("[Info] connected 7 times in 17 s"))
+        // A numeric credential in the profile JSON counts as well.
+        assertTrue(ReportRedactor.secretValues("""{"type":"socks","password":4321}""").contains("4321"))
+    }
+
+    /** A configured IPv6 server in a spelling none of its listed forms has: compared by value in free text (review). */
+    @Test
+    fun ipv6ServerByValueInFreeText() {
+        val r = ReportRedactor(ReportRedactor.serverNames("fd00::1", "{}"), emptyList())
+        assertEquals("[Debug] dial tcp [<server-1>]:443: connection refused", r.redact("[Debug] dial tcp [fd00:0::1]:443: connection refused"))
+        assertEquals("[Debug] peer <server-1> up", r.redact("[Debug] peer FD00:0:0::0:1 up"))
+        // Unconfigured addresses, loopback and times stay.
+        assertEquals("[Debug] fe80::1 and ::1 at 12:30:45", r.redact("[Debug] fe80::1 and ::1 at 12:30:45"))
+        assertEquals("fd00::1", ReportRedactor.canonicalIpv6("fd00:0000:0::1"))
+        assertEquals("2001:db8::1:0:0:1", ReportRedactor.canonicalIpv6("2001:db8:0:0:1:0:0:1"))
+    }
+
     /** An IPv6 server in any spelling — compressed, full, zero-padded, with brackets and port (neighbouring case). */
     @Test
     fun ipv6ServerInAnySpelling() {

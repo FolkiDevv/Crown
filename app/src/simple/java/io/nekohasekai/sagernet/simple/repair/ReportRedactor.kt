@@ -41,10 +41,25 @@ class ReportRedactor(
      */
     private val names: Regex?
 
-    /** The known secret values, anywhere, the longest first. */
-    private val secretPattern: Regex? = secrets.map { it.trim() }.filter { it.length >= MIN_SECRET }.distinct()
-        .sortedByDescending { it.length }.takeIf { it.isNotEmpty() }
-        ?.let { known -> Regex("(?iu)" + known.joinToString("|") { Regex.escape(it) }) }
+    /**
+     * The known secret values, longest first, by length (every length is masked — a password "12345" or "7" too — but
+     * a short value is a common word or number, so where it counts differs): [MIN_ANYWHERE] characters and more
+     * anywhere; [MIN_TOKEN] and more as a whole token; shorter only right after a credential word ("password 7").
+     */
+    private val secretPatterns: List<Pair<Regex, String>> = secrets.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        .sortedByDescending { it.length }.let { known ->
+            fun alternatives(range: IntRange) = known.filter { it.length in range }.joinToString("|") { Regex.escape(it) }
+            listOfNotNull(
+                alternatives(MIN_ANYWHERE..Int.MAX_VALUE).takeIf { it.isNotEmpty() }?.let { Regex("(?iu)$it") to MASK },
+                alternatives(MIN_TOKEN until MIN_ANYWHERE).takeIf { it.isNotEmpty() }?.let {
+                    Regex("(?iu)(?<![\\p{L}\\p{N}_])(?:$it)(?![\\p{L}\\p{N}_])") to MASK
+                },
+                // The credential word and separator (group 1) stay.
+                alternatives(1 until MIN_TOKEN).takeIf { it.isNotEmpty() }?.let {
+                    Regex("(?iu)($CREDENTIAL_WORD[\"']?[\\s:=]{1,3}[\"']?)(?:$it)(?![\\p{L}\\p{N}_])") to "$1$MASK"
+                },
+            )
+        }
 
     init {
         // Every spelling of a server gets its label: IPv6 compressed / full / zero-padded, IDN as Unicode and punycode.
@@ -77,7 +92,7 @@ class ReportRedactor(
         for ((link, label) in links) s = s.replace(link, label)
         // Known secrets first, before LogRedactor rewrites anything inside them (an IP-like part becomes "<ip>"). The
         // mask has no angle brackets: LogRedactor still sees credentials of a URL as credentials.
-        secretPattern?.let { pattern -> s = pattern.replace(s, MASK) }
+        for ((pattern, replacement) in secretPatterns) s = pattern.replace(s, replacement)
         s = log.redact(s)
         // From here on a masked secret is a label like the others (protected from the name pass).
         s = s.replace(MASK, "<redacted>")
@@ -98,8 +113,14 @@ class ReportRedactor(
                 labels[normalize(name) ?: name.lowercase()] ?: m.value
             }
         }
+        // A configured IPv6 server in a spelling not listed above ("fd00:0::1" for "fd00::1"): compared by value.
+        if (hasIpv6Servers) {
+            s = IPV6_TOKEN.replace(s) { m -> canonicalIpv6(m.value.lowercase())?.let { labels[it] } ?: m.value }
+        }
         return s
     }
+
+    private val hasIpv6Servers = labels.keys.any { it.contains(':') }
 
     /** Every line of [text]. */
     fun redactText(text: String): String = text.lineSequence().joinToString("\n") { redact(it) }
@@ -208,17 +229,28 @@ class ReportRedactor(
             return out
         }
 
-        private fun ipv6Forms(s: String): Set<String> {
-            if (s.count { it == ':' } < 2 || s.any { !(it.isDigit() || it in 'a'..'f' || it == ':') }) return emptySet()
+        /** The eight groups of an IPv6 address written in lowercase hex (no embedded IPv4), null if [s] is none. */
+        private fun ipv6Groups(s: String): List<Int>? {
+            if (s.count { it == ':' } < 2 || s.any { !(it in '0'..'9' || it in 'a'..'f' || it == ':') }) return null
             val halves = s.split("::")
-            if (halves.size > 2) return emptySet()
+            if (halves.size > 2) return null
             val head = halves[0].split(':').filter { it.isNotEmpty() }
             val tail = if (halves.size == 2) halves[1].split(':').filter { it.isNotEmpty() } else emptyList()
             val missing = 8 - head.size - tail.size
-            if (if (halves.size == 1) missing != 0 else missing < 1) return emptySet()
-            val groups = (head + List(missing) { "0" } + tail).map { group ->
-                group.takeIf { it.length <= 4 }?.toIntOrNull(16) ?: return emptySet()
+            if (if (halves.size == 1) missing != 0 else missing < 1) return null
+            if (halves.size == 1 && (s.startsWith(':') || s.endsWith(':'))) return null
+            return (head + List(missing) { "0" } + tail).map { group ->
+                group.takeIf { it.length <= 4 }?.toIntOrNull(16) ?: return null
             }
+        }
+
+        /** The RFC 5952 spelling of an IPv6 address (lowercase hex), null if [s] is none. */
+        fun canonicalIpv6(s: String): String? = ipv6Groups(s)?.let { ipv6Spellings(it).last() }
+
+        private fun ipv6Forms(s: String): Set<String> = ipv6Groups(s)?.let(::ipv6Spellings)?.toSet() ?: emptySet()
+
+        /** Full, zero-padded and compressed (RFC 5952, last) spellings of [groups]. */
+        private fun ipv6Spellings(groups: List<Int>): List<String> {
             fun hex(list: List<Int>) = list.joinToString(":") { it.toString(16) }
             var bestStart = -1
             var bestLength = 1
@@ -239,11 +271,21 @@ class ReportRedactor(
             val compressed = if (bestStart < 0) hex(groups) else {
                 hex(groups.subList(0, bestStart)) + "::" + hex(groups.subList(bestStart + bestLength, 8))
             }
-            return setOf(hex(groups), groups.joinToString(":") { it.toString(16).padStart(4, '0') }, compressed)
+            return listOf(hex(groups), groups.joinToString(":") { it.toString(16).padStart(4, '0') }, compressed)
         }
 
-        /** Shorter values ("/ws", "none") are words of the config, not secrets: replacing them would blur the report. */
-        private const val MIN_SECRET = 6
+        /** An IPv6-looking token of free text (the colon-hex run between non-word characters). */
+        private val IPV6_TOKEN = Regex("""(?<![\p{L}\p{N}_:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\p{L}\p{N}_:])""")
+
+        /** Secret values this long are replaced anywhere, even inside a longer word. */
+        private const val MIN_ANYWHERE = 6
+
+        /** Secret values this long are replaced as a whole token; shorter ones only after a [CREDENTIAL_WORD]. */
+        private const val MIN_TOKEN = 4
+
+        /** A word that says a credential follows ("password 7", "token: ab"); the separator is up to three characters. */
+        private const val CREDENTIAL_WORD =
+            """(?<![\p{L}\p{N}_])(?:password|passwd|pass|secret|token|key|auth|psk|credentials?|user(?:name)?|login|id|uuid)"""
 
         /**
          * Secrets under the keys LogRedactor does not know: Xray writes them in camelCase (`shortId`, `serverName`, the
@@ -276,17 +318,19 @@ class ReportRedactor(
         )
 
         /**
-         * The secret values of one profile ([outboundJson]): every string (also in arrays) at least [MIN_SECRET] long
-         * under a key the patterns treat as secret, or the Xray user `id`, except the server names — those get labels
-         * from [serverNames] instead.
+         * The secret values of one profile ([outboundJson]): every nonempty string or number (also in arrays) under a key
+         * the patterns treat as secret, or the Xray user `id`, whatever its length — a password "12345" or "7" too. Not
+         * credentials by their field: the server names (they get labels from [serverNames]) and paths (a transport path,
+         * a key file), kept only from [MIN_ANYWHERE] characters ("/ws" is a word of the config).
          */
         fun secretValues(outboundJson: String): Set<String> {
             val out = LinkedHashSet<String>()
             val root = runCatching { JSONObject(outboundJson) }.getOrNull() ?: return out
-            fun addValue(value: Any?) {
+            fun addValue(value: Any?, path: Boolean) {
                 when (value) {
-                    is String -> value.trim().takeIf { it.length >= MIN_SECRET }?.let(out::add)
-                    is JSONArray -> for (i in 0 until value.length()) addValue(value.opt(i))
+                    is String -> value.trim().takeIf { it.isNotEmpty() && (!path || it.length >= MIN_ANYWHERE) }?.let(out::add)
+                    is Number -> if (!path) out += value.toString()
+                    is JSONArray -> for (i in 0 until value.length()) addValue(value.opt(i), path)
                 }
             }
             fun walk(node: Any?) {
@@ -294,7 +338,7 @@ class ReportRedactor(
                     is JSONObject -> node.keys().forEach { key ->
                         val value = node.opt(key)
                         val lower = key.lowercase()
-                        if (lower !in SERVER_KEYS && (lower == "id" || isSecretKey(key))) addValue(value)
+                        if (lower !in SERVER_KEYS && (lower == "id" || isSecretKey(key))) addValue(value, lower.endsWith("path"))
                         walk(value)
                     }
 
