@@ -5,11 +5,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.CoroutineContext
 
 /**
  * One reversible automatic fix of «Починка» (connection-repair "Безопасные автоматические исправления"): a setting of
@@ -220,6 +223,24 @@ class RepairJournal(
  * its own stopped state.
  */
 class SerialRuns(private val scope: CoroutineScope) {
+
+    /**
+     * The scope of the runs and the stop gate of the newest one, closed together in the right order: the gate first
+     * (the run's calls to `:bg` are given up), then the scope (the runs are cancelled). The view model registers it
+     * with `addCloseable` and launches the runs in [scope], not in `viewModelScope`, which a view model cancels before
+     * anything else of its own when it is cleared.
+     */
+    class Owner(context: CoroutineContext) : AutoCloseable {
+        val scope = CoroutineScope(SupervisorJob() + context)
+
+        @Volatile
+        var gate: RepairStopGate? = null
+
+        override fun close() {
+            gate?.close()
+            scope.cancel()
+        }
+    }
 
     /** The «done» of the newest run: complete when it and every run before it are complete. */
     private var lastDone: Job? = null
