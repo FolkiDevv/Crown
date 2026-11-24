@@ -93,7 +93,7 @@ class RepairVpnSyncTest {
         successorMs = 1_500L,
     )
 
-    @Test
+    @Test(timeout = 20_000)
     fun everySubmittedGroupIsThroughBeforeTheWaitEnds() = runBlocking {
         // Two groups with independent durations, one far longer than any fixed limit the wait could have had.
         val queue = FakeQueue(jobMs = { gid -> if (gid == 7L) 1_200L else 100L })
@@ -102,7 +102,7 @@ class RepairVpnSyncTest {
         assertEquals(listOf(7L, 8L), queue.done.toList())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aSlowSubmissionIsStillWaitedFor() = runBlocking {
         // The request reaches the queue late (a slow binder): the barrier is only queued after it.
         val queue = FakeQueue(jobMs = { 50L }, submitDelayMs = 400L)
@@ -110,7 +110,7 @@ class RepairVpnSyncTest {
         assertEquals(listOf(1L, 2L, 3L), queue.done.toList())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aQueueThatCannotBeReachedIsNoFinishedUpdate() = runBlocking {
         val wait = SubscriptionWait(
             submit = { throw IllegalStateException("cannot bind core service") },
@@ -121,7 +121,7 @@ class RepairVpnSyncTest {
         assertFalse(wait.await(listOf(1L), running = null))
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun theSuccessorStartOfAReplacedRunningProfileIsWaitedFor() = runBlocking {
         // The update deleted the running profile 5 and stopped the service; `:bg` starts the successor afterwards in
         // a coroutine of its own, after its queue job is through.
@@ -154,7 +154,7 @@ class RepairVpnSyncTest {
         assertTrue("returned before the successor started", successorStartedAt in (started + 1)..returned)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun anUnrelatedReconnectBeforeTheSuccessorDoesNotEndTheWait() = runBlocking {
         // The service reconnects (a reload) on the replaced profile before `:bg` starts the successor: that connect
         // must not end the wait — only the service running another profile does.
@@ -185,7 +185,7 @@ class RepairVpnSyncTest {
         assertTrue("the wait ended on the unrelated reconnect", successorStartedAt in 1..System.nanoTime())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aWaitOverItsLimitEndsAsNotRunInsteadOfHanging() = runBlocking {
         // The service binding (or the queue) never answers: the wait ends at its limit, the update counts as not run.
         val wait = SubscriptionWait(
@@ -200,7 +200,7 @@ class RepairVpnSyncTest {
         assertTrue((System.nanoTime() - started) / 1_000_000 < 2_000)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun anOwedReloadSurvivesAFailingLookAndIsSentOnTheNextOne() = runBlocking {
         // The state cannot be read once, then sending fails once: the watcher goes on, the reload stays owed and is
         // sent once both work.
@@ -237,14 +237,14 @@ class RepairVpnSyncTest {
         reloadAllowed = { true },
     )
 
-    @Test
+    @Test(timeout = 20_000)
     fun aSubscriptionFixReloadsTheRunningVpnBeforeTheRecheck() = runBlocking {
         val vpn = FakeVpn()
         fix(vpn).apply()
         assertEquals(1, vpn.reloads.get())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aSubscriptionUpdateIsNotRolledBackNorItsOwnSelection() = runBlocking {
         // The update moves the selection 9 → 10 (a successor of a replaced profile): a stop keeps it and the
         // provider's content; the rollback writes nothing (design.md D8: not reversible).
@@ -260,7 +260,7 @@ class RepairVpnSyncTest {
         assertEquals(10L, selection)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aSubscriptionFixWhoseVpnDoesNotConnectFailsAndIsPutBack() = runBlocking {
         // The service is starting and never connects: the fix must not count; the engine puts it back.
         val vpn = FakeVpn(isConnected = false)
@@ -286,7 +286,7 @@ class RepairVpnSyncTest {
         assertEquals(0, vpn.reloads.get())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aSubscriptionFixThatLeftTheUsersVpnOffIsNoFix() = runBlocking {
         // The update deleted the running profile, no successor took over: the service is off afterwards.
         val vpn = FakeVpn()
@@ -321,7 +321,7 @@ class RepairVpnSyncTest {
         assertEquals(0, vpn.reloads.get())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aReloadThatDoesNotReconnectIsReported() = runBlocking {
         val vpn = FakeVpn(reconnects = false)
         assertFalse(VpnReloader(vpn, reconnectMs = 200L).reload("MTU changed"))
@@ -335,7 +335,7 @@ class RepairVpnSyncTest {
     private fun pending(phase: () -> ServicePhase, reloads: AtomicInteger) =
         PendingReload(phase, { reloads.incrementAndGet() }, scope, pollMs = 20L, lifetimeMs = 5_000L)
 
-    @Test
+    @Test(timeout = 20_000)
     fun aCancelledWaitDoesNotLoseTheOwedReloadAndItGoesOnlyOnceConnected() = runBlocking {
         // A value was put back while the VPN was starting with the replaced one; the run waits (settle) and the user
         // stops it during that wait.
@@ -367,7 +367,7 @@ class RepairVpnSyncTest {
         assertFalse(pending.armed)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun armingTwiceOwesOneReload() = runBlocking {
         var phase = ServicePhase.STARTING
         val reloads = AtomicInteger()
@@ -380,7 +380,7 @@ class RepairVpnSyncTest {
         assertEquals(1, reloads.get())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun theOwedReloadRecordsTheConnectsAtItsSend() = runBlocking {
         val vpn = FakeVpn()
         vpn.connect()
@@ -391,7 +391,7 @@ class RepairVpnSyncTest {
         assertEquals(2, owed.connectsAtSend)
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun anOwedReloadIsDroppedWhenTheServiceGoesOffOrIsDisarmed() = runBlocking {
         var phase = ServicePhase.STARTING
         val reloads = AtomicInteger()
@@ -434,7 +434,7 @@ class RepairVpnSyncTest {
         fun awaitDone() = assertTrue("the callback did not finish", done.await(5, java.util.concurrent.TimeUnit.SECONDS))
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aLateBindAfterTheWaitWasStoppedSubmitsNothing() = runBlocking {
         // The binding answers only after the run was stopped (a binder wait cannot be interrupted): the claim fails,
         // nothing is submitted.
@@ -449,7 +449,7 @@ class RepairVpnSyncTest {
         assertEquals(0, callback.submitted.get())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aSubmissionClaimedBeforeTheStopIsPartOfTheRunEvenWithAPauseBeforeIt() = runBlocking {
         // The call claims, then pauses before it submits (non-suspending code is not interrupted); the stop comes in
         // that pause. The claim came first, so the submission goes through as part of the run — and a stop that comes
@@ -471,7 +471,7 @@ class RepairVpnSyncTest {
         assertEquals(1, callback.submitted.get())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aBindOverTheLimitIsGivenUpAndSubmitsNothing() = runBlocking {
         val callback = Callback()
         val result = detachedCall(scope, 100L) { claim -> callback.claimAfterRelease(claim) }
@@ -481,12 +481,12 @@ class RepairVpnSyncTest {
         assertEquals(0, callback.submitted.get())
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aCallInTimeReturnsItsResult() = runBlocking {
         assertEquals(42, detachedCall(scope, 1_000L) { claim -> if (claim()) 42 else 0 })
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun theStopGivesUpBeforeTheCancellationReachesTheWait() = runBlocking {
         // The service callback comes while the stop has been pressed but the waiting coroutine has not processed its
         // cancellation yet (it is not cancelled at all here): the closed gate makes the claim fail.
@@ -503,7 +503,7 @@ class RepairVpnSyncTest {
         waiter.cancel() // … and only then the cancellation
     }
 
-    @Test
+    @Test(timeout = 20_000)
     fun aClaimBeforeTheStopIsKeptAndACallAfterItStartsGivenUp() = runBlocking {
         val gate = RepairStopGate()
         val submitted = AtomicInteger()
