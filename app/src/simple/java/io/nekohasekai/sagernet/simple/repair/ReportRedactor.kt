@@ -54,17 +54,19 @@ class ReportRedactor(
         val distinctLinks = subscriptions.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         links = distinctLinks.mapIndexed { i, link -> link to "<subscription-${i + 1}>" }.sortedByDescending { it.first.length }
         distinctLinks.forEachIndexed { i, link ->
-            hostOf(link)?.let(::normalize)?.let { host ->
+            hostOf(link)?.let { normalize(it) ?: singleLabel(it) }?.let { host ->
                 for (form in forms(host)) labels.putIfAbsent(form, "<subscription-${i + 1}-host>")
             }
         }
-        // A subdomain of a server's domain names the server too: "cdn.vpn.example.com" becomes the label of
-        // "vpn.example.com" (group 1 is dropped). Word edges are Unicode letters and digits (IDN, Cyrillic names).
+        // Group 1: a label already in the text (LogRedactor's or this pass's) is skipped whole, so a server called
+        // "server-1", "redacted" or "x" never eats into one. Otherwise a known name as a whole word; a subdomain of a
+        // server's domain names the server too: "cdn.vpn.example.com" becomes the label of "vpn.example.com" (group 2 is
+        // dropped). Word edges are Unicode letters and digits (IDN, Cyrillic names); a colon may come before a name
+        // ("dialing to tcp:host:443").
         names = labels.keys.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
-            // A colon may come before a name ("dialing to tcp:host:443"): only a letter, digit, dot or dash may not.
             Regex(
-                "(?iu)(?<![\\p{L}\\p{N}_.\\-])((?:[a-z0-9_\\-]+\\.)*)(" + known.joinToString("|") { Regex.escape(it) } +
-                    ")(?![\\p{L}\\p{N}_\\-]|\\.[\\p{L}\\p{N}_\\-])",
+                "(?iu)($LABEL)|(?<![\\p{L}\\p{N}_.\\-])((?:[a-z0-9_\\-]+\\.)*)(" +
+                    known.joinToString("|") { Regex.escape(it) } + ")(?![\\p{L}\\p{N}_\\-]|\\.[\\p{L}\\p{N}_\\-])",
             )
         }
     }
@@ -77,6 +79,8 @@ class ReportRedactor(
         // mask has no angle brackets: LogRedactor still sees credentials of a URL as credentials.
         secretPattern?.let { pattern -> s = pattern.replace(s, MASK) }
         s = log.redact(s)
+        // From here on a masked secret is a label like the others (protected from the name pass).
+        s = s.replace(MASK, "<redacted>")
         s = SECRET.replace(s) { m ->
             val (_, quote, key, separator, value) = m.groupValues
             "$quote$key$quote$separator" + if (value.startsWith("[")) "[\"<redacted>\"]" else "\"<redacted>\""
@@ -89,11 +93,12 @@ class ReportRedactor(
         }
         names?.let { pattern ->
             s = pattern.replace(s) { m ->
-                val name = m.groupValues[2]
+                if (m.groups[1] != null) return@replace m.value
+                val name = m.groupValues[3]
                 labels[normalize(name) ?: name.lowercase()] ?: m.value
             }
         }
-        return s.replace(MASK, "<redacted>")
+        return s
     }
 
     /** Every line of [text]. */
@@ -143,10 +148,12 @@ class ReportRedactor(
      */
     private fun labelFor(host: String): String {
         val name = normalize(host) ?: host.trim().removePrefix("[").removeSuffix("]").trimEnd('.').lowercase()
-        if (name.isEmpty() || isLoopback(name)) return host
-        // Another spelling of a known address or name (IPv6 written otherwise, punycode) has its label already.
+        if (name.isEmpty()) return host
+        // A configured server keeps its label even on loopback; another spelling of a known address or name (IPv6
+        // written otherwise, punycode) has its label already.
         labels[name]?.let { return it }
         forms(name).firstNotNullOfOrNull { labels[it] }?.let { return it }
+        if (isLoopback(name)) return host
         return labels.getOrPut(name) { "<host-${++hosts}>" }
     }
 
@@ -157,27 +164,25 @@ class ReportRedactor(
         /** What a known secret becomes until the end of [redact]: private-use characters, no angle brackets. */
         private const val MASK = "\uE000redacted\uE000"
 
-        private val LABEL_WORD = Regex("""(?:server|host|subscription)-\d+(?:-host)?""")
+        /** The labels LogRedactor and this pass put in the text; the name pass skips them whole. */
+        private const val LABEL = """<(?:redacted|uuid|ip|key|domain|(?:server|host|subscription)-\d+(?:-host)?)>"""
 
-        private val SINGLE_LABEL = Regex("[\\p{L}\\p{N}](?:[\\p{L}\\p{N}\\-]*[\\p{L}\\p{N}])?")
+        private val SINGLE_LABEL = Regex("[\\p{L}\\p{N}](?:[\\p{L}\\p{N}_\\-]*[\\p{L}\\p{N}])?")
 
-        /** Words a profile writes where an address would be, which are no host. */
-        private val NOT_HOSTS = setOf(
-            "localhost", "none", "auto", "direct", "block", "local", "any", "true", "false", "null", "default",
-            // The words of the report's own labels: a server called so would eat them.
-            "redacted", "uuid", "key", "ip", "domain",
+        /**
+         * Values a profile writes under an address key where there is no address. Only these, and bare numbers (ports),
+         * are skipped there; the server's own address is kept whatever it is called.
+         */
+        private val PLACEHOLDERS = setOf(
+            "none", "auto", "direct", "block", "any", "true", "false", "null", "default",
         )
 
-        /** The keys whose single-label value ("gateway") is a server; a transport's "host" or an SNI is not that sure. */
-        private val PRIMARY_SERVER_KEYS = setOf(
-            "server", "address", "endpoint", "peer", "remote", "remote_address", "server_address", "serveraddress",
-            "hostname",
-        )
+        private fun isPlaceholder(name: String) = name in PLACEHOLDERS || name.all(Char::isDigit)
 
 
         /**
-         * A single-label host name ("gateway", "vpn"; also "gateway:8080"), lowercase, or null: not a number, not one of
-         * [NOT_HOSTS].
+         * A single-label host name ("gateway", "vpn", "x", "server-1"; also "gateway:8080"), lowercase, or null when
+         * [raw] is no such name.
          */
         fun singleLabel(raw: String): String? {
             var s = raw.trim()
@@ -185,7 +190,7 @@ class ReportRedactor(
             s = s.substringBefore('/')
             if (s.count { it == ':' } == 1) s = s.substringBefore(':')
             s = s.trimEnd('.').lowercase()
-            if (s.length !in 2..63 || s in NOT_HOSTS || s.all(Char::isDigit) || LABEL_WORD.matches(s)) return null
+            if (s.length !in 1..63) return null
             return s.takeIf { SINGLE_LABEL.matches(it) }
         }
 
@@ -327,28 +332,27 @@ class ReportRedactor(
 
         /**
          * The server names of one profile as the app stores it ([outboundJson], the desktop's profile JSON): every string
-         * under a [SERVER_KEYS] key at any depth (also "host:port" lists and arrays), plus [server] itself. A single-label
-         * name ("gateway") counts as the server's address itself or under [PRIMARY_SERVER_KEYS].
+         * under a [SERVER_KEYS] key at any depth (also "host:port" lists and arrays), plus [server] itself, whatever it is
+         * called. Under the keys only a [PLACEHOLDERS] word or a bare number is skipped: it stands for no address.
          */
         fun serverNames(server: String, outboundJson: String): Set<String> {
             val out = LinkedHashSet<String>()
             (normalize(server) ?: singleLabel(server))?.let(out::add)
             val root = runCatching { JSONObject(outboundJson) }.getOrNull() ?: return out
-            fun addValue(value: Any?, primary: Boolean) {
+            fun addValue(value: Any?) {
                 when (value) {
                     is String -> value.split(',', ' ', '\n').forEach { part ->
-                        (normalize(part) ?: if (primary) singleLabel(part) else null)?.let(out::add)
+                        (normalize(part) ?: singleLabel(part)?.takeUnless(::isPlaceholder))?.let(out::add)
                     }
 
-                    is JSONArray -> for (i in 0 until value.length()) addValue(value.opt(i), primary)
+                    is JSONArray -> for (i in 0 until value.length()) addValue(value.opt(i))
                 }
             }
             fun walk(node: Any?) {
                 when (node) {
                     is JSONObject -> node.keys().forEach { key ->
                         val value = node.opt(key)
-                        val lower = key.lowercase()
-                        if (lower in SERVER_KEYS) addValue(value, lower in PRIMARY_SERVER_KEYS)
+                        if (key.lowercase() in SERVER_KEYS) addValue(value)
                         walk(value)
                     }
 

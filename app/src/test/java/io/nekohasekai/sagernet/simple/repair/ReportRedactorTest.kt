@@ -270,8 +270,8 @@ class ReportRedactorTest {
         assertTrue(r.redact("[Info] user@vpn connected").contains("user@<server-2>"))
         // Even a generic name is the user's server: as a plain word it is labelled too (the spec allows no server address).
         assertEquals("[Info] the <server-1> is down, <server-2> service on", r.redact("[Info] the gateway is down, VPN service on"))
-        // Words a profile writes for "no address" are no servers.
-        assertEquals(emptySet<String>(), ReportRedactor.serverNames("none", """{"address":"auto","endpoint":"8080"}"""))
+        // The server's own address counts whatever it is called; under the keys a "no address" word or a port does not.
+        assertEquals(setOf("none"), ReportRedactor.serverNames("none", """{"address":"auto","endpoint":"8080"}"""))
     }
 
     /**
@@ -292,15 +292,38 @@ class ReportRedactorTest {
         assertEquals("[Info] mybox77 and xmybox7 and дача55", r.redact("[Info] mybox77 and xmybox7 and дача55"))
         // A generic name is labelled as a word and as a host.
         assertEquals("[Info] <server-3> started, dial tcp:<server-3>:1080", r.redact("[Info] proxy started, dial tcp:proxy:1080"))
-        // The report's own label words are never server names, and labels stay whole even for servers called
-        // "server" or "host".
-        assertEquals(emptySet<String>(), ReportRedactor.serverNames("redacted", """{"address":"server-1"}"""))
+        // Labels stay whole even for servers called "server" or "host".
         assertEquals("[Info] password=<redacted> uuid <uuid>", r.redact("[Info] password=secret12 uuid $uuid"))
         val labelled = ReportRedactor(listOf("server", "host", "vpn.example.org"), emptyList())
         assertEquals(
             "[Info] <server-1> <server-2> at <server-3> https://<host-1>/<redacted>",
             labelled.redact("[Info] server host at vpn.example.org https://other.example.net/x"),
         )
+    }
+
+    /**
+     * Servers named like a label ("server-1", "redacted") or with one character ("x") are kept and labelled as whole
+     * words; the labels already in the text stay intact (review).
+     */
+    @Test
+    fun labelLikeAndOneCharacterServers() {
+        val names = ReportRedactor.serverNames("server-1", "{}") + ReportRedactor.serverNames("x", "{}") +
+            ReportRedactor.serverNames("redacted", """{"address":"server-1"}""")
+        assertEquals(setOf("server-1", "x", "redacted"), names)
+        val r = ReportRedactor(names, emptyList())
+        assertEquals("[Info] <server-1> handshake failed", r.redact("[Info] server-1 handshake failed"))
+        assertEquals(
+            "[Info] GET https://<server-1>/<redacted> and <server-1>",
+            r.redact("[Info] GET https://server-1/x and server-1"),
+        )
+        assertEquals(
+            "[Info] <server-2> is down; box x2 x-ray x.y password=<redacted>",
+            r.redact("[Info] X is down; box x2 x-ray x.y password=pw1"),
+        )
+        assertEquals("[Info] password=<redacted> <server-3> <uuid>", r.redact("[Info] password=secret12 redacted $uuid"))
+        // A configured loopback server is labelled too; an unconfigured one stays readable.
+        val loopback = ReportRedactor(listOf("127.0.0.1:1080"), emptyList())
+        assertEquals("socks5://<server-1>:1080 http://127.0.0.2:9/<redacted>", loopback.redact("socks5://127.0.0.1:1080 http://127.0.0.2:9/x"))
     }
 
     /** An IPv6 server in any spelling — compressed, full, zero-padded, with brackets and port (neighbouring case). */
