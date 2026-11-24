@@ -60,6 +60,7 @@ import io.nekohasekai.sagernet.simple.ServiceDetail
 import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
 import io.nekohasekai.sagernet.simple.unavailable
+import io.nekohasekai.sagernet.simple.wholeInViewOnFocus
 import kotlin.math.abs
 
 /** Where a button of «Починка» leads: a system settings screen (only the user changes Android's settings) or «Серверы». */
@@ -176,7 +177,8 @@ fun RepairScreen(
                 .fillMaxWidth()
             state.verdict?.let { verdict ->
                 item(key = "verdict") {
-                    VerdictCard(verdict, progress.results, actions.open, width.padding(bottom = 12.dp)) {
+                    // Coming back up to the verdict brings its heading into view too, not only its focused button.
+                    VerdictCard(verdict, progress.results, actions.open, width.padding(bottom = 12.dp).wholeInViewOnFocus()) {
                         ExportButton(state, actions.export, main = verdict is RepairVerdict.Unknown)
                     }
                 }

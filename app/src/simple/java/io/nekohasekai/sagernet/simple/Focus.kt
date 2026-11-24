@@ -227,6 +227,19 @@ private class FocusRingNode(var shape: Shape, var outset: Dp) :
 }
 
 /**
+ * The whole group in view whenever the focus comes into it: a card whose heading and text take no focus (the verdict of
+ * «Починка») would otherwise show only its focused button when a remote comes back up a list, its heading left above.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+fun Modifier.wholeInViewOnFocus(): Modifier = composed {
+    val requester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    bringIntoViewRequester(requester).onFocusChanged { state ->
+        if (state.hasFocus) scope.launch { requester.bringIntoView() }
+    }
+}
+
+/**
  * A control that is unavailable for a while (busy) without losing a remote's focus: Compose takes the focus from a
  * disabled clickable, and it then drops to the navigation. Such a control stays enabled for the focus, ignores presses
  * itself while [unavailable] and tells accessibility services it is disabled.
