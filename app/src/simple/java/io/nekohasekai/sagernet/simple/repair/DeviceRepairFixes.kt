@@ -11,6 +11,7 @@ import io.nekohasekai.sagernet.database.RouteDnsSettings
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.group.RemoteRouteUpdater
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.config.SimpleConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,9 +77,23 @@ class DeviceRepairFixes(
     @Volatile
     private var owed: PendingReload.Owed? = null
 
-    /** «Починка» stopped the VPN it had started: nothing may reload (a reload would start it again). */
+    /**
+     * The session ([SimpleHooks.KEY_CONNECTED_SINCE], 0 = never connected) of the VPN «Починка» started for the checks
+     * and stopped; null while it has stopped none. No reload may reach that VPN (a reload would start it again).
+     */
     @Volatile
-    private var vpnStopped = false
+    private var stoppedSession: Long? = null
+
+    /**
+     * The VPN «Починка» stopped is still the one around (stopping; `:bg` drops its session only once it has stopped):
+     * nothing may reload it. A VPN started since — by the user, another session — takes reloads like any other, so a
+     * change put back later, by a retry in a later run too, reaches it.
+     */
+    private fun ourStopHolds(): Boolean {
+        val stopped = stoppedSession ?: return false
+        val now = DataStore.configurationStore.getLong(SimpleHooks.KEY_CONNECTED_SINCE) ?: 0L
+        return now == stopped
+    }
 
     /** The subscriptions were updated in this run already. */
     private var subscriptionsUpdated = false
@@ -119,11 +134,12 @@ class DeviceRepairFixes(
     }
 
     /**
-     * The VPN started for the checks is being stopped: no reload from here on, and none owed (a reload reaching the
-     * stopping service would start it again; its next start reads the stored values anyway).
+     * The VPN started for the checks, of [session], is being stopped: no reload reaches it from here on, and none is
+     * owed (a reload reaching the stopping service would start it again; its next start reads the stored values
+     * anyway). A VPN started later, as another session, takes reloads again ([ourStopHolds]).
      */
-    fun vpnStopped() {
-        vpnStopped = true
+    fun vpnStopped(session: Long) {
+        stoppedSession = session
         RepairReloads.pending.disarm()
         owed = null
     }
@@ -147,7 +163,7 @@ class DeviceRepairFixes(
     private fun armOwed() {
         if (!owePending) return
         owePending = false
-        if (vpnStopped || env.serviceOff()) return
+        if (env.serviceOff() || ourStopHolds()) return
         owed = RepairReloads.pending.arm { env.connects() }
     }
 
@@ -252,7 +268,7 @@ class DeviceRepairFixes(
             vpn = vpn,
             reloader = reloader,
             running = { DataStore.currentProfile },
-            reloadAllowed = { !vpnStopped },
+            reloadAllowed = { !ourStopHolds() },
             log = { Logs.i("simple repair: $it") },
         )
     }
@@ -324,7 +340,7 @@ class DeviceRepairFixes(
      * it does not connect (again).
      */
     private suspend fun takeUp(why: String): Boolean = when {
-        vpnStopped || env.serviceOff() -> true
+        env.serviceOff() || ourStopHolds() -> true
         env.vpnConnected() -> reloader.reload(why)
         else -> reloader.reloadWhenConnected(why)
     }

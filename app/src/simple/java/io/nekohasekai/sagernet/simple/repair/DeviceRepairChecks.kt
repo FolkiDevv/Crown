@@ -490,7 +490,14 @@ class DeviceRepairChecks(
             journal.record(
                 step, kind = null, keepIf = RepairStep.SITES_VPN, key = "server",
                 stillOurs = { DataStore.selectedProxy == chosen },
-            ) { DataStore.selectedProxy = selected }
+            ) {
+                // A server gone meanwhile (a subscription update removed it) is not put back: the one selected stays.
+                if (ProfileManager.getProfile(selected) != null) {
+                    DataStore.selectedProxy = selected
+                } else {
+                    Logs.i("simple repair: the server selected before the checks is gone; the one selected now stays")
+                }
+            }
         } else {
             null
         }
@@ -500,7 +507,7 @@ class DeviceRepairChecks(
             val running = DataStore.configurationStore.getLong(SimpleHooks.KEY_CONNECTED_SINCE)
             if (!env.serviceOff() && (session == null || running == session)) {
                 Logs.i("simple repair: stopping the VPN started for the checks")
-                fixes.vpnStopped()
+                fixes.vpnStopped(running ?: 0L)
                 env.stopVpn()
             } else {
                 Logs.i("simple repair: the VPN started for the checks is gone; the one running now is left alone")

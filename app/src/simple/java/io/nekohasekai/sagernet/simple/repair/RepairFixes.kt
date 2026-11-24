@@ -221,8 +221,12 @@ class RepairJournal(
  * start atomically (a cancellation before the start does not skip the body) and wait without cancellation, so a
  * stopped run's body still runs after the wait — already cancelled, it ends at its first suspension and can publish
  * its own stopped state.
+ *
+ * One chain per process (the view model keeps it in a singleton), not per screen: a run in a new view model waits for
+ * the rollback of a run whose view model was cleared, too. Each run is launched in the scope of its own view model
+ * ([Owner]); the chain is made of plain jobs of no scope, so clearing a view model never breaks it.
  */
-class SerialRuns(private val scope: CoroutineScope) {
+class SerialRuns {
 
     /**
      * The scope of the runs and the stop gate of the newest one, closed together in the right order: the gate first
@@ -246,7 +250,7 @@ class SerialRuns(private val scope: CoroutineScope) {
     private var lastDone: Job? = null
 
     @Synchronized
-    fun launch(block: suspend CoroutineScope.() -> Unit): Job {
+    fun launch(scope: CoroutineScope, block: suspend CoroutineScope.() -> Unit): Job {
         val previous = lastDone
         val done = Job()
         lastDone = done
