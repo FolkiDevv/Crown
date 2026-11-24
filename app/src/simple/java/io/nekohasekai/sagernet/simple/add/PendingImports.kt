@@ -58,6 +58,20 @@ object PendingImports {
         return updates.schedule()
     }
 
+    /** The scheduler's periodic work as WorkManager reports it: its id, its generation and whether it is finished. */
+    data class WorkMark(val id: String, val generation: Int, val finished: Boolean)
+
+    /**
+     * Whether the scheduler's work was registered again after [before] was read: an unfinished work that is new (another
+     * id) or updated (a higher generation; ExistingPeriodicWorkPolicy.UPDATE raises it on every update, also an update
+     * to the same plan). Such a registration was planned from the groups as they were when it ran, so after the flag
+     * was cleared, with the restored group's interval in it. The work that was already there (an older plan, maybe
+     * another period) does not count.
+     */
+    fun registeredAfter(before: List<WorkMark>, after: List<WorkMark>): Boolean = after.any { work ->
+        !work.finished && before.none { it.id == work.id && it.generation >= work.generation }
+    }
+
     /** Adds or replaces (the group id became known) the entry of one import. */
     fun record(records: Records, lock: Any, entry: Entry) = synchronized(lock) {
         records.save(records.load().filterNot { it.sameImport(entry) } + entry)
