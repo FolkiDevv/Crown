@@ -47,16 +47,22 @@ class ReportRedactor(
      * "1.7", "10.0.0.7" stay). A user with a one-character password sees that character standing alone in the log
      * masked as well: privacy first.
      */
-    private val secretPatterns: List<Regex> = secrets.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    private val secretSources: List<String> = secrets.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         .sortedByDescending { it.length }.let { known ->
             fun alternatives(range: IntRange) = known.filter { it.length in range }.joinToString("|") { Regex.escape(it) }
             listOfNotNull(
-                alternatives(MIN_ANYWHERE..Int.MAX_VALUE).takeIf { it.isNotEmpty() }?.let { Regex("(?iu)$it") },
+                alternatives(MIN_ANYWHERE..Int.MAX_VALUE).takeIf { it.isNotEmpty() },
                 alternatives(1 until MIN_ANYWHERE).takeIf { it.isNotEmpty() }?.let {
-                    Regex("(?iu)(?<![\\p{L}\\p{N}_]|\\p{N}\\.)(?:$it)(?![\\p{L}\\p{N}_]|\\.\\p{N})")
+                    "(?<![\\p{L}\\p{N}_]|\\p{N}\\.)(?:$it)(?![\\p{L}\\p{N}_]|\\.\\p{N})"
                 },
             )
         }
+
+    /** The secrets before LogRedactor (see [redact]). */
+    private val secretPatterns: List<Regex> = secretSources.map { Regex("(?iu)$it") }
+
+    /** The secrets once more at the end, the labels in the text (group 1) skipped whole. */
+    private val leftoverSecretPatterns: List<Regex> = secretSources.map { Regex("(?iu)($LABEL)|(?:$it)") }
 
     init {
         // Every spelling of a server gets its label: IPv6 compressed / full / zero-padded, IDN as Unicode and punycode.
@@ -89,7 +95,15 @@ class ReportRedactor(
         for ((link, label) in links) s = s.replace(link, label)
         // Known secrets first, before LogRedactor rewrites anything inside them (an IP-like part becomes "<ip>"). The
         // mask has no angle brackets: LogRedactor still sees credentials of a URL as credentials.
-        for (pattern in secretPatterns) s = pattern.replace(s, MASK)
+        // A secret that is also a scheme or network word right before ":" ("https://…", "tcp:host") is left for the end:
+        // masked here it would hide the URL / address from the passes below, which then could not clean it.
+        for (pattern in secretPatterns) {
+            val text = s
+            s = pattern.replace(text) { m ->
+                val beforeColon = m.range.last + 1 < text.length && text[m.range.last + 1] == ':'
+                if (beforeColon && SCHEME_WORD.matches(m.value)) m.value else MASK
+            }
+        }
         s = log.redact(s)
         // From here on a masked secret is a label like the others (protected from the name pass).
         s = s.replace(MASK, "<redacted>")
@@ -125,6 +139,10 @@ class ReportRedactor(
         // ("TCP Connect request to tcp:site:443", "taking detour [proxy] for [tcp:site:443]").
         if (XRAY_DESTINATION_LINE.containsMatchIn(s)) {
             s = DOMAIN.replace(s) { m -> "<domain>." + m.groupValues[1] }
+        }
+        // What the first secret pass left (a secret spelled like a scheme), now that URLs and addresses are labelled.
+        for (pattern in leftoverSecretPatterns) {
+            s = pattern.replace(s) { m -> if (m.groups[1] != null) m.value else "<redacted>" }
         }
         return s
     }
@@ -199,6 +217,12 @@ class ReportRedactor(
 
         /** The labels LogRedactor and this pass put in the text; the name pass skips them whole. */
         private const val LABEL = """<(?:redacted|uuid|ip|key|domain|(?:server|host|subscription)-\d+(?:-host)?)>"""
+
+        /**
+         * A word that can be a URL scheme or a network prefix before ":" ("https", "tcp", "vless+ws"). No dot: a secret
+         * with an IP-like part ("pw-1.2.3.4") must be masked before LogRedactor turns that part into "<ip>".
+         */
+        private val SCHEME_WORD = Regex("""[a-zA-Z][a-zA-Z0-9+\-]*""")
 
         private val SINGLE_LABEL = Regex("[\\p{L}\\p{N}](?:[\\p{L}\\p{N}_\\-]*[\\p{L}\\p{N}])?")
 

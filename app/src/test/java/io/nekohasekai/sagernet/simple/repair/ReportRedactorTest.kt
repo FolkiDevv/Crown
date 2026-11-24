@@ -348,6 +348,30 @@ class ReportRedactorTest {
         assertTrue(ReportRedactor.secretValues("""{"type":"socks","password":4321}""").contains("4321"))
     }
 
+    /**
+     * A secret spelled like a URL scheme or a network prefix ("https", "tcp") must not hide the URL or the address from
+     * the later passes: the host is labelled, the credentials go, and the secret itself is masked at the end (review).
+     */
+    @Test
+    fun secretsSpelledLikeSchemes() {
+        val vpn = "vpn.example.net"
+        val profile = """{"type":"vless","server":"$vpn","password":"https","uuid":"tcp"}"""
+        val r = ReportRedactor(
+            ReportRedactor.serverNames(vpn, profile) + ReportRedactor.serverNames("fd00::1", "{}"),
+            emptyList(),
+            ReportRedactor.secretValues(profile),
+        )
+        val url = r.redact("[Info] GET https://user:https@$vpn/x failed")
+        assertEquals("[Info] GET <redacted>://<redacted>@<server-1>/<redacted> failed", url)
+        for (gone in listOf("https", "user", vpn)) assertFalse(url, url.contains(gone))
+        assertEquals("[Debug] dialing to <redacted>:<server-1>:443", r.redact("[Debug] dialing to tcp:$vpn:443"))
+        assertEquals("[Debug] dialing to <redacted>:<server-2>", r.redact("[Debug] dialing to tcp:fd00:0::1"))
+        assertEquals("[Debug] dialing to <redacted>:<ip>", r.redact("[Debug] dialing to tcp:2a00:1450::1"))
+        // Labels are never touched by the second pass, and an IP-like secret before ":" is still masked first.
+        val ipLike = ReportRedactor(emptyList(), emptyList(), listOf("pw-1.2.3.4"))
+        assertEquals("[Warn] bad <redacted>: denied", ipLike.redact("[Warn] bad pw-1.2.3.4: denied"))
+    }
+
     /** A configured IPv6 server in a spelling none of its listed forms has: compared by value in free text (review). */
     @Test
     fun ipv6ServerByValueInFreeText() {
