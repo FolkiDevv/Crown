@@ -63,7 +63,12 @@ class PendingImportsTest {
     /** The preferences of the app, in memory. */
     private class Memory(var entries: List<Entry> = emptyList()) : PendingImports.Records {
         override fun load() = entries
-        override fun save(entries: List<Entry>) { this.entries = entries }
+        var failWrites = false
+        override fun save(entries: List<Entry>): Boolean {
+            if (failWrites) return false
+            this.entries = entries
+            return true
+        }
     }
 
     private val lock = Any()
@@ -326,6 +331,35 @@ class PendingImportsTest {
         assertEquals(listOf(entry), settleWithRestore(records, updates, entry))
         assertEquals(PendingImports.WorkMark("w", 4, false) to 1, scheduler.work)
         assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
+    fun aRecordThatCannotBeWrittenIsReported() {
+        val records = Memory().apply { failWrites = true }
+        assertFalse(PendingImports.record(records, lock, Entry(1_000L, 0L, url, here)))
+        assertTrue(records.entries.isEmpty())
+        records.failWrites = false
+        assertTrue(PendingImports.record(records, lock, Entry(1_000L, 0L, url, here)))
+    }
+
+    @Test
+    fun aHealWhoseSchedulerFailedStillAsksForTheSettingsToBeShownAgain() = runBlocking {
+        // An interrupted first import: the restore turns the never-set global switch on, then the scheduler check fails.
+        val entry = Entry(1_000L, 5L, url, "gone")
+        val records = Memory(listOf(entry))
+        val updates = FakeAutoUpdates().apply { global = null; scheduleResult = { false } }
+        assertTrue(PendingImports.heal(records, lock, { PendingImports.restore(it, updates) }, session = here))
+        assertEquals(true, updates.global)
+        assertEquals(listOf(entry), records.entries)
+    }
+
+    @Test
+    fun aHealWithNothingToDoLeavesTheSettingsAlone() = runBlocking {
+        val running = Entry(1_000L, 5L, url, here)
+        val updates = FakeAutoUpdates()
+        assertFalse(PendingImports.heal(Memory(), lock, { PendingImports.restore(it, updates) }, session = here))
+        assertFalse(PendingImports.heal(Memory(listOf(running)), lock, { PendingImports.restore(it, updates) }, session = here))
+        assertEquals(0, updates.schedules)
     }
 
     @Test

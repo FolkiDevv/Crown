@@ -167,13 +167,14 @@ object SimpleImport {
      * download that fails leaves nothing behind: the new group is removed again, so adding it once more just works.
      */
     suspend fun subscribe(plan: Plan.Subscription): SubscribeResult = coroutineScope {
+        // Recorded before the group exists: a process killed at any point after this leaves the entry, and the next
+        // start of the interface turns automatic updates on for the group (healInterrupted). Without it on disk no
+        // group is created: one that skips automatic updates might never get them back.
+        val pending = PendingImports.Entry(System.currentTimeMillis(), 0L, plan.url.trim(), PendingImports.SESSION)
+        if (!recordPending(pending)) return@coroutineScope SubscribeResult.Failed(null)
         val reports = Channel<SubscriptionClient.Report>(Channel.UNLIMITED)
         // Collecting keeps the callback registered; it lands before the download ends (that needs the network).
         val listener = launch { SubscriptionClient.reports.collect { reports.trySend(it) } }
-        // Recorded before the group exists: a process killed at any point after this leaves the entry, and the next
-        // start of the interface turns automatic updates on for the group (healInterrupted).
-        val pending = PendingImports.Entry(System.currentTimeMillis(), 0L, plan.url.trim(), PendingImports.SESSION)
-        recordPending(pending)
         var gid = -1L
         try {
             delay(200)
@@ -199,10 +200,16 @@ object SimpleImport {
             // The entry is forgotten only once that worked; otherwise the next start of the interface tries again.
             withContext(NonCancellable) {
                 val entry = pending.copy(gid = gid.coerceAtLeast(0L))
-                if (PendingImports.settle(records, pendingLock, listOf(entry), ::restore).isEmpty()) {
-                    // This import has ended: the next heal (in this process too) retries it.
-                    recordPending(entry.copy(session = ""), entry.gid)
-                    Logs.w("simple add: automatic updates of subscription $gid not turned on yet, kept for the next start")
+                var restored = false
+                try {
+                    restored = PendingImports.settle(records, pendingLock, listOf(entry), ::restore).isNotEmpty()
+                } finally {
+                    // Not restored (failed, or cancelled from within, e.g. a cancelled WorkManager future): this import
+                    // has ended, so its entry drops this process's session and the next heal (here too) retries it.
+                    if (!restored) {
+                        recordPending(entry.copy(session = ""), entry.gid)
+                        Logs.w("simple add: automatic updates of subscription $gid not turned on yet, kept for the next start")
+                    }
                 }
             }
         }
@@ -217,11 +224,10 @@ object SimpleImport {
     private val records = object : PendingImports.Records {
         private val prefs get() = app.getSharedPreferences(SimpleUi.PREFS, Context.MODE_PRIVATE)
         override fun load() = PendingImports.parse(prefs.getString(KEY_PENDING_IMPORTS, null))
-        override fun save(entries: List<PendingImports.Entry>) {
-            if (!prefs.edit().putString(KEY_PENDING_IMPORTS, PendingImports.format(entries)).commit()) {
-                Logs.w("simple add: the pending imports were not written")
+        override fun save(entries: List<PendingImports.Entry>): Boolean =
+            prefs.edit().putString(KEY_PENDING_IMPORTS, PendingImports.format(entries)).commit().also {
+                if (!it) Logs.w("simple add: the pending imports were not written")
             }
-        }
     }
 
     private fun recordPending(entry: PendingImports.Entry, gid: Long = 0L) =
@@ -297,12 +303,8 @@ object SimpleImport {
      * an import still running in this process is left alone. An entry is forgotten only after its group's flag is
      * cleared (PendingImports.settle), so a failure or another interruption is retried on the next start.
      */
-    suspend fun healInterrupted(): Boolean {
-        val stale = synchronized(pendingLock) { PendingImports.stale(records.load()) }
-        if (stale.isEmpty()) return false
-        val done = PendingImports.settle(records, pendingLock, stale, ::restore)
-        Logs.i("simple add: ${stale.size} interrupted import(s), automatic updates turned on for ${done.size}")
-        return done.isNotEmpty()
+    suspend fun healInterrupted(): Boolean = PendingImports.heal(records, pendingLock, ::restore).also { tried ->
+        if (tried) Logs.i("simple add: interrupted imports settled, ${records.load().size} left for the next start")
     }
 
     /**
