@@ -1,12 +1,14 @@
 package io.nekohasekai.sagernet.simple.add
 
+import kotlinx.coroutines.CancellationException
+
 /**
  * Subscriptions the new interface is adding (SimpleImport.subscribe). Such a group is created without automatic
  * updates, so that no automatic poll downloads it again while its first download runs; the import turns them on when
  * it ends, however it ends. When the import never got to its end (the process died, the device turned off), the entry
  * stays here, and the next start of the interface turns automatic updates on for that group: an interrupted import
- * never leaves a subscription that does not update itself. The groups a user excluded from automatic updates in the
- * classic interface are never touched, since only groups recorded here are.
+ * never leaves a subscription that does not update itself. Only groups recorded here are touched (by id, or by URL
+ * while the id never reached the UI process); the user's «automatic updates off» stays off.
  *
  * Kept as text in the UI process's preferences (only that process imports): one entry per line,
  * `<start, ms since epoch>\t<group id, 0 while unknown>\t<subscription URL>`.
@@ -39,6 +41,12 @@ object PendingImports {
         suspend fun changed(id: Long)
 
         /**
+         * Turns the global automatic updates on while they were never set, as a finished import does
+         * (SimpleImport.updateAutomatically); an «off» the user chose stays off.
+         */
+        suspend fun globalOnIfNeverSet()
+
+        /**
          * Plans the automatic updates again and confirms the result is in place: the periodic poll is registered, or
          * none is needed (nothing updates automatically). False when that cannot be confirmed.
          */
@@ -51,10 +59,13 @@ object PendingImports {
      * after the flag (listeners, scheduler) is completed by the next one. True only when all of it succeeded.
      */
     suspend fun restore(entry: Entry, updates: AutoUpdates): Boolean {
-        for (group in updates.groupsOf(entry)) {
+        val groups = updates.groupsOf(entry)
+        for (group in groups) {
             if (group.skipAutoUpdate) updates.clearFlag(group.id)
             updates.changed(group.id)
         }
+        // A first import interrupted before it switched the global setting on would leave it never set (off).
+        if (groups.isNotEmpty()) updates.globalOnIfNeverSet()
         return updates.schedule()
     }
 
@@ -84,7 +95,15 @@ object PendingImports {
      * already cleared, does nothing and forgets the entry. Entries recorded meanwhile are kept. Returns the forgotten.
      */
     suspend fun settle(records: Records, lock: Any, entries: List<Entry>, restore: suspend (Entry) -> Boolean): List<Entry> {
-        val done = entries.filter { entry -> runCatching { restore(entry) }.getOrDefault(false) }
+        val done = entries.filter { entry ->
+            try {
+                restore(entry)
+            } catch (e: CancellationException) {
+                throw e // the entry stays for the next heal
+            } catch (_: Exception) {
+                false
+            }
+        }
         if (done.isNotEmpty()) synchronized(lock) {
             records.save(records.load().filterNot { kept -> done.any { it.sameImport(kept) } })
         }

@@ -7,7 +7,7 @@ import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.work.WorkInfo
 import androidx.work.WorkQuery
-import androidx.work.multiprocess.RemoteWorkManager
+import androidx.work.WorkManager
 import com.google.common.util.concurrent.ListenableFuture
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
@@ -237,16 +237,24 @@ object SimpleImport {
 
         override suspend fun changed(id: Long) = GroupRepo.postUpdate(id)
 
+        override suspend fun globalOnIfNeverSet() {
+            if (DataStore.configurationStore.getInt(SettingsRegistry.SUB_AUTO_UPDATE.key) == null) {
+                DataStore.subAutoUpdate = DAILY_MINUTES
+            }
+        }
+
         /**
          * SubscriptionScheduler.schedule registers the poll asynchronously and only logs a failure, so the result is
          * read back from WorkManager: while a group updates itself, the scheduler's work must have been registered
          * again after this call (PendingImports.registeredAfter: a new id or a higher generation than before the
          * call), that is planned from the groups with the restored one in them; the work that was there before (an
          * older plan) does not count. Nothing to confirm while no group updates automatically: the global switch is
-         * off (the user's choice, never changed here) and the scheduler cancels the work on purpose.
+         * off (the user's choice, never changed here) and the scheduler cancels the work on purpose. Read in this
+         * process directly: the UI process is WorkManager's default process (SagerNet's configuration), so the work's
+         * generation comes from its own database rather than through the multiprocess copy.
          */
         override suspend fun schedule(): Boolean {
-            val workManager = RemoteWorkManager.getInstance(app)
+            val workManager = WorkManager.getInstance(app)
             val query = WorkQuery.fromUniqueWorkNames(listOf(SCHEDULER_WORK))
             val before = workManager.getWorkInfos(query).await().map(::mark)
             SubscriptionScheduler.schedule()
