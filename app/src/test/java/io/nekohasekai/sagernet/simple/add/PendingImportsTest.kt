@@ -158,10 +158,52 @@ class PendingImportsTest {
             notified++
         }
 
+        /** The global switch: null = never set (a fresh install), false = off by the user, true = on. */
+        var global: Boolean? = true
+
+        override suspend fun globalOnIfNeverSet() {
+            if (global == null) global = true
+        }
+
+        /** Like SubscriptionScheduler: a poll is needed only while the global switch is on. */
         override suspend fun schedule(): Boolean {
             schedules++
-            return scheduleResult()
+            return if (global == true) scheduleResult() else true
         }
+    }
+
+    @Test
+    fun anInterruptedFirstImportOnAFreshInstallTurnsTheGlobalSwitchOn() = runBlocking {
+        // The first import died before updateAutomatically turned the never-set global switch on.
+        val entry = Entry(1_000L, 5L, url)
+        val records = Memory(listOf(entry))
+        val updates = FakeAutoUpdates().apply { global = null; scheduleResult = { false } }
+        // The poll it now needs is not confirmed yet: the record stays, the switch is on.
+        assertTrue(settleWithRestore(records, updates, entry).isEmpty())
+        assertEquals(true, updates.global)
+        assertEquals(listOf(entry), records.entries)
+        updates.scheduleResult = { true }
+        assertEquals(listOf(entry), settleWithRestore(records, updates, entry))
+        assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
+    fun theUsersOffStaysOff() = runBlocking {
+        val entry = Entry(1_000L, 5L, url)
+        val records = Memory(listOf(entry))
+        val updates = FakeAutoUpdates().apply { global = false }
+        assertEquals(listOf(entry), settleWithRestore(records, updates, entry))
+        assertEquals(false, updates.global)
+        assertFalse(updates.skipAutoUpdate)
+        assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
+    fun aGoneGroupDoesNotTouchTheGlobalSwitch() = runBlocking {
+        val entry = Entry(1_000L, 5L, url)
+        val updates = FakeAutoUpdates(exists = false).apply { global = null }
+        assertEquals(listOf(entry), settleWithRestore(Memory(listOf(entry)), updates, entry))
+        assertEquals(null, updates.global)
     }
 
     private suspend fun settleWithRestore(records: Memory, updates: FakeAutoUpdates, entry: Entry) =
