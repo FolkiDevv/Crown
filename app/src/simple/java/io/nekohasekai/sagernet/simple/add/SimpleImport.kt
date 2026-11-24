@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Process
 import android.os.SystemClock
 import android.provider.OpenableColumns
+import androidx.work.WorkInfo
 import androidx.work.WorkQuery
 import androidx.work.multiprocess.RemoteWorkManager
 import com.google.common.util.concurrent.ListenableFuture
@@ -238,24 +239,30 @@ object SimpleImport {
 
         /**
          * SubscriptionScheduler.schedule registers the poll asynchronously and only logs a failure, so the result is
-         * read back from WorkManager: while a group updates itself, the unique periodic work must be there (an earlier
-         * registration counts too — every poll plans itself again from the groups). Nothing to confirm while no group
-         * updates automatically (the global switch is off): the scheduler then cancels the work on purpose.
+         * read back from WorkManager: while a group updates itself, the scheduler's work must have been registered
+         * again after this call (PendingImports.registeredAfter: a new id or a higher generation than before the
+         * call), that is planned from the groups with the restored one in them; the work that was there before (an
+         * older plan) does not count. Nothing to confirm while no group updates automatically: the global switch is
+         * off (the user's choice, never changed here) and the scheduler cancels the work on purpose.
          */
         override suspend fun schedule(): Boolean {
-            SubscriptionScheduler.schedule()
-            if (GroupRepo.all().none { SubscriptionScheduler.interval(it) > 0 }) return true
             val workManager = RemoteWorkManager.getInstance(app)
             val query = WorkQuery.fromUniqueWorkNames(listOf(SCHEDULER_WORK))
+            val before = workManager.getWorkInfos(query).await().map(::mark)
+            SubscriptionScheduler.schedule()
+            if (GroupRepo.all().none { SubscriptionScheduler.interval(it) > 0 }) return true
             return withTimeoutOrNull(SCHEDULE_CONFIRM_MS) {
                 while (true) {
-                    if (workManager.getWorkInfos(query).await().any { !it.state.isFinished }) return@withTimeoutOrNull true
+                    val after = workManager.getWorkInfos(query).await().map(::mark)
+                    if (PendingImports.registeredAfter(before, after)) return@withTimeoutOrNull true
                     delay(250)
                 }
                 @Suppress("UNREACHABLE_CODE")
                 false
             } ?: false
         }
+
+        private fun mark(work: WorkInfo) = PendingImports.WorkMark(work.id.toString(), work.generation, work.state.isFinished)
     }
 
     /** SubscriptionScheduler's unique work (its WORK_NAME, private there). */

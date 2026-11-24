@@ -227,6 +227,62 @@ class PendingImportsTest {
     }
 
     @Test
+    fun theWorkAlreadyThereDoesNotConfirmANewRegistration() {
+        val old = PendingImports.WorkMark("a", generation = 0, finished = false)
+        // The new scheduling failed: WorkManager still shows the old work only.
+        assertFalse(PendingImports.registeredAfter(listOf(old), listOf(old)))
+        // Updated in place (ExistingPeriodicWorkPolicy.UPDATE raises the generation).
+        assertTrue(PendingImports.registeredAfter(listOf(old), listOf(old.copy(generation = 1))))
+        // Registered anew (another id), or for the first time.
+        assertTrue(PendingImports.registeredAfter(listOf(old), listOf(PendingImports.WorkMark("b", 0, false))))
+        assertTrue(PendingImports.registeredAfter(emptyList(), listOf(PendingImports.WorkMark("b", 0, false))))
+        // A finished (cancelled) work confirms nothing; neither does nothing at all.
+        assertFalse(PendingImports.registeredAfter(listOf(old), listOf(old.copy(generation = 1, finished = true))))
+        assertFalse(PendingImports.registeredAfter(listOf(old), emptyList()))
+    }
+
+    /** WorkManager's unique work of the scheduler, with the period of its plan (hours), and a scheduler that can fail. */
+    private class FakeScheduler(var work: Pair<PendingImports.WorkMark, Int>?) {
+        var fails = false
+
+        /** SubscriptionScheduler.schedule: registers the plan of the current groups (UPDATE), unless it fails. */
+        fun schedule(periodHours: Int) {
+            if (fails) return // logged by the scheduler, never thrown
+            val current = work?.first
+            work = (current?.copy(generation = current.generation + 1) ?: PendingImports.WorkMark("w", 0, false)) to periodHours
+        }
+
+        fun marks() = listOfNotNull(work?.first)
+    }
+
+    /** The app's schedule step over [scheduler]: read before, schedule, confirm a registration after the call. */
+    private fun confirmingUpdates(scheduler: FakeScheduler, periodHours: Int) = FakeAutoUpdates().apply {
+        scheduleResult = {
+            val before = scheduler.marks()
+            scheduler.schedule(periodHours)
+            PendingImports.registeredAfter(before, scheduler.marks())
+        }
+    }
+
+    @Test
+    fun anOldJobOfAnotherPlanKeepsTheRecordUntilTheNewPlanIsRegistered() = runBlocking {
+        val entry = Entry(1_000L, 5L, url)
+        val records = Memory(listOf(entry))
+        // A 24 h job from before; the restored subscription needs 1 h.
+        val scheduler = FakeScheduler(PendingImports.WorkMark("w", 3, false) to 24)
+        scheduler.fails = true
+        val updates = confirmingUpdates(scheduler, periodHours = 1)
+        assertTrue(settleWithRestore(records, updates, entry).isEmpty())
+        assertEquals(24, scheduler.work!!.second)
+        assertEquals(listOf(entry), records.entries)
+        // Next start: the 1 h plan is registered (generation 4) and confirmed, then the record goes.
+        scheduler.fails = false
+        assertEquals(listOf(entry), settleWithRestore(records, updates, entry))
+        assertEquals(PendingImports.WorkMark("w", 4, false) to 1, scheduler.work)
+        assertTrue(records.entries.isEmpty())
+    }
+
+    @Test
     fun onlyTheStaleOnesAreReturned() {
         val old = Entry(1_000L, 1L, "https://a")
         val running = Entry(50_000L, 2L, "https://b")
