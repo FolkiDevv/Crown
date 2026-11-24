@@ -15,6 +15,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Collections
@@ -148,29 +149,71 @@ class RepairVpnSyncTest {
         assertTrue("returned before the successor started", successorStartedAt in (started + 1)..returned)
     }
 
-    private fun fix(vpn: FakeVpn, restored: MutableList<String>, running: Long = 9L) = SubscriptionUpdateFix(
+    /** The selected server; [putBack]s are recorded. */
+    private class Selection(@Volatile var value: Long = 9L) {
+        val putBacks: MutableList<Long> = Collections.synchronizedList(mutableListOf())
+    }
+
+    private fun fix(vpn: FakeVpn, selection: Selection = Selection(), moveTo: Long? = null) = SubscriptionUpdateFix(
         groups = listOf(1L),
-        wait = wait(FakeQueue(jobMs = { 50L }), vpn),
+        wait = if (moveTo == null) {
+            wait(FakeQueue(jobMs = { 50L }), vpn)
+        } else {
+            // An update that moves the selection (its running profile replaced by a successor).
+            SubscriptionWait(submit = { selection.value = moveTo }, barrier = { }, profileExists = { true }, vpn = vpn)
+        },
         vpn = vpn,
         reloader = VpnReloader(vpn, reconnectMs = 400L, restartShowMs = 10L),
-        running = { running },
+        running = { 9L },
         reloadAllowed = { true },
-        restoreSelection = { restored += "selection" },
+        selection = { selection.value },
+        putBack = { saved ->
+            selection.putBacks += saved
+            selection.value = saved
+        },
     )
 
     @Test
     fun aSubscriptionFixReloadsTheRunningVpnBeforeTheRecheck() = runBlocking {
         val vpn = FakeVpn()
-        fix(vpn, mutableListOf()).apply()
+        fix(vpn).apply()
         assertEquals(1, vpn.reloads.get())
+    }
+
+    @Test
+    fun theSelectionTheUpdateMovedGoesBackUnlessTheUserChoseAnotherSince() = runBlocking {
+        // The update moved the selection 9 → 10; nothing else changed it: the rollback puts 9 back.
+        val moved = Selection()
+        val first = fix(FakeVpn(), moved, moveTo = 10L)
+        first.apply()
+        assertEquals(10L, moved.value)
+        assertTrue(first.stillApplied())
+        first.restore()
+        assertEquals(9L, moved.value)
+        assertEquals(listOf(9L), moved.putBacks.toList())
+        // The user chose 11 while the update ran: the rollback keeps it (compare and set).
+        val chosen = Selection()
+        val second = fix(FakeVpn(), chosen, moveTo = 10L)
+        second.apply()
+        chosen.value = 11L
+        assertFalse(second.stillApplied())
+        second.restore()
+        assertEquals(11L, chosen.value)
+        assertTrue(chosen.putBacks.isEmpty())
+        // An update that did not move it puts nothing back; its content is no undoable effect.
+        val still = Selection()
+        val third = fix(FakeVpn(), still)
+        third.apply()
+        third.restore()
+        assertTrue(still.putBacks.isEmpty())
+        assertFalse(third.reversible)
     }
 
     @Test
     fun aSubscriptionFixWhoseVpnDoesNotConnectFailsAndIsPutBack() = runBlocking {
         // The service is starting and never connects: the fix must not count; the engine puts it back.
         val vpn = FakeVpn(isConnected = false)
-        val restored = mutableListOf<String>()
-        val subscriptionFix = fix(vpn, restored)
+        val subscriptionFix = fix(vpn)
         var applied = false
         val checks = object : RepairChecks {
             // The recheck would pass: only the VPN that did not connect makes the fix fail.
@@ -188,7 +231,7 @@ class RepairVpnSyncTest {
         val result = RepairEngine(checks, timeoutMs = { 10_000L }, fixTimeoutMs = 10_000L).run { }.results
             .getValue(RepairStep.SUBSCRIPTION)
         assertEquals(StepStatus.FAIL, result.status)
-        assertEquals(listOf("selection"), restored)
+        assertNull(result.fix)
         assertEquals(0, vpn.reloads.get())
     }
 
@@ -214,15 +257,18 @@ class RepairVpnSyncTest {
             reloader = VpnReloader(vpn, reconnectMs = 200L, restartShowMs = 10L),
             running = { 9L },
             reloadAllowed = { true },
-            restoreSelection = { },
+            selection = { 9L },
+            putBack = { },
         )
-        val failed = try {
+        // The update itself ran through (the queue drained): the failure is the stopped VPN, nothing else.
+        val failure = try {
             subscriptionFix.apply()
-            false
+            null
         } catch (e: IllegalStateException) {
-            true
+            e.message
         }
-        assertTrue(failed)
+        assertEquals("the update stopped the VPN", failure)
+        assertEquals(listOf(1L), queue.done.toList())
         assertEquals(0, vpn.reloads.get())
     }
 

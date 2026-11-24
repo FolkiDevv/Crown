@@ -111,17 +111,20 @@ class RepairEngine(
             }
             // The stop puts back every change of the run, the kept fixes too, before the cancellation goes on.
             withContext(NonCancellable) {
-                if (journal.applied.isNotEmpty()) {
+                val restored = if (journal.applied.isNotEmpty()) {
                     publish(undoing = true)
-                    journal.restoreAll()
-                    settle(wait = false)
+                    journal.restoreAll().also { settle(wait = false) }
+                } else {
+                    emptyList()
                 }
-                // A check whose fix was put back is no longer fixed: it shows what it found and that the fix was undone.
-                // A fix whose restore failed is still in effect and stays «исправлено» (UnrestoredChanges retries it).
-                val stillApplied = journal.applied.map { it.step to it.kind }.toSet()
+                // A check whose fix was reversed is no longer fixed: it shows what it found and that the fix was undone.
+                // A fix whose restore failed is still in effect (UnrestoredChanges retries it), one whose setting was
+                // changed since was superseded, and an update of provider content (routes, subscription) stays: those
+                // stay «исправлено».
+                val reversed = restored.filter { it.reversed }.map { it.step to it.kind }.toSet()
                 for ((step, status) in fixedFrom) {
                     val result = (steps[step] as? StepState.Done)?.result ?: continue
-                    if (result.status != StepStatus.FIXED || (step to result.fix) in stillApplied) continue
+                    if (result.status != StepStatus.FIXED || (step to result.fix) !in reversed) continue
                     steps[step] = StepState.Done(result.copy(status = status, fix = null, undoneFix = result.fix))
                 }
                 publish()
@@ -131,17 +134,31 @@ class RepairEngine(
         return RepairProgress(LinkedHashMap(steps))
     }
 
+    /** The fixes offered for [result] of [step], but none of the kinds [tried] already in this step. */
+    private suspend fun candidates(
+        step: RepairStep,
+        result: StepResult,
+        done: Map<RepairStep, StepResult>,
+        tried: Set<FixKind>,
+    ): List<RepairFix> = try {
+        checks.fixesFor(step, result, done).filter { it.kind !in tried }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        emptyList()
+    }
+
     /** The fixes for the [failed] result of [step], one after another until one makes the check pass. */
-    private suspend fun tryFixes(step: RepairStep, failed: StepResult, done: Map<RepairStep, StepResult>): StepResult {
-        val fixes = try {
-            checks.fixesFor(step, failed, done)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            emptyList()
-        }
-        for (fix in fixes) {
-            val entry = journal.record(step, fix.kind, stillOurs = fix::stillApplied, restore = fix::restore)
+    private suspend fun tryFixes(
+        step: RepairStep,
+        failed: StepResult,
+        done: Map<RepairStep, StepResult>,
+        tried: Set<FixKind> = emptySet(),
+    ): StepResult {
+        for (fix in candidates(step, failed, done, tried)) {
+            val entry = journal.record(
+                step, fix.kind, stillOurs = fix::stillApplied, reversible = fix.reversible, restore = fix::restore,
+            )
             val recheck = try {
                 withTimeout(fixTimeoutMs) {
                     fix.apply()
@@ -155,6 +172,16 @@ class RepairEngine(
                 null
             }
             if (recheck != null && recheck.status.passed) {
+                // Partial progress: the check passes with a warning that further fixes can act on (a subscription
+                // update made other servers answer, the selected one still does not). It is not fixed until one of
+                // them makes it pass; this change stays either way.
+                if (recheck.status == StepStatus.WARN) {
+                    val tried2 = tried + fix.kind
+                    if (candidates(step, recheck, done, tried2).isNotEmpty()) {
+                        val further = tryFixes(step, recheck, done, tried2)
+                        return if (further.status == StepStatus.FIXED) further else recheck.copy(values = failed.values + recheck.values)
+                    }
+                }
                 return failed.copy(
                     status = StepStatus.FIXED,
                     fix = fix.kind,
@@ -166,7 +193,12 @@ class RepairEngine(
                 )
             }
             // connection-repair "Откат неудачного исправления": the setting goes back before anything else is tried.
-            if (journal.restore(entry)) settle(wait = true)
+            // A restore that fails is tried once more; if the change still cannot be put back, no other fix is tried
+            // on top of it, and the result says so (the checks after it measure the state that is in effect).
+            if (!journal.restore(entry) && !journal.restore(entry)) {
+                return failed.copy(note = "the ${fix.kind.name.lowercase()} change could not be put back")
+            }
+            settle(wait = true)
         }
         return failed
     }

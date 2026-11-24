@@ -216,8 +216,10 @@ class SubscriptionWait(
  * «Обновление подписки»: every subscription is updated, the wait ([SubscriptionWait]) cannot be cut short by a stop,
  * and a VPN that runs takes the update up before the recheck (a running profile that kept its id but took new content
  * is otherwise applied only at its next start). An update that did not run, one that left the user's VPN off, or a VPN
- * that did not connect with it makes the fix unsuccessful. The servers are the provider's current ones and stay;
- * [restoreSelection] puts back a selection the update moved.
+ * that did not connect with it makes the fix unsuccessful. The servers are the provider's current ones and stay (a
+ * stop does not report the fix as undone); only a selection the update moved goes back — compare and set: while the
+ * selection is still the one the update made (a server the user chose since stays) — and [putBack] writes it only
+ * while the saved profile exists.
  */
 class SubscriptionUpdateFix(
     private val groups: List<Long>,
@@ -228,16 +230,31 @@ class SubscriptionUpdateFix(
     private val running: () -> Long,
     /** False once «Починка» stopped the VPN it had started: nothing may reload it. */
     private val reloadAllowed: () -> Boolean,
-    private val restoreSelection: () -> Unit,
+    /** The selected server now. */
+    private val selection: () -> Long,
+    /** Selects [saved] again, if its profile still exists. */
+    private val putBack: (saved: Long) -> Unit,
     private val log: (String) -> Unit = {},
 ) : RepairFix {
 
     override val kind = FixKind.SUBSCRIPTION_UPDATED
 
+    override val reversible: Boolean get() = false
+
+    /** The selection before the update. */
+    private val saved = selection()
+
+    /** The selection the update moved it to; null when it did not move it. */
+    @Volatile
+    private var movedTo: Long? = null
+
+    override fun stillApplied(): Boolean = movedTo.let { it == null || selection() == it }
+
     override suspend fun apply() {
         log("fix subscription_updated: ${groups.size} subscription(s)")
         val before = if (vpn.off()) null else running()
         val finished = withContext(NonCancellable) { wait.await(groups, before) }
+        selection().takeIf { it != saved }?.let { movedTo = it }
         if (!finished) throw IllegalStateException("the subscription update did not run")
         // The update removed the profile the VPN ran and nothing took over: the user's VPN is off now — no fix.
         if (before != null && vpn.off()) throw IllegalStateException("the update stopped the VPN")
@@ -246,5 +263,8 @@ class SubscriptionUpdateFix(
         }
     }
 
-    override fun restore() = restoreSelection()
+    override fun restore() {
+        val moved = movedTo ?: return
+        if (selection() == moved) putBack(saved)
+    }
 }

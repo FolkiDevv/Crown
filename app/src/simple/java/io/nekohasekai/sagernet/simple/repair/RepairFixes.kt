@@ -1,11 +1,13 @@
 package io.nekohasekai.sagernet.simple.repair
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * One reversible automatic fix of «Починка» (connection-repair "Безопасные автоматические исправления"): a setting of
@@ -39,6 +41,12 @@ interface RepairFix {
      * the newer value is kept. True for a fix that writes nothing a later change could supersede.
      */
     fun stillApplied(): Boolean = true
+
+    /**
+     * Whether [restore] reverses the fix's effect. False for provider content that stays after a rollback (updated
+     * routing profiles, an updated subscription): a stop then does not report the fix as undone.
+     */
+    val reversible: Boolean get() = true
 }
 
 /**
@@ -72,8 +80,15 @@ class RepairJournal(
         val keepIf: RepairStep,
         /** Whether the value this change wrote is still in place ([RepairFix.stillApplied]). */
         val stillOurs: () -> Boolean,
+        /** Whether a restore reverses the change ([RepairFix.reversible]). */
+        val reversible: Boolean,
         val restore: () -> Unit,
-    )
+    ) {
+        /** The change was put back by a restore that reversed it (not superseded, not provider content). */
+        @Volatile
+        var reversed: Boolean = false
+            internal set
+    }
 
     private val entries = ArrayList<Entry>()
 
@@ -94,8 +109,9 @@ class RepairJournal(
         kind: FixKind?,
         keepIf: RepairStep = step,
         stillOurs: () -> Boolean = { true },
+        reversible: Boolean = true,
         restore: () -> Unit,
-    ): Entry = Entry(step, kind, keepIf, stillOurs, restore).also { synchronized(entries) { entries += it } }
+    ): Entry = Entry(step, kind, keepIf, stillOurs, reversible, restore).also { synchronized(entries) { entries += it } }
 
     /** Puts [entry] back; true when it was in effect and is put back now (a failed restore keeps it in effect). */
     fun restore(entry: Entry): Boolean {
@@ -125,7 +141,12 @@ class RepairJournal(
      * done with, without a write (the newer value stays). True when the change is no longer in effect.
      */
     private fun run(entry: Entry): Boolean = try {
-        if (entry.stillOurs()) entry.restore() else onSuperseded(entry)
+        if (entry.stillOurs()) {
+            entry.restore()
+            entry.reversed = entry.reversible
+        } else {
+            onSuperseded(entry)
+        }
         synchronized(entries) { failed -= entry }
         true
     } catch (e: Exception) {
@@ -188,8 +209,26 @@ class UnrestoredChanges {
     suspend fun retry() {
         val runs = synchronized(left) { left.toList() }.asReversed()
         for ((journal, checks) in runs) {
-            if (journal.retryFailed().isNotEmpty()) checks.settle(true)
+            if (journal.retryFailed().isNotEmpty()) settle(checks)
             if (journal.unrestored.isEmpty()) synchronized(left) { left.remove(journal to checks) }
         }
+    }
+
+    /**
+     * As the engine settles: limited in time, and nothing it throws escapes into the run that retries (the reload a
+     * restore owes is armed in the restore itself and survives a failed wait).
+     */
+    private suspend fun settle(checks: RepairChecks) {
+        try {
+            withTimeoutOrNull(SETTLE_MS) { checks.settle(true) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Unit
+        }
+    }
+
+    private companion object {
+        const val SETTLE_MS = 120_000L
     }
 }

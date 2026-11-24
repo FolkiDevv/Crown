@@ -90,7 +90,7 @@ class DeviceRepairFixes(
             RepairStep.DNS_DIRECT -> listOfNotNull(directDns().takeIf { result.has(Finding.DNS_NO_ANSWER) })
             RepairStep.SUBSCRIPTION -> listOfNotNull(subscriptionUpdate())
             RepairStep.SERVERS -> when {
-                result.has(Finding.CURRENT_SERVER_DOWN) -> listOfNotNull(switchServer(result.servers?.chosenId ?: 0L))
+                result.has(Finding.CURRENT_SERVER_DOWN) -> listOfNotNull(result.servers?.let(::switchServer))
                 result.has(Finding.NO_SERVER_ANSWERS) -> listOfNotNull(subscriptionUpdate())
                 else -> emptyList()
             }
@@ -175,14 +175,20 @@ class DeviceRepairFixes(
     }
 
     /** The current server does not answer → [chosen], which did; checked again by a test of that server alone. */
-    private fun switchServer(chosen: Long): RepairFix? {
+    private fun switchServer(found: ServersSummary): RepairFix? {
+        val chosen = found.chosenId
         val before = DataStore.selectedProxy
         if (chosen <= 0L || chosen == before) return null
         val fix = setting(FixKind.SWITCHED_SERVER, "server", before, chosen, { DataStore.selectedProxy }) { DataStore.selectedProxy = it }
         return object : RepairFix by fix {
+            // The counts of the URL test stay; the newly selected server is the current one, and it answers.
             override suspend fun recheck(): StepResult {
                 val delay = testServer(chosen)
-                return if (delay != null) StepResult.ok() else StepResult.fail(Finding.CURRENT_SERVER_DOWN)
+                return if (delay != null) {
+                    StepResult(StepStatus.OK, servers = found.copy(currentAnswers = true, chosenId = chosen))
+                } else {
+                    StepResult.fail(Finding.CURRENT_SERVER_DOWN)
+                }
             }
         }
     }
@@ -193,7 +199,6 @@ class DeviceRepairFixes(
         val groups = GroupRepo.all().filter { it.isSubscription && !it.archive && it.url.isNotBlank() }.map { it.id }
         if (groups.isEmpty()) return null
         subscriptionsUpdated = true
-        val selected = DataStore.selectedProxy
         val wait = SubscriptionWait(
             // Returns once `:bg`'s queue holds the update (SubscriptionQueue.refreshGroup enqueues synchronously).
             submit = { gid -> withContext(Dispatchers.IO) { CoreServiceClient.call { it.refreshGroup(gid, false) } } },
@@ -217,10 +222,11 @@ class DeviceRepairFixes(
             reloader = reloader,
             running = { DataStore.currentProfile },
             reloadAllowed = { !vpnStopped },
-            restoreSelection = {
-                // A selection the update moved goes back while its profile exists (a deleted one is replaced).
-                if (DataStore.selectedProxy != selected && ProfileManager.getProfile(selected) != null) {
-                    DataStore.selectedProxy = selected
+            selection = { DataStore.selectedProxy },
+            putBack = { saved ->
+                // A deleted profile was replaced by the update; its successor stays.
+                if (ProfileManager.getProfile(saved) != null) {
+                    DataStore.selectedProxy = saved
                     owe()
                 }
             },
@@ -235,14 +241,16 @@ class DeviceRepairFixes(
         return object : RepairFix {
             override val kind = FixKind.ROUTES_UPDATED
 
+            // The rules are the provider's current ones and stay after a rollback: a stop does not undo them.
+            override val reversible: Boolean get() = false
+
             override suspend fun apply() {
                 val (updated, failures) = withContext(Dispatchers.IO) { RemoteRouteUpdater.updateAll(onlyAutoUpdate = false) }
                 Logs.i("simple repair: fix routes_updated: $updated updated, ${failures.size} failed")
                 if (updated == 0) throw IllegalStateException("no routing profile was updated")
-                if (!reload("routing profiles updated")) throw IllegalStateException("the VPN did not reconnect")
+                if (!takeUp("routing profiles updated")) throw IllegalStateException("the VPN did not reconnect")
             }
 
-            // The rules are the provider's current ones; no setting was changed.
             override fun restore() = Unit
         }
     }
@@ -268,7 +276,7 @@ class DeviceRepairFixes(
         override suspend fun apply() {
             Logs.i("simple repair: fix ${kind.name.lowercase()}: $name ${describe(before)} -> ${describe(after)}")
             withContext(Dispatchers.IO) { write(after) }
-            if (env.vpnConnected() && !reload("$name changed")) throw IllegalStateException("the VPN did not reconnect")
+            if (!takeUp("$name changed")) throw IllegalStateException("the VPN did not reconnect")
         }
 
         override fun stillApplied(): Boolean = read() == after
@@ -286,8 +294,17 @@ class DeviceRepairFixes(
         else -> value.toString()
     }
 
-    /** Reloads the running VPN and waits until it is connected again; true without a reload once it was stopped. */
-    private suspend fun reload(why: String): Boolean = vpnStopped || reloader.reload(why)
+    /**
+     * Lets the service take a change up and waits until it is connected again: a connected one reloads at once; one
+     * still starting or reloading is reloaded once it is connected (a reload reaching a start in flight would stop
+     * it); one that is off reads the change at its next start, and one «Починка» stopped is not touched. False when
+     * it does not connect (again).
+     */
+    private suspend fun takeUp(why: String): Boolean = when {
+        vpnStopped || env.serviceOff() -> true
+        env.vpnConnected() -> reloader.reload(why)
+        else -> reloader.reloadWhenConnected(why)
+    }
 
     private companion object {
         /** connection-repair: «снижение MTU до 1280». */
