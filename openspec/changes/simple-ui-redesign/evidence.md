@@ -26,12 +26,12 @@
 
 Правка `upstream_touch_points.py` в батче 12 (по ревью PR #13). Раньше скрипт сравнивал рабочее дерево с вершиной `--base` напрямую (`git diff <base>`). `upstream/main` (ec33c659) ушёл на 6 коммитов от точки слияния 0f3c1ca1, поэтому собственные изменения upstream (199 файлов) попадали в список «вне списка», и выходил код 1, хотя ни один из этих файлов наши коммиты не меняют. Теперь база сравнения — `git merge-base <base> HEAD`, то есть учитываются только наши изменения. Обработка рабочего дерева, индекса и неотслеживаемых файлов (батч 1) осталась прежней. design.md D2 и формулировка требования в `specs/repository-governance` уточнены так же.
 
-Повторная проверка отрицательных путей (временные правки, откачены сразу после запуска; `upstream_touch_points.py` — уже с правкой, `--base upstream/main`):
+Повторная проверка отрицательных путей (временные правки, откачены сразу после запуска; `upstream_touch_points.py` — уже с правкой, `--base upstream/main`). Повторена 2026-11-25 на d3536053, где скрипт из `main` (PR #14) знает и точки Crown. `SagerNet.kt`, на котором проверялось до этого, теперь точка Crown, поэтому файл вне обоих перечней — `DataStore.kt`:
 
 - удалена строка `simple_nav_home` из `values-ru/strings_simple.xml` → `i18n_coverage.py --scope simple` выводит `missing string: simple_nav_home`, код 1;
 - дописана строка в `app/src/test/.../ktx/WrappedHostResolverTest.kt` → `existing upstream file in app/src/test/`, код 1;
-- дописана строка в `app/src/main/java/io/nekohasekai/sagernet/SagerNet.kt` → `outside the touch-point list of design.md D2`, код 1; то же, если правку добавить в индекс, а рабочую копию вернуть (`git add` + `git checkout`), — код 1;
-- неотслеживаемый файл в корне репозитория → `A TmpOutside.txt: outside the touch-point list`, код 1;
+- дописана строка в `app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt` (нет ни в D2, ни в `FORK_IDENTITY_POINTS`) → `outside the touch-point lists (design.md D2, repository-governance)`, код 1; то же, если правку добавить в индекс, а рабочую копию вернуть (`git add` + `git checkout`), — код 1;
+- неотслеживаемый файл в корне репозитория → `A TmpOutside.txt: outside the touch-point lists (design.md D2, repository-governance)`, код 1;
 - добавлен новый файл `app/src/test/java/io/nekohasekai/sagernet/TmpNewTest.kt` → вне списка 0, код 0;
 - несуществующий `--base upstream/nonexistent` → ошибка git, код 2;
 - полный прогон `i18n_coverage.py --res-dir <фикстура>` на фикстуре без пробелов (`values/strings.xml`: `<string translatable="false">`, `<string>` с `%1$s`, `<plurals>`; `values/arrays.xml`: `<string-array>` и `<string-array translatable="false">`; `values-de` с переводом всех переводимых записей) → `0 issue(s)`, код 0.
@@ -170,8 +170,8 @@
 | № | Требование · сценарий | Доказательство | Статус |
 |---|---|---|---|
 | 110 | 简化界面代码与 upstream 隔离 · 仅清单内文件被修改 (только файлы из списка) | стат. Б12: `uv run tools/diagnostics/upstream_touch_points.py --base upstream/main` (скрипт с правкой батча 12, база — точка слияния 0f3c1ca1) — 7 точек D2 (и 9 точек Crown из `FORK_IDENTITY_POINTS` после слияния PR #14), вне списка 0, код 0; каждый батч — то же в PR | есть |
-| 111 | 简化界面代码与 upstream 隔离 · 修改 upstream 既有测试文件 (изменён тест upstream) | стат. Б1 1.1; повторено в Б12 с `--base upstream/main`: правка `WrappedHostResolverTest.kt` → код 1, новый файл в `app/src/test/` — код 0 | есть |
-| 112 | 简化界面代码与 upstream 隔离 · 出现清单外修改 (изменение вне списка) | стат. Б1 1.1; повторено в Б12 с `--base upstream/main`: правка `SagerNet.kt` (в рабочей копии и только в индексе) и неотслеживаемый файл → код 1 | есть |
+| 111 | 简化界面代码与 upstream 隔离 · 修改 upstream 既有测试文件 (изменён тест upstream) | стат. Б1 1.1; повторено в Б12 с `--base upstream/main` (в последний раз на d3536053): правка `WrappedHostResolverTest.kt` → код 1, новый файл в `app/src/test/` — код 0 | есть |
+| 112 | 简化界面代码与 upstream 隔离 · 出现清单外修改 (изменение вне списка) | стат. Б1 1.1; повторено в Б12 с `--base upstream/main` на d3536053: правка `DataStore.kt` (нет ни в D2, ни в `FORK_IDENTITY_POINTS`; в рабочей копии и только в индексе) и неотслеживаемый файл → `outside the touch-point lists (design.md D2, repository-governance)`, код 1 | есть |
 
 ## Проверка на устройстве в батче 12
 
