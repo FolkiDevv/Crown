@@ -1,6 +1,6 @@
 # Сценарий → доказательство (задача 12.1)
 
-Сверка на 2026-11-23, вершина стека — `claude/simple-ui-batch-11` (712c6269); 2026-11-24 ветка батча 12 перенесена на окончательный батч 11 (a6a8197e), статические проверки и локальная сборка повторены на нём. Все сценарии (`#### Scenario:`) пяти спецификаций изменения: `simple-ui` — 41, `traffic-modes` — 37, `connection-repair` — 23, `i18n` — 8, `repository-governance` — 3, всего 112.
+Сверка на 2026-11-23, вершина стека — `claude/simple-ui-batch-11` (712c6269); 2026-11-24 ветка батча 12 перенесена на окончательный батч 11 (a6a8197e), 2026-11-25 — на батч 11 после слияния PR #3 в `main` (d3536053; в `main` есть и PR #14 «Crown»: идентичность форка и правка того же скрипта). Статические проверки и локальная сборка повторены на нём. Все сценарии (`#### Scenario:`) пяти спецификаций изменения: `simple-ui` — 41, `traffic-modes` — 37, `connection-repair` — 23, `i18n` — 8, `repository-governance` — 3, всего 112.
 
 ## Обозначения
 
@@ -18,7 +18,7 @@
 |---|---|
 | `npx -y @fission-ai/openspec validate simple-ui-redesign --strict` | `Change 'simple-ui-redesign' is valid`, код 0 |
 | `uv run tools/diagnostics/i18n_coverage.py --scope simple` | `checked 1 locale(s), 0 issue(s)`, код 0 |
-| `uv run tools/diagnostics/upstream_touch_points.py --base upstream/main` | `base: upstream/main (merge base 0f3c1ca1)`, 107 изменённых файлов (на e26ca57c + батч 12), вне фирменных каталогов — 7 точек D2 (`build.gradle.kts`, `app/build.gradle.kts`, `AndroidManifest.xml`, `main_drawer_menu.xml`, `MainActivity.kt`, `BaseService.kt`, `RemoteRouteUpdater.kt`), вне списка — 0, код 0 |
+| `uv run tools/diagnostics/upstream_touch_points.py --base upstream/main` | `base: upstream/main (merge base 0f3c1ca1)`, 127 изменённых файлов (на d3536053 + батч 12), вне фирменных каталогов — 7 точек D2 (`build.gradle.kts`, `app/build.gradle.kts`, `AndroidManifest.xml`, `main_drawer_menu.xml`, `MainActivity.kt`, `BaseService.kt`, `RemoteRouteUpdater.kt`) и 9 точек идентичности форка Crown из `FORK_IDENTITY_POINTS` (PR #14), вне списка — 0, код 0 |
 | `uv run tools/diagnostics/upstream_touch_points.py --base HEAD` | изменён только сам скрипт, вне списка 0, код 0 (проверка задачи 1.1) |
 | `uv run tools/diagnostics/i18n_coverage.py` (без `--scope`, справочно, D9) | код 1: только классические пробелы перевода upstream (54 строки на язык, у `values-in` — 65), `extra=0` и `placeholder=0` во всех 19 языках; простые строки — 0 замечаний |
 
@@ -169,7 +169,7 @@
 
 | № | Требование · сценарий | Доказательство | Статус |
 |---|---|---|---|
-| 110 | 简化界面代码与 upstream 隔离 · 仅清单内文件被修改 (только файлы из списка) | стат. Б12: `uv run tools/diagnostics/upstream_touch_points.py --base upstream/main` (скрипт с правкой батча 12, база — точка слияния 0f3c1ca1) — 7 точек D2, вне списка 0, код 0; каждый батч — то же в PR | есть |
+| 110 | 简化界面代码与 upstream 隔离 · 仅清单内文件被修改 (только файлы из списка) | стат. Б12: `uv run tools/diagnostics/upstream_touch_points.py --base upstream/main` (скрипт с правкой батча 12, база — точка слияния 0f3c1ca1) — 7 точек D2 (и 9 точек Crown из `FORK_IDENTITY_POINTS` после слияния PR #14), вне списка 0, код 0; каждый батч — то же в PR | есть |
 | 111 | 简化界面代码与 upstream 隔离 · 修改 upstream 既有测试文件 (изменён тест upstream) | стат. Б1 1.1; повторено в Б12 с `--base upstream/main`: правка `WrappedHostResolverTest.kt` → код 1, новый файл в `app/src/test/` — код 0 | есть |
 | 112 | 简化界面代码与 upstream 隔离 · 出现清单外修改 (изменение вне списка) | стат. Б1 1.1; повторено в Б12 с `--base upstream/main`: правка `SagerNet.kt` (в рабочей копии и только в индексе) и неотслеживаемый файл → код 1 | есть |
 
@@ -305,6 +305,6 @@ GitHub Actions не создаёт прогонов в репозитории с
 | 7.5 (#9) | 45190253743, 45190269869 (073388c5) | ff112502 — 45249352216, 45249369052, успешно |
 | 9.3 (#10) | 45239010354, 45239022687 (ed3bd571) | 8c2efeb6 — прогона нет (Actions стоят); последний зелёный — d1ec7dea: 45250038583, 45250045154 |
 | 8.4 (#11) | 45204772737, 45204896895 (97622242) | 8105dd17 — прогона нет (Actions стоят); последний зелёный — 7f9802ed: 45254858741, 45254870437 |
-| 11.3 (#12) | 45230628919, 45230715217 (712c6269) | a6a8197e — прогона нет (Actions стоят); последний зелёный — 6219291b: 45236433487, 45236450393 |
+| 11.3 (#12) | 45230628919, 45230715217 (712c6269) | a6a8197e, затем d3536053 — прогона нет (Actions стоят); последний зелёный — 6219291b: 45236433487, 45236450393 |
 
-Unit-задачи с проверкой «тест в CI» (1.6, 3.1, 3.2, 4.2, 5.1, 6.1, 7.1, 7.2, 8.1, 9.1) покрыты прогонами своих батчей из этой таблицы. На окончательном стеке (батч 12 поверх a6a8197e) unit-тесты прогнаны локально (Docker, `app:testOssDebugUnitTest app:assembleOssDebug`).
+Unit-задачи с проверкой «тест в CI» (1.6, 3.1, 3.2, 4.2, 5.1, 6.1, 7.1, 7.2, 8.1, 9.1) покрыты прогонами своих батчей из этой таблицы. На окончательном стеке (батч 12 поверх d3536053) unit-тесты прогнаны локально (Docker, `app:testOssDebugUnitTest app:assembleOssDebug`).
