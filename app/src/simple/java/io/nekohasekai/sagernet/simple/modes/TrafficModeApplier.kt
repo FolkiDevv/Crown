@@ -7,14 +7,15 @@ import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
-import io.nekohasekai.sagernet.simple.regime.NetworkRegimeWatcher
 import io.nekohasekai.sagernet.simple.regime.ProbeGate
 import io.nekohasekai.sagernet.simple.regime.Regime
 import io.nekohasekai.sagernet.simple.regime.RegimeRecord
 import io.nekohasekai.sagernet.simple.regime.RegimeStore
+import io.nekohasekai.sagernet.simple.regime.WhitelistZoneState
 import io.nekohasekai.sagernet.simple.servers.CountryChoice
 import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.CoroutineScope
@@ -66,7 +67,8 @@ object TrafficModeApplier {
                 }
                 applyLocked(context, stagedScopeMayRun)
             }
-            if (result.mode == TrafficMode.AUTO) NetworkRegimeWatcher.requestCheck(context)
+            // «Авто», and a configuration for whitelists (traffic-modes «Подсказка вне зоны белых списков»), check the network.
+            WhitelistZoneState.afterChoice(context, check = result.mode == TrafficMode.AUTO)
             result
         }
 
@@ -126,7 +128,7 @@ object TrafficModeApplier {
             val target = TrafficModePlan.server(id, managed.auto, managed.autoWhitelist, routingOf(TrafficModes.mode()))
             TrafficModes.setCountryChoice(null)
             switchTo(target, rebuilt = false)
-        }
+        }.also { WhitelistZoneState.afterChoice(app) }
     }
 
     /**
@@ -144,7 +146,7 @@ object TrafficModeApplier {
                 if (id <= 0L) return@withLock 0L
                 TrafficModes.setCountryChoice(choice)
                 switchTo(id, rebuilt = changed)
-            }
+            }.also { WhitelistZoneState.afterChoice(context) }
         }
 
     /** Selects [target]; a running service reloads when it changed or its selector was [rebuilt]. */

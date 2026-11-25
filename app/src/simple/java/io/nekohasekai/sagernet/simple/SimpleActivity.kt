@@ -869,6 +869,13 @@ private fun HomeSection(
                 focusKey = settingsState.classicHint,
                 onToggle = { home.toggle(actions.requestStart) },
                 onDismissProblem = home::dismissProblem,
+                onLeaveWhitelists = { mode ->
+                    home.leaveWhitelists(mode) { done ->
+                        modes.refresh()
+                        // A server for whitelists with no «Авто» selector to take over: the user picks another one.
+                        if (!done) actions.openServers()
+                    }
+                },
                 modifier = Modifier.weight(1f),
                 focus = focus,
             )

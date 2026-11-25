@@ -1,6 +1,11 @@
 package io.nekohasekai.sagernet.simple.home
 
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.os.RemoteException
 import android.os.SystemClock
 import androidx.annotation.StringRes
@@ -25,9 +30,12 @@ import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.modes.Managed
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
+import io.nekohasekai.sagernet.simple.modes.TrafficMode
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.simple.modes.WhitelistKeywords
 import io.nekohasekai.sagernet.simple.regime.RegimeStore
+import io.nekohasekai.sagernet.simple.regime.WhitelistZone
+import io.nekohasekai.sagernet.simple.regime.WhitelistZoneState
 import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +92,13 @@ data class HomeUiState(
     val hasServers: Boolean? = null,
     val server: ServerCard? = null,
     val problem: HomeProblem? = null,
+    /**
+     * A configuration for whitelists runs in a network found without them (traffic-modes «Подсказка вне зоны белых
+     * списков»): what of it is for whitelists; null when there is nothing to warn about (always while not connected).
+     */
+    val whitelistZone: WhitelistZone.Use? = null,
+    /** One of the whitelist card's actions is running. */
+    val whitelistZoneBusy: Boolean = false,
 )
 
 /**
@@ -190,10 +205,39 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
+    /** What the whitelist card warns about (read with [refreshZone]); shown only while connected. */
+    private var zone: WhitelistZone.Use? = null
+    private var zoneJob: Job? = null
+    private var zoneBusy = false
+
+    /** `:bg` stored a network check's result, or the physical network changed: the warning is read again. */
+    private val zoneReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            // `:bg` names its physical network, which this process may learn of only later.
+            if (intent.hasExtra(WhitelistZoneState.EXTRA_NETWORK)) {
+                val network = intent.getLongExtra(WhitelistZoneState.EXTRA_NETWORK, WhitelistZoneState.NO_NETWORK)
+                refreshZone { network.takeIf { it != WhitelistZoneState.NO_NETWORK } }
+            } else {
+                refreshZone()
+            }
+        }
+    }
+
     init {
         lost = DataStore.serviceError.takeIf { it.isNotBlank() }?.let { HomeProblem.ConnectionLost(it) }
         connection.connect(application, this)
         ProfileManager.addListener(this)
+        try {
+            val filter = IntentFilter(WhitelistZoneState.ACTION_CHANGED)
+            val permission = "${application.packageName}.SERVICE"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                application.registerReceiver(zoneReceiver, filter, permission, null, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                application.registerReceiver(zoneReceiver, filter, permission, null)
+            }
+        } catch (e: Exception) {
+            Logs.w(e)
+        }
         viewModelScope.launch {
             AutoSelectorClient.status.collect { status ->
                 val reselected = status.selectedId != autoStatus.selectedId
@@ -313,7 +357,45 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         publish()
     }
 
+    /**
+     * The whitelist card's «Авто» or «Умный»: [mode] becomes the traffic mode and a server for whitelists chosen by
+     * hand gives way to the «Авто» selector. [onDone] gets false when a server for whitelists is still selected (no
+     * «Авто» selector to take over): the screen opens the server list.
+     */
+    fun leaveWhitelists(mode: TrafficMode, onDone: (Boolean) -> Unit) {
+        if (zoneBusy) return
+        zoneBusy = true
+        publish()
+        viewModelScope.launch {
+            val done = try {
+                WhitelistZoneState.leave(getApplication(), mode)
+            } finally {
+                zoneBusy = false
+            }
+            refreshProfiles()
+            onDone(done)
+        }
+    }
+
+    /** Reads again whether the whitelist card shows (the mode, the server, the network check and its network). */
+    private fun refreshZone(network: () -> Long? = RegimeStore::currentNetwork) {
+        zoneJob?.cancel()
+        zoneJob = viewModelScope.launch {
+            val read = withContext(Dispatchers.IO) {
+                try {
+                    WhitelistZoneState.warning(network())
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    null
+                }
+            }
+            zone = read
+            publish()
+        }
+    }
+
     override fun onCleared() {
+        runCatching { getApplication<Application>().unregisterReceiver(zoneReceiver) }
         ProfileManager.removeListener(this)
         connection.disconnect(getApplication())
         super.onCleared()
@@ -390,6 +472,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             urlTestFailures = 0
             serverProblemHidden = false
             if (foreground) restartChecks(FIRST_CHECK_MS)
+            refreshZone()
         } else if (!connected && wasConnected) {
             checkJob?.cancel()
             urlTestFailures = 0
@@ -594,6 +677,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             selectedWhitelist = snapshot.whitelist
             mutableState.update { it.copy(hasServers = snapshot.hasServers) }
             publish()
+            // A mode or server chosen (here, in «Серверы», in the settings) may start or end the whitelist card.
+            refreshZone()
             // The profiles may have changed in :bg (a subscription update renamed the running member).
             if (autoStatus.active && autoStatus.selectedId > 0L) lookUpPickCountry(autoStatus.selectedId, force = true)
         }
@@ -655,6 +740,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             it.copy(
                 server = server,
                 problem = HomeStatus.problem(lost, connected, urlTestFailures, exhausted, serverProblemHidden),
+                // Network checks run only while the VPN is on, so a result says nothing once it is off.
+                whitelistZone = zone.takeIf { connected },
+                whitelistZoneBusy = zoneBusy,
             )
         }
     }

@@ -30,7 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TOUCH_POINTS: dict[str, str] = {
     "build.gradle.kts": "1: Compose compiler plugin declaration",
     "app/build.gradle.kts": "2: Compose plugin, buildFeatures.compose, dependencies, simple source dirs",
-    "app/src/main/AndroidManifest.xml": "3: SimpleActivity declaration",
+    "app/src/main/AndroidManifest.xml": "3: SimpleActivity and WhitelistZoneReceiver declarations",
     "app/src/main/res/menu/main_drawer_menu.xml": "4: 'New interface' drawer item",
     "app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt": "5: SimpleUi.redirect in onCreate/onNewIntent and the drawer handler",
     "app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt": "6: SimpleHooks service start/stop",
