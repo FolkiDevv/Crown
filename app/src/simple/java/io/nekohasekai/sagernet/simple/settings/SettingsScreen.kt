@@ -253,24 +253,25 @@ private fun LazyListScope.modeItems(state: ModesUiState, actions: SettingsAction
 }
 
 /**
- * The update switches of the classic Settings › General › Updates, on the same keys: the daily check and pre-releases
- * (simple-ui "Расширенный режим"). Shown only where the in-app updater exists, as in the classic settings.
+ * The update switches of the classic Settings › General › Updates, on the same keys: the daily check and
+ * pre-releases, with own en/ru strings like the rest of the simple interface (simple-ui "Переключатели обновлений в
+ * расширенном режиме"). Shown only where the in-app updater exists, as in the classic settings.
  */
 private fun LazyListScope.updateItems(settings: SettingsUiState, actions: SettingsActions) {
     item { SectionDivider() }
-    item { Header(R.string.cag_updates) }
+    item { Header(R.string.simple_updates_header) }
     item {
         SwitchItem(
-            title = stringResource(R.string.update_check_auto),
-            summary = stringResource(R.string.update_check_auto_sum),
+            title = stringResource(R.string.simple_update_check),
+            summary = stringResource(R.string.simple_update_check_summary),
             checked = settings.updateCheck,
             onChange = actions.setUpdateCheck,
         )
     }
     item {
         SwitchItem(
-            title = stringResource(R.string.allow_beta_update),
-            summary = stringResource(R.string.allow_beta_update_sum),
+            title = stringResource(R.string.simple_update_beta),
+            summary = stringResource(R.string.simple_update_beta_summary),
             checked = settings.betaUpdates,
             onChange = actions.setBetaUpdates,
         )

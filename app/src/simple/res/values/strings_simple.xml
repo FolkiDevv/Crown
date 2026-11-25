@@ -270,6 +270,11 @@
     <string name="simple_advanced_tools_summary">Performance profile of the core</string>
     <string name="simple_advanced_all">All classic settings</string>
     <string name="simple_advanced_all_summary">Inbound, routing, subscriptions and everything else</string>
+    <string name="simple_updates_header">Updates</string>
+    <string name="simple_update_check">Check for updates daily</string>
+    <string name="simple_update_check_summary">Show a notification when a new version is available</string>
+    <string name="simple_update_beta">Pre-release versions</string>
+    <string name="simple_update_beta_summary">Also offer test versions when checking for updates</string>
     <!-- The once-only hint after an upgrade -->
     <string name="simple_hint_classic_title">This is the new Throne interface</string>
     <string name="simple_hint_classic_text">The classic one is still here: Settings › Classic interface.</string>

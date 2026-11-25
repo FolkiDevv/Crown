@@ -257,6 +257,11 @@
     <string name="simple_advanced_tools_summary">Профиль производительности ядра</string>
     <string name="simple_advanced_all">Все настройки классического интерфейса</string>
     <string name="simple_advanced_all_summary">Входящие подключения, маршрутизация, подписки и всё остальное</string>
+    <string name="simple_updates_header">Обновления</string>
+    <string name="simple_update_check">Проверять обновления ежедневно</string>
+    <string name="simple_update_check_summary">Показывать уведомление, когда выходит новая версия</string>
+    <string name="simple_update_beta">Предварительные версии</string>
+    <string name="simple_update_beta_summary">Также предлагать тестовые версии при проверке обновлений</string>
     <string name="simple_hint_classic_title">Это новый интерфейс Throne</string>
     <string name="simple_hint_classic_text">Классический никуда не делся: «Настройки» › «Классический интерфейс».</string>
     <string name="simple_hint_classic_open">Открыть настройки</string>
