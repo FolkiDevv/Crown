@@ -154,4 +154,53 @@ class HomeStatusTest {
         assertFalse(ConnectionClock.isValid(0L, 10L))
         assertFalse(ConnectionClock.isValid(11L, 10L))
     }
+
+    // ------------------------------------------------------------------------------------------------ working count
+
+    private fun member(usable: Boolean, lastOk: Long, lastProbe: Long) = HomeStatus.MemberHealth(usable, lastOk, lastProbe)
+
+    /** Batch 12's case: health restored from an earlier session says every member works; one is dead here. */
+    @Test
+    fun restoredHealthFromBeforeTheNetworkDoesNotCount() {
+        val since = 10_000L
+        val members = listOf(
+            member(usable = true, lastOk = 9_000, lastProbe = 12_000), // «LTE 1»: probed here, failed; still "usable"
+            member(usable = true, lastOk = 12_500, lastProbe = 12_500),
+            member(usable = true, lastOk = 12_600, lastProbe = 12_600),
+            member(usable = true, lastOk = 12_700, lastProbe = 12_700),
+        )
+        assertEquals(3 to 4, HomeStatus.working(members, since, lastRoundMs = 13_000, suspended = false))
+    }
+
+    @Test
+    fun nothingUntilARoundFinishedInThisNetwork() {
+        val since = 10_000L
+        val restored = List(4) { member(usable = true, lastOk = 5_000, lastProbe = 5_000) }
+        // Restored health, no probe and no round since the network appeared: no count at all, not «4 из 4».
+        assertNull(HomeStatus.working(restored, since, lastRoundMs = 5_000, suspended = false))
+        // A round finished, but it says nothing about these members (none probed here).
+        assertNull(HomeStatus.working(restored, since, lastRoundMs = 11_000, suspended = false))
+        // Probed here but the round is older than the network.
+        val probed = List(4) { member(usable = true, lastOk = 11_000, lastProbe = 11_000) }
+        assertNull(HomeStatus.working(probed, since, lastRoundMs = 9_000, suspended = false))
+    }
+
+    @Test
+    fun ordinaryCaseStillShowsNOfM() {
+        val since = 10_000L
+        val members = listOf(
+            member(usable = true, lastOk = 11_000, lastProbe = 11_000),
+            member(usable = true, lastOk = 11_100, lastProbe = 11_100),
+            member(usable = false, lastOk = 0, lastProbe = 11_200),
+        )
+        assertEquals(2 to 3, HomeStatus.working(members, since, lastRoundMs = 11_500, suspended = false))
+    }
+
+    @Test
+    fun unknownNetworkSuspendedOrEmptyShowNothing() {
+        val members = listOf(member(usable = true, lastOk = 11_000, lastProbe = 11_000))
+        assertNull(HomeStatus.working(members, since = null, lastRoundMs = 12_000, suspended = false))
+        assertNull(HomeStatus.working(members, since = 10_000, lastRoundMs = 12_000, suspended = true))
+        assertNull(HomeStatus.working(emptyList(), since = 10_000, lastRoundMs = 12_000, suspended = false))
+    }
 }

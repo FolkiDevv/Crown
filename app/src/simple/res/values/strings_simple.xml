@@ -5,7 +5,7 @@
     <string name="simple_nav_home">Home</string>
     <string name="simple_nav_servers">Servers</string>
     <string name="simple_nav_settings">Settings</string>
-    <string name="simple_servers_placeholder">Your servers will appear here soon.</string>
+    <string name="simple_servers_empty">No servers yet.</string>
     <string name="simple_settings_classic">Classic interface</string>
     <string name="simple_settings_classic_summary">All features and settings of the full app. You can come back from its menu.</string>
     <!-- Item of the classic drawer menu (main_drawer_menu.xml) -->
@@ -20,8 +20,8 @@
     <string name="simple_status_protected">Protected</string>
     <string name="simple_status_reconnecting">Reconnecting…</string>
     <string name="simple_status_disconnecting">Disconnecting…</string>
-    <string name="simple_hint_connect">Tap the button to connect</string>
-    <string name="simple_hint_cancel">Tap the button to cancel</string>
+    <string name="simple_hint_connect">Press the button to connect</string>
+    <string name="simple_hint_cancel">Press the button to cancel</string>
     <string name="simple_hint_reconnecting">Restoring the connection</string>
     <!-- %1$s: time since the connection started, e.g. 1:05 or 2:03:04 -->
     <string name="simple_connected_for">Connected for %1$s</string>
@@ -33,12 +33,7 @@
     <string name="simple_vpn_permission_denied">Android did not allow the VPN connection.</string>
 
     <!-- Home: no servers yet -->
-    <string name="simple_no_servers_title">No servers yet</string>
-    <string name="simple_no_servers_text">Add a server or a subscription link from your VPN provider to connect.</string>
     <string name="simple_add_server">Add server</string>
-    <string name="simple_add_server_interim_title">Add a server</string>
-    <string name="simple_add_server_interim_text">Adding servers right here is coming in an upcoming update. For now, add it in the classic interface and come back.</string>
-    <string name="simple_open_classic">Open classic interface</string>
 
     <!-- Home: server and traffic mode cards -->
     <string name="simple_card_server">Server</string>
@@ -58,14 +53,15 @@
     <string name="simple_problem_repair">Repair</string>
     <string name="simple_problem_dismiss">Hide</string>
     <string name="simple_repair_title">Repair</string>
-    <string name="simple_repair_coming">Automatic checks and fixes are coming in an upcoming update.</string>
     <!-- %1$s: the error message of the service -->
     <string name="simple_repair_details">Details: %1$s</string>
+    <string name="simple_details_more">Show all</string>
+    <string name="simple_details_less">Show less</string>
 
     <!-- Traffic modes: settings -->
     <string name="simple_settings_mode">Traffic mode</string>
     <string name="simple_mode_auto">Auto</string>
-    <string name="simple_mode_auto_summary">Picks the mode that suits the network. For now it works like Smart.</string>
+    <string name="simple_mode_auto_summary">Smart in an ordinary network, Whitelists where whitelists are found. Switches by itself.</string>
     <string name="simple_mode_smart_summary">Russian sites go directly, everything else through the VPN.</string>
     <string name="simple_mode_whitelist">Whitelists</string>
     <string name="simple_mode_whitelist_summary">Everything goes through the VPN except the local network and apps without VPN. For networks where only allowed sites open.</string>
@@ -95,4 +91,347 @@
     <string name="simple_route_whitelist_name">Whitelists (simple interface)</string>
     <string name="simple_selector_auto_name">Auto</string>
     <string name="simple_selector_auto_whitelist_name">Auto · whitelists</string>
+
+    <!-- Adding servers (batch 4): the welcome screen, the add sheet and its dialogs -->
+    <string name="simple_welcome_title">Welcome</string>
+    <string name="simple_welcome_text">Add a server to connect. The quickest way is the link from your VPN provider.</string>
+    <string name="simple_welcome_where_title">Where do I get a link?</string>
+    <string name="simple_welcome_where_text">Your VPN provider gives it to you after you sign up or pay: in your account on their website, in their Telegram bot or in an email. Copy it and tap \"Paste from clipboard\".</string>
+    <string name="simple_add_title">Add a server</string>
+    <string name="simple_add_paste">Paste from clipboard</string>
+    <string name="simple_add_paste_summary">A subscription or server link you copied</string>
+    <string name="simple_add_scan">Scan QR code</string>
+    <string name="simple_add_scan_summary">With the camera or from a picture</string>
+    <string name="simple_add_link">Enter a link</string>
+    <string name="simple_add_link_summary">Type or paste it yourself</string>
+    <string name="simple_add_file">Open a file</string>
+    <string name="simple_add_file_summary">A configuration or a Throne backup</string>
+    <string name="simple_add_link_title">Enter a link</string>
+    <string name="simple_add_link_text">A subscription link or a server link from your VPN provider.</string>
+    <string name="simple_add_link_field">Link</string>
+    <string name="simple_add_action">Add</string>
+    <string name="simple_add_busy_reading">Reading…</string>
+    <string name="simple_add_busy_subscription">Loading the subscription…</string>
+    <string name="simple_add_busy_servers">Adding servers…</string>
+    <string name="simple_add_clipboard_empty">The clipboard is empty. Copy the link first.</string>
+    <string name="simple_add_subscription_exists">This subscription is already added.</string>
+    <string name="simple_add_servers_exist">Already among your servers.</string>
+    <plurals name="simple_add_servers_added">
+        <item quantity="one">%d server added</item>
+        <item quantity="other">%d servers added</item>
+    </plurals>
+    <string name="simple_add_unknown_title">Not a VPN link</string>
+    <string name="simple_add_unknown_text">This does not look like a link from a VPN service, so nothing was added. Copy the subscription or server link your provider gave you and try again.</string>
+    <string name="simple_add_failed_title">Could not add</string>
+    <string name="simple_add_failed_text">Something went wrong while adding. Please try again.</string>
+    <string name="simple_add_subscription_failed_title">The subscription did not load</string>
+    <string name="simple_add_subscription_failed_text">Could not download the subscription, so nothing was added. Check the internet connection and the link, then try again.</string>
+    <string name="simple_add_file_failed_title">Cannot open the file</string>
+    <!-- %1$s: the file name -->
+    <string name="simple_add_file_unreadable">\"%1$s\" cannot be read or is not a configuration.</string>
+    <!-- %1$s: the file name -->
+    <string name="simple_add_file_too_large">\"%1$s\" is too large for a configuration.</string>
+    <string name="simple_add_no_file_picker">No app to choose files is available.</string>
+    <!-- The group of servers added by hand -->
+    <string name="simple_group_my_servers">My servers</string>
+
+    <!-- Summary of an added subscription -->
+    <string name="simple_summary_title">Subscription added</string>
+    <plurals name="simple_summary_servers">
+        <item quantity="one">%d server</item>
+        <item quantity="other">%d servers</item>
+    </plurals>
+    <plurals name="simple_summary_countries">
+        <item quantity="one">%d country</item>
+        <item quantity="other">%d countries</item>
+    </plurals>
+    <!-- %1$s: e.g. "12 servers", %2$s: e.g. "5 countries" -->
+    <string name="simple_summary_servers_countries">%1$s · %2$s</string>
+    <!-- %1$s: e.g. "12.3 GB" -->
+    <string name="simple_summary_traffic_left">Traffic left: %1$s</string>
+    <string name="simple_summary_traffic_unlimited">Traffic: unlimited</string>
+    <!-- Traffic amounts in binary units; %1$s: a number, e.g. 97 or 1.5 -->
+    <string name="simple_size_mb">%1$s MB</string>
+    <string name="simple_size_gb">%1$s GB</string>
+    <string name="simple_size_tb">%1$s TB</string>
+    <!-- %1$s: a date -->
+    <string name="simple_summary_expires">Valid until %1$s</string>
+    <!-- %1$s: a date -->
+    <string name="simple_summary_expired">Expired on %1$s</string>
+    <string name="simple_summary_enabled">Turned on for you:</string>
+    <string name="simple_summary_enabled_auto_server">Auto: the best server is picked for you</string>
+    <string name="simple_summary_enabled_daily">Daily subscription update</string>
+    <string name="simple_summary_enabled_hourly">Subscription update every hour</string>
+    <!-- %d: hours between automatic updates, as the subscription provider asks -->
+    <plurals name="simple_summary_enabled_every_hours">
+        <item quantity="one">Subscription update every %d hour</item>
+        <item quantity="other">Subscription update every %d hours</item>
+    </plurals>
+    <string name="simple_summary_enabled_auto_mode">Traffic mode: Auto</string>
+    <string name="simple_summary_done">Done</string>
+
+    <!-- Offer to add what is in the clipboard when the app opens -->
+    <string name="simple_offer_title">Add from clipboard?</string>
+    <!-- %1$s: the host of the subscription link -->
+    <string name="simple_offer_subscription">The clipboard holds a subscription link (%1$s).</string>
+    <plurals name="simple_offer_servers">
+        <item quantity="one">The clipboard holds %d server.</item>
+        <item quantity="other">The clipboard holds %d servers.</item>
+    </plurals>
+    <string name="simple_offer_later">Not now</string>
+
+    <!-- Servers section (batch 5) -->
+    <string name="simple_servers_auto_summary">The best working server is picked for you</string>
+    <!-- %1$s: the server in use now, e.g. "🇩🇪 Germany 3" -->
+    <string name="simple_servers_now">Now: %1$s</string>
+    <string name="simple_servers_whitelist">For whitelists</string>
+    <string name="simple_servers_whitelist_hint">Used when the mobile network lets only whitelisted sites through</string>
+    <string name="simple_country_detecting">Detecting the country…</string>
+    <string name="simple_country_unknown">Country unknown</string>
+    <plurals name="simple_servers_count">
+        <item quantity="one">%d server</item>
+        <item quantity="other">%d servers</item>
+    </plurals>
+    <string name="simple_server_no_answer">No answer</string>
+    <string name="simple_server_answers">Answers</string>
+    <string name="simple_server_unnamed">Unnamed server</string>
+    <string name="simple_servers_expand">Show servers</string>
+    <string name="simple_servers_collapse">Hide servers</string>
+    <string name="simple_sub_update">Update the subscription</string>
+    <string name="simple_sub_empty">No servers in this subscription yet.</string>
+    <!-- %1$s: traffic left, %2$s: the quota, e.g. "97.6 GB of 100 GB left" -->
+    <string name="simple_sub_traffic_left">%1$s of %2$s left</string>
+    <string name="simple_sub_traffic_unlimited">Unlimited traffic</string>
+    <string name="simple_sub_traffic_exhausted">The traffic is used up</string>
+    <!-- %1$d: days left, %2$s: the date -->
+    <plurals name="simple_sub_expires_soon">
+        <item quantity="one">Ends in %1$d day, on %2$s</item>
+        <item quantity="other">Ends in %1$d days, on %2$s</item>
+    </plurals>
+    <string name="simple_sub_expires_today">Ends today</string>
+    <string name="simple_sub_updated_now">Updated just now</string>
+    <plurals name="simple_sub_updated_minutes">
+        <item quantity="one">Updated %d minute ago</item>
+        <item quantity="other">Updated %d minutes ago</item>
+    </plurals>
+    <plurals name="simple_sub_updated_hours">
+        <item quantity="one">Updated %d hour ago</item>
+        <item quantity="other">Updated %d hours ago</item>
+    </plurals>
+    <!-- %1$s: a date -->
+    <string name="simple_sub_updated_date">Updated %1$s</string>
+    <string name="simple_sub_never_updated">Not updated yet</string>
+    <!-- %1$s: the reason, as the subscription server or the network gave it -->
+    <string name="simple_servers_update_failed">Could not update the subscription: %1$s</string>
+    <string name="simple_servers_choose_failed">Could not switch the server</string>
+    <string name="simple_selector_country_name">Country (simple interface)</string>
+    <!-- Home server card -->
+    <string name="simple_server_country_best">The best server of the country</string>
+    <!-- %1$s: the server Auto picked -->
+    <string name="simple_server_auto_with">Auto · %1$s</string>
+
+    <!-- Settings (batch 10) -->
+    <string name="simple_settings_connection">Connection</string>
+    <string name="simple_settings_autostart">Connect when the device starts</string>
+    <string name="simple_settings_autostart_summary">The VPN turns on by itself after the device restarts</string>
+    <string name="simple_settings_auto_update">Update subscriptions automatically</string>
+    <string name="simple_settings_auto_update_summary">As often as the provider asks, otherwise once a day</string>
+    <string name="simple_settings_general">General</string>
+    <string name="simple_settings_theme">Theme</string>
+    <string name="simple_theme_system">Same as the system</string>
+    <string name="simple_theme_light">Light</string>
+    <string name="simple_theme_dark">Dark</string>
+    <string name="simple_theme_battery">Dark while saving battery</string>
+    <string name="simple_settings_transfer">Move to another device</string>
+    <string name="simple_settings_transfer_summary">Save servers and settings to a backup file, or restore one</string>
+    <string name="simple_settings_advanced">Advanced mode</string>
+    <string name="simple_settings_advanced_summary">Show the technical screens of the classic interface here</string>
+    <!-- Advanced mode: links to the screens of the classic interface -->
+    <string name="simple_advanced_header">Classic interface screens</string>
+    <string name="simple_advanced_routes">Routes and rules</string>
+    <string name="simple_advanced_routes_summary">Routing profiles and their rules</string>
+    <string name="simple_advanced_dns">DNS</string>
+    <string name="simple_advanced_dns_summary">DNS servers, FakeIP, predefined answers, cache</string>
+    <string name="simple_advanced_network">Network and TUN</string>
+    <string name="simple_advanced_network_summary">Stack, MTU, IPv6, private ranges</string>
+    <string name="simple_advanced_presets">Protocol presets</string>
+    <string name="simple_advanced_presets_summary">Multiplex, TLS fragment, uTLS, HTTP/2 and QUIC defaults</string>
+    <string name="simple_advanced_core">Core</string>
+    <string name="simple_advanced_core_summary">Logging, statistics, Clash API, security, NTP</string>
+    <string name="simple_advanced_testing">Testing</string>
+    <string name="simple_advanced_testing_summary">Latency and speed tests</string>
+    <string name="simple_advanced_log">Log</string>
+    <string name="simple_advanced_log_summary">What the app and the core write</string>
+    <string name="simple_advanced_graphs">Live graphs</string>
+    <string name="simple_advanced_graphs_summary">Traffic and connections in real time</string>
+    <string name="simple_advanced_tools">Diagnostic tools</string>
+    <string name="simple_advanced_tools_summary">Performance profile of the core</string>
+    <string name="simple_advanced_all">All classic settings</string>
+    <string name="simple_advanced_all_summary">Inbound, routing, subscriptions and everything else</string>
+    <!-- The once-only hint after an upgrade -->
+    <string name="simple_hint_classic_title">This is the new Throne interface</string>
+    <string name="simple_hint_classic_text">The classic one is still here: Settings › Classic interface.</string>
+    <string name="simple_hint_classic_open">Open settings</string>
+    <string name="simple_hint_classic_close">Got it</string>
+    <!-- Home server card with whitelists in effect (batch 6) -->
+    <string name="simple_server_whitelist">Server for whitelists</string>
+    <!-- %1$d: servers of Auto that answer in this network, %2$d: all of them -->
+    <string name="simple_server_working">Working in this network: %1$d of %2$d servers</string>
+
+    <!-- Repair (batch 7): the entry in Settings -->
+    <string name="simple_repair_entry">Something not working?</string>
+    <string name="simple_repair_entry_summary">Repair finds out why and fixes what it can</string>
+    <!-- Repair: the screen -->
+    <string name="simple_repair_back">Back</string>
+    <string name="simple_repair_stop">Stop</string>
+    <string name="simple_repair_again">Check again</string>
+    <string name="simple_repair_running">Checking everything the VPN depends on…</string>
+    <string name="simple_repair_stopped">Check stopped</string>
+    <string name="simple_repair_fixed">Fixed</string>
+    <string name="simple_repair_undoing">Stopping: putting back the settings Repair changed…</string>
+    <string name="simple_repair_fix_server">Fixed: switched to a server that answers</string>
+    <string name="simple_repair_fix_direct_dns">Fixed: the direct DNS now uses servers from the whitelist</string>
+    <string name="simple_repair_fix_vpn_dns">Fixed: the DNS through the VPN now uses another server</string>
+    <string name="simple_repair_fix_subscription">Fixed: the subscription was updated</string>
+    <string name="simple_repair_fix_routes">Fixed: the routing profiles were updated</string>
+    <string name="simple_repair_fix_mtu">Fixed: the VPN\'s MTU was lowered to 1280</string>
+    <string name="simple_repair_fix_undone">The fix was undone: the check was stopped</string>
+    <!-- Repair: the checks in their order -->
+    <string name="simple_repair_step_internet">Internet without VPN</string>
+    <string name="simple_repair_step_whitelists">Whitelists in the network</string>
+    <string name="simple_repair_step_clock">Time on the device</string>
+    <string name="simple_repair_step_private_dns">Private DNS and other VPNs</string>
+    <string name="simple_repair_step_dns_direct">DNS directly</string>
+    <string name="simple_repair_step_subscription">Subscription</string>
+    <string name="simple_repair_step_servers">Server availability</string>
+    <string name="simple_repair_step_dns_vpn">DNS through VPN</string>
+    <string name="simple_repair_step_sites_vpn">Websites through VPN</string>
+    <string name="simple_repair_step_ru_direct">Russian websites directly</string>
+    <string name="simple_repair_step_background">Running in the background</string>
+    <!-- Repair: what a check found. %1$d: test addresses that answered, %2$d: all of them -->
+    <string name="simple_repair_internet_ok">The internet works: %1$d of %2$d test addresses answered</string>
+    <string name="simple_repair_internet_no_network">No network: Wi‑Fi and mobile data are off, or airplane mode is on</string>
+    <string name="simple_repair_internet_nothing">There is a network, but no website answers</string>
+    <string name="simple_repair_whitelists_found">Only allowed websites open in this network (whitelists)</string>
+    <string name="simple_repair_whitelists_none">No whitelists: the network lets any website through</string>
+    <string name="simple_repair_clock_ok">The time is right</string>
+    <!-- %1$s: how far off, e.g. «7 minutes» -->
+    <string name="simple_repair_clock_ahead">The clock is %1$s fast. With a wrong time the VPN may fail to connect</string>
+    <string name="simple_repair_clock_behind">The clock is %1$s slow. With a wrong time the VPN may fail to connect</string>
+    <plurals name="simple_repair_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="simple_repair_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <plurals name="simple_repair_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <string name="simple_repair_private_ok">Neither a private DNS nor another VPN gets in the way</string>
+    <string name="simple_repair_private_dns">A private DNS is set in the Android settings: it can block the VPN</string>
+    <string name="simple_repair_other_vpn">Another app\'s VPN is on: only one VPN can work at a time</string>
+    <string name="simple_repair_dns_ok">The DNS server answers</string>
+    <string name="simple_repair_dns_fail">The DNS server for the server addresses does not answer</string>
+    <string name="simple_repair_sub_ok">The subscription is active</string>
+    <string name="simple_repair_sub_expired">The subscription has ended</string>
+    <string name="simple_repair_sub_exhausted">The subscription traffic is used up</string>
+    <string name="simple_repair_sub_empty">The subscription has no servers</string>
+    <plurals name="simple_repair_sub_soon">
+        <item quantity="one">The subscription ends in %d day</item>
+        <item quantity="other">The subscription ends in %d days</item>
+    </plurals>
+    <string name="simple_repair_sub_today">The subscription ends today</string>
+    <string name="simple_repair_sub_low">Little subscription traffic is left</string>
+    <!-- %1$d: servers that answer, %2$d: all servers (the quantity) -->
+    <plurals name="simple_repair_servers_ok">
+        <item quantity="one">%1$d of %2$d server answers, the current one too</item>
+        <item quantity="other">%1$d of %2$d servers answer, the current one too</item>
+    </plurals>
+    <plurals name="simple_repair_servers_current_down">
+        <item quantity="one">The current server does not answer; %1$d of %2$d server does</item>
+        <item quantity="other">The current server does not answer; %1$d of %2$d servers do</item>
+    </plurals>
+    <!-- %1$d: all servers (the quantity) -->
+    <plurals name="simple_repair_servers_none">
+        <item quantity="one">The %1$d server does not answer</item>
+        <item quantity="other">None of the %1$d servers answers</item>
+    </plurals>
+    <string name="simple_repair_stopping">Stopping…</string>
+    <string name="simple_repair_servers_empty">No servers added</string>
+    <!-- %1$d of %2$d: servers for whitelists that answer -->
+    <string name="simple_repair_servers_whitelist">Servers for whitelists: %1$d of %2$d answer</string>
+    <string name="simple_repair_dns_vpn_ok">Website names are looked up through the VPN</string>
+    <string name="simple_repair_dns_vpn_fail">DNS through the VPN does not answer</string>
+    <!-- %1$d: the delay in milliseconds -->
+    <string name="simple_repair_sites_ok">Websites open through the VPN (%1$d ms)</string>
+    <string name="simple_repair_sites_fail">Websites do not open through the VPN</string>
+    <!-- %1$d of %2$d: Russian test addresses that answered -->
+    <string name="simple_repair_ru_ok">Russian websites open directly: %1$d of %2$d</string>
+    <string name="simple_repair_ru_fail">Russian websites do not open directly</string>
+    <string name="simple_repair_background_ok">Android lets the VPN run in the background</string>
+    <string name="simple_repair_background_optimized">Battery optimization may stop the VPN in the background</string>
+    <string name="simple_repair_background_restricted">Background activity is restricted: Android stops the VPN</string>
+    <!-- Repair: why a check was not done -->
+    <string name="simple_repair_skip_no_internet">Not checked: no internet</string>
+    <string name="simple_repair_skip_no_server">Not checked: no working server</string>
+    <string name="simple_repair_skip_other_vpn">Not checked: another app\'s VPN is active</string>
+    <string name="simple_repair_skip_vpn_off">Not checked: the VPN is off. Turn it on and run Repair again</string>
+    <string name="simple_repair_skip_no_permission">Not checked: no permission for the VPN</string>
+    <string name="simple_repair_skip_vpn_start">Not checked: the VPN did not turn on</string>
+    <string name="simple_repair_skip_bypass">Not checked: this app is excluded from the VPN</string>
+    <string name="simple_repair_skip_no_subscription">Not checked: no subscription added</string>
+    <string name="simple_repair_skip_dns_kind">Not checked: the check does not support this kind of DNS server</string>
+    <string name="simple_repair_skip_android">Not checked: not available on this Android version</string>
+    <string name="simple_repair_skip_no_time">Not checked: could not get the exact time</string>
+    <string name="simple_repair_skip_busy">Not checked: another test is running</string>
+    <string name="simple_repair_skip_timeout">Not checked: the check took too long</string>
+    <string name="simple_repair_skip_error">Not checked: the check failed</string>
+    <string name="simple_repair_skip_stopped">Not checked: stopped</string>
+    <!-- Repair: buttons to the system settings -->
+    <string name="simple_repair_open_date">Date and time settings</string>
+    <string name="simple_repair_open_network">Network settings</string>
+    <string name="simple_repair_open_vpn">VPN settings</string>
+    <string name="simple_repair_open_wifi">Wi‑Fi settings</string>
+    <string name="simple_repair_allow_background">Allow running in the background</string>
+    <string name="simple_repair_open_servers">Open Servers</string>
+    <!-- Repair: the verdict -->
+    <string name="simple_repair_verdict_fixed">Fixed it ourselves</string>
+    <string name="simple_repair_verdict_found">Cause found</string>
+    <string name="simple_repair_verdict_unknown">Could not find the cause</string>
+    <string name="simple_repair_unknown_text">Some checks failed, but no known cause explains it. If the problem goes on, export the report and send it to your VPN service\'s support.</string>
+    <string name="simple_repair_unknown_clean">All checks passed. If the problem goes on, export the report and send it to your VPN service\'s support.</string>
+    <string name="simple_repair_unknown_partial">The checks that ran found no problem; some checks did not run (see why next to them). If the problem goes on, export the report and send it to your VPN service\'s support.</string>
+    <!-- Repair: the report export (one archive without passwords, keys, server addresses or subscription links) -->
+    <string name="simple_repair_export">Export report</string>
+    <string name="simple_repair_exporting">Preparing the report…</string>
+    <string name="simple_repair_export_share">Send the report</string>
+    <string name="simple_repair_export_failed">Could not prepare the report</string>
+    <string name="simple_repair_export_no_target">No app to send the report with</string>
+    <string name="simple_repair_cause_no_internet">The problem is not the VPN: the device has no internet</string>
+    <string name="simple_repair_cause_no_internet_steps">Turn off airplane mode and check Wi‑Fi or mobile data.</string>
+    <string name="simple_repair_cause_clock">The time on the device is wrong</string>
+    <string name="simple_repair_cause_clock_steps">Turn on automatic date and time in the Android settings.</string>
+    <string name="simple_repair_cause_other_vpn">Another app\'s VPN is on</string>
+    <string name="simple_repair_cause_other_vpn_steps">Turn it off in the Android VPN settings, then connect again.</string>
+    <string name="simple_repair_cause_private_dns">A private DNS gets in the way</string>
+    <string name="simple_repair_cause_private_dns_steps">In the Android network settings set Private DNS to Automatic or Off.</string>
+    <string name="simple_repair_cause_sub_ended">The subscription is over</string>
+    <string name="simple_repair_cause_sub_ended_steps">Renew it with your VPN service, then update it in Servers.</string>
+    <string name="simple_repair_cause_sub_empty">The subscription has no servers</string>
+    <string name="simple_repair_cause_sub_empty_steps">Update the subscription in Servers. If it stays empty, contact your VPN service.</string>
+    <string name="simple_repair_cause_no_servers">No servers added</string>
+    <string name="simple_repair_cause_no_servers_steps">Add the subscription link or the servers your VPN service gave you.</string>
+    <string name="simple_repair_cause_wl_no_servers">The network has whitelists, and the subscription has no servers for them</string>
+    <string name="simple_repair_cause_wl_no_servers_steps">Ask your VPN service for a server that works with whitelists, or connect to Wi‑Fi.</string>
+    <string name="simple_repair_cause_wl_down">Servers for whitelists do not answer now</string>
+    <string name="simple_repair_cause_wl_down_steps">The problem is probably on the VPN service\'s side. Try again later or connect to Wi‑Fi.</string>
+    <string name="simple_repair_cause_servers_down">No server answers</string>
+    <string name="simple_repair_cause_servers_down_steps">The problem is probably on the VPN service\'s side, or the servers are blocked in this network. Update the subscription or try another network.</string>
+    <string name="simple_repair_cause_current_down">The current server does not answer</string>
+    <string name="simple_repair_cause_current_down_steps">Other servers work: choose one of them, or Auto, in Servers.</string>
+    <string name="simple_repair_cause_battery">Android may stop the VPN in the background</string>
+    <string name="simple_repair_cause_battery_steps">Let the app run in the background without battery restrictions.</string>
 </resources>

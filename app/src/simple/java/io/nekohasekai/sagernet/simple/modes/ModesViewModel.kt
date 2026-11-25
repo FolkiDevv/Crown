@@ -231,7 +231,11 @@ class ModesViewModel(application: Application, private val saved: SavedStateHand
     override suspend fun groupUpdated(group: ProxyGroup) = Unit
     override suspend fun groupUpdated(groupId: Long) = Unit
 
-    private fun syncGroups() {
+    /**
+     * Brings the managed auto-selectors' groups up to date. GroupRepo's listeners only hear about groups added in this
+     * process; a subscription added through SubscriptionClient is created in `:bg`, so the add flow calls this itself.
+     */
+    fun syncGroups() {
         viewModelScope.launch {
             work.withLock {
                 withContext(Dispatchers.IO) {

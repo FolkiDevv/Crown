@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -24,7 +27,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,19 +37,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -61,8 +63,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.simple.FocusShapes
+import io.nekohasekai.sagernet.simple.focusRing
+import io.nekohasekai.sagernet.simple.focusWhenShown
+import io.nekohasekai.sagernet.simple.unavailable
+import io.nekohasekai.sagernet.simple.add.AddActions
+import io.nekohasekai.sagernet.simple.add.Welcome
 import io.nekohasekai.sagernet.simple.modes.ModeCard
+import io.nekohasekai.sagernet.simple.servers.CountryFromName
+import io.nekohasekai.sagernet.simple.servers.CountryLabels
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** What the home screen opens; the screens behind the stubs arrive in later batches. */
 class HomeActions(
@@ -70,13 +81,16 @@ class HomeActions(
     val requestStart: () -> Unit,
     /** The «Серверы» section. */
     val openServers: () -> Unit,
-    /** The classic interface for one visit, without changing the choice (adding servers until batch 4). */
-    val openClassicOnce: () -> Unit,
+    /** The ways to add a server, shown on the welcome screen while there is none (batch 4). */
+    val add: AddActions,
     /** The traffic mode settings. */
     val openMode: () -> Unit,
+    /** «Починка», from the problem banner (batch 7). */
+    val openRepair: () -> Unit,
 )
 
 /** The home section: the connect button with its status, the problem banner and the server and mode cards. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     state: HomeUiState,
@@ -86,13 +100,16 @@ fun HomeScreen(
     onToggle: () -> Unit,
     onDismissProblem: () -> Unit,
     modifier: Modifier = Modifier,
+    /** A remote (D-pad) starts on the connect button, or the first way to add, as the section opens. */
+    focus: Boolean = true,
+    /** It moves to the connect button again each time this changes (the hint above it closed). */
+    focusKey: Any? = null,
+    /** A notice at the top of the scrolling content (the hint after an upgrade), given the width of the cards. */
+    hint: (@Composable (Modifier) -> Unit)? = null,
 ) {
-    var repairDialog by rememberSaveable { mutableStateOf(false) }
-    var addDialog by rememberSaveable { mutableStateOf(false) }
-
     val banner: @Composable (Modifier, Dp) -> Unit = { bannerModifier, gap ->
         state.problem?.let { problem ->
-            ProblemBanner(problem, onRepair = { repairDialog = true }, onDismiss = onDismissProblem, modifier = bannerModifier)
+            ProblemBanner(problem, onRepair = actions.openRepair, onDismiss = onDismissProblem, modifier = bannerModifier)
             Spacer(Modifier.height(gap))
         }
     }
@@ -110,25 +127,35 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp, vertical = if (low) 0.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // A remote on the button also sees its status: the smaller button on a low window, and the status brought
+                // into view whenever the button takes the focus (the status itself takes none).
+                val statusInView = remember { BringIntoViewRequester() }
+                val scope = rememberCoroutineScope()
                 Column(
                     Modifier
                         .weight(1f)
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(rememberScrollState())
+                        .onFocusChanged { if (it.hasFocus) scope.launch { statusInView.bringIntoView() } },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    ConnectButton(state.phase, onToggle)
-                    Spacer(Modifier.height(16.dp))
-                    Status(state)
+                    ConnectButton(state.phase, onToggle, focus = focus, focusKey = focusKey, small = low)
+                    Spacer(Modifier.height(if (low) 12.dp else 16.dp))
+                    Column(Modifier.bringIntoViewRequester(statusInView), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Status(state)
+                    }
                 }
                 Spacer(Modifier.width(16.dp))
                 Column(
                     Modifier
                         .weight(1f)
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(rememberScrollState())
+                        // Room for the focus ring of the first and last card, which the scrolling clips.
+                        .padding(vertical = 6.dp),
                 ) {
                     val cardWidth = Modifier.fillMaxWidth()
+                    hint?.invoke(cardWidth)
                     banner(cardWidth, if (low) 8.dp else 16.dp)
-                    ServerCardView(state, actions.openServers, cardWidth)
+                    ServerCardView(state, modeCard?.whitelists == true, actions.openServers, cardWidth)
                     Spacer(Modifier.height(if (low) 8.dp else 12.dp))
                     ModeCardView(modeCard, actions.openMode, cardWidth)
                 }
@@ -142,17 +169,20 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 val cardWidth = Modifier.widthIn(max = 560.dp).fillMaxWidth()
+                hint?.invoke(cardWidth)
                 banner(cardWidth, 16.dp)
                 when (content) {
                     HomeContent.LOADING -> Unit
-                    HomeContent.NO_SERVERS -> NoServers(onAdd = { addDialog = true }, low = low, modifier = cardWidth)
+                    HomeContent.NO_SERVERS -> Welcome(actions.add, low = low, modifier = cardWidth, focus = focus)
                     HomeContent.CONTROLS -> {
-                        Spacer(Modifier.height(16.dp))
-                        ConnectButton(state.phase, onToggle)
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(if (low) 8.dp else 16.dp))
+                        // A low pane (a TV, the home pane beside the server list) takes a smaller button, so the status
+                        // and the cards come into view sooner.
+                        ConnectButton(state.phase, onToggle, focus = focus, focusKey = focusKey, small = low)
+                        Spacer(Modifier.height(if (low) 12.dp else 20.dp))
                         Status(state)
                         Spacer(Modifier.height(28.dp))
-                        ServerCardView(state, actions.openServers, cardWidth)
+                        ServerCardView(state, modeCard?.whitelists == true, actions.openServers, cardWidth)
                         Spacer(Modifier.height(12.dp))
                         ModeCardView(modeCard, actions.openMode, cardWidth)
                         Spacer(Modifier.height(16.dp))
@@ -161,30 +191,16 @@ fun HomeScreen(
             }
         }
     }
-
-    if (repairDialog) {
-        RepairStubDialog((state.problem as? HomeProblem.ConnectionLost)?.detail) { repairDialog = false }
-    }
-    if (addDialog) {
-        AlertDialog(
-            onDismissRequest = { addDialog = false },
-            title = { Text(stringResource(R.string.simple_add_server_interim_title)) },
-            text = { Text(stringResource(R.string.simple_add_server_interim_text)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    addDialog = false
-                    actions.openClassicOnce()
-                }) { Text(stringResource(R.string.simple_open_classic)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { addDialog = false }) { Text(stringResource(R.string.simple_cancel)) }
-            },
-        )
-    }
 }
 
 @Composable
-private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit) {
+private fun ConnectButton(
+    phase: ConnectionPhase,
+    onToggle: () -> Unit,
+    focus: Boolean,
+    focusKey: Any?,
+    small: Boolean = false,
+) {
     val colors = MaterialTheme.colorScheme
     val container by animateColorAsState(
         when (phase) {
@@ -209,19 +225,23 @@ private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit) {
     val status = stringResource(phase.label())
     val busy = phase == ConnectionPhase.CONNECTING || phase == ConnectionPhase.RECONNECTING ||
         phase == ConnectionPhase.DISCONNECTING
-    Box(Modifier.size(184.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(if (small) 144.dp else 184.dp), contentAlignment = Alignment.Center) {
         if (busy) {
             CircularProgressIndicator(Modifier.fillMaxSize(), strokeWidth = 4.dp)
         }
+        // Not disabled while disconnecting: a remote's focus would leave it (Focus.kt unavailable).
+        val disconnecting = phase == ConnectionPhase.DISCONNECTING
         Surface(
-            onClick = onToggle,
-            enabled = phase != ConnectionPhase.DISCONNECTING,
+            onClick = { if (!disconnecting) onToggle() },
             shape = CircleShape,
             color = container,
             border = if (phase == ConnectionPhase.OFF) BorderStroke(2.dp, colors.outlineVariant) else null,
             shadowElevation = if (phase == ConnectionPhase.PROTECTED) 6.dp else 0.dp,
             modifier = Modifier
-                .size(160.dp)
+                .size(if (small) 124.dp else 160.dp)
+                .focusRing(CircleShape, outset = 4.dp)
+                .focusWhenShown(key = focusKey, enabled = focus)
+                .unavailable(disconnecting)
                 .semantics {
                     role = Role.Button
                     contentDescription = action
@@ -233,7 +253,7 @@ private fun ConnectButton(phase: ConnectionPhase, onToggle: () -> Unit) {
                     painterResource(R.drawable.simple_ic_power),
                     contentDescription = null,
                     tint = iconColor,
-                    modifier = Modifier.size(64.dp),
+                    modifier = Modifier.size(if (small) 52.dp else 64.dp),
                 )
             }
         }
@@ -304,10 +324,14 @@ private fun elapsedSince(since: Long): Long {
 }
 
 @Composable
-private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Modifier) {
+private fun ServerCardView(state: HomeUiState, whitelists: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val server = state.server?.let { card ->
         card.localizedName?.let { card.copy(name = stringResource(it)) } ?: card
     }
+    val locale = LocalConfiguration.current.locales[0]
+    val country = server?.country?.let { CountryLabels.label(it, locale) }
+    // The pick shown under a country headline without its own flag (the headline has the country's).
+    val picked = server?.autoSelected?.let { CountryFromName.withoutLeadingFlag(it) }.orEmpty()
     val headline: String
     val supporting: String?
     when {
@@ -316,9 +340,20 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
             supporting = null
         }
 
+        // A country chosen in «Серверы»: the country, and the server its selector runs.
+        server.countryChoice != null -> {
+            headline = CountryLabels.label(server.countryChoice, locale)
+            supporting = picked.ifEmpty { stringResource(R.string.simple_server_country_best) }
+        }
+
+        // «Авто» picked a server: the country it is in (simple-ui "Карточки сервера и режима на главной").
         server.auto && server.autoSelected.isNotEmpty() -> {
-            headline = server.autoSelected
-            supporting = stringResource(R.string.simple_server_auto)
+            headline = country ?: server.autoSelected
+            supporting = if (country != null) {
+                stringResource(R.string.simple_server_auto_with, picked)
+            } else {
+                stringResource(R.string.simple_server_auto)
+            }
         }
 
         server.auto -> {
@@ -330,15 +365,28 @@ private fun ServerCardView(state: HomeUiState, onClick: () -> Unit, modifier: Mo
         }
 
         else -> {
-            headline = server.name
-            supporting = null
+            headline = CountryFromName.spacedFlag(server.name)
+            // A name that starts with its flag: the country line without a second one.
+            supporting = server.country?.let {
+                if (CountryFromName.startsWithFlag(server.name)) CountryLabels.name(it, locale) else country
+            }
         }
     }
     val latency = server?.latencyMs?.let { stringResource(R.string.simple_latency_ms, it) }
+    // With whitelists in effect: whether the server is one for whitelists, and how many of «Авто»'s servers work in
+    // this network (traffic-modes "Применение результата в режиме «Авто»").
+    val notes = buildList {
+        if (server?.whitelistServer == true) add(stringResource(R.string.simple_server_whitelist))
+        val working = server?.working
+        if (whitelists && working != null) {
+            add(stringResource(R.string.simple_server_working, working.alive, working.total))
+        }
+    }
     HomeCard(
         overline = stringResource(R.string.simple_card_server),
         headline = headline,
         supporting = supporting,
+        note = notes.takeIf { it.isNotEmpty() }?.joinToString(" · "),
         trailing = latency,
         onClick = onClick,
         modifier = modifier,
@@ -382,6 +430,8 @@ private fun HomeCard(
     modifier: Modifier,
     /** Whitelists are in effect: the card stands out in a warning colour (simple-ui spec, mode card). */
     warning: Boolean = false,
+    /** A short third line under [supporting]. */
+    note: String? = null,
 ) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val container = when {
@@ -397,7 +447,7 @@ private fun HomeCard(
     val secondary = if (warning) content else MaterialTheme.colorScheme.onSurfaceVariant
     OutlinedCard(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.focusRing(FocusShapes.Card),
         colors = CardDefaults.outlinedCardColors(containerColor = container, contentColor = content),
     ) {
         Row(
@@ -427,6 +477,15 @@ private fun HomeCard(
                     Text(
                         it,
                         style = MaterialTheme.typography.bodyMedium,
+                        color = secondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                note?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
                         color = secondary,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -475,7 +534,7 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
                 Spacer(Modifier.height(2.dp))
                 Text(stringResource(text), style = MaterialTheme.typography.bodyMedium)
             }
-            IconButton(onClick = onDismiss) {
+            IconButton(onClick = onDismiss, modifier = Modifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
                 Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.simple_problem_dismiss))
             }
         }
@@ -485,63 +544,7 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
                 .padding(start = 16.dp, end = 16.dp, bottom = 12.dp, top = 4.dp),
             horizontalArrangement = Arrangement.End,
         ) {
-            Button(onClick = onRepair) { Text(stringResource(R.string.simple_problem_repair)) }
+            Button(onClick = onRepair, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_problem_repair)) }
         }
     }
-}
-
-@Composable
-private fun NoServers(onAdd: () -> Unit, low: Boolean, modifier: Modifier) {
-    Column(
-        modifier.padding(top = if (low) 8.dp else 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest) {
-            Icon(
-                painterResource(R.drawable.simple_ic_power),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .padding(if (low) 16.dp else 28.dp)
-                    .size(if (low) 32.dp else 48.dp),
-            )
-        }
-        Spacer(Modifier.height(if (low) 12.dp else 24.dp))
-        Text(
-            stringResource(R.string.simple_no_servers_title),
-            style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            stringResource(R.string.simple_no_servers_text),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(if (low) 16.dp else 24.dp))
-        Button(onClick = onAdd) { Text(stringResource(R.string.simple_add_server)) }
-    }
-}
-
-/** «Починка» arrives in batch 7; the banner and the settings already lead here. */
-@Composable
-fun RepairStubDialog(detail: String?, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.simple_repair_title)) },
-        text = {
-            Column {
-                Text(stringResource(R.string.simple_repair_coming))
-                if (!detail.isNullOrBlank()) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(R.string.simple_repair_details, detail),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.simple_ok)) } },
-    )
 }

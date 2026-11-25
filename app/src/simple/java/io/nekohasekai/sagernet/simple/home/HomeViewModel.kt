@@ -24,9 +24,15 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.modes.Managed
+import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
+import io.nekohasekai.sagernet.simple.modes.WhitelistKeywords
+import io.nekohasekai.sagernet.simple.regime.RegimeStore
+import io.nekohasekai.sagernet.simple.servers.CountryFromName
+import io.nekohasekai.sagernet.simple.servers.ServerCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,10 +40,12 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** The server card: what runs (or would run) when the button is pressed. */
 data class ServerCard(
@@ -53,7 +61,17 @@ data class ServerCard(
      * language it was created in); null otherwise.
      */
     @StringRes val localizedName: Int? = null,
-)
+    /** The country (ISO code) of the plain server, or of the server the auto-selector picked; null when unknown. */
+    val country: String? = null,
+    /** The country chosen in «Серверы» when the managed country selector runs; null otherwise. */
+    val countryChoice: String? = null,
+    /** The plain server, or the server the auto-selector picked, is a server for whitelists (WhitelistKeywords). */
+    val whitelistServer: Boolean = false,
+    /** How many servers of the running auto-selector work in this network; null before its first round. */
+    val working: Working? = null,
+) {
+    data class Working(val alive: Int, val total: Int)
+}
 
 data class HomeUiState(
     val phase: ConnectionPhase = ConnectionPhase.OFF,
@@ -88,6 +106,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     val messages: SharedFlow<Int> = mutableMessages.asSharedFlow()
 
     private var serviceState = BaseService.State.Idle
+
+    /** How many times the service has become connected since this screen model exists (each start and reload). */
+    private val mutableConnects = MutableStateFlow(0)
     private var userStopping = false
     private var lost: HomeProblem.ConnectionLost? = null
     private var urlTestFailures = 0
@@ -105,6 +126,70 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     /** The delay the last check of the running connection measured (through the auto-selector's pick, if any). */
     private var liveLatency: Int? = null
 
+    /**
+     * «Работают в этой сети: N из M» of the running auto-selector, from its member table: only members that answered
+     * since the session first saw the current physical network count (HomeStatus.working); null until known.
+     */
+    private var workingCount: WorkingRead? = null
+    private var workingJob: Job? = null
+
+    /** A count read for one selector: it is shown only while that selector runs. */
+    private data class WorkingRead(val selectorId: Long, val alive: Int, val total: Int)
+
+    /** The selector changed while a member table was read: one more read follows that one. */
+    private var workingAgain = false
+
+    /** Reads the running selector's member table again, a moment after its status changed (rounds end, picks change). */
+    private fun refreshWorkingLater() {
+        if (workingJob?.isActive == true) {
+            workingAgain = true
+            return
+        }
+        workingAgain = false
+        workingJob = viewModelScope.launch {
+            delay(WORKING_DELAY_MS)
+            val selectorId = selectedProfile?.takeIf { it.type == AutoSelectorProfiles.TYPE }?.id
+            val status = autoStatus
+            val service = connection.service
+            val read = if (
+                selectorId == null || service == null || serviceState != BaseService.State.Connected ||
+                !status.active || status.selectorId != selectorId || status.suspended
+            ) {
+                null
+            } else {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val full = AutoSelectorStatus.parse(service.autoSelectorStatus(true))
+                        // The table must be the one of the selector this read is for.
+                        if (full.selectorId != selectorId) return@withContext null
+                        HomeStatus.working(
+                            members = full.members.map { HomeStatus.MemberHealth(it.isUsable, it.lastOkMs, it.lastProbeMs) },
+                            since = RegimeStore.currentNetworkSince(),
+                            lastRoundMs = full.lastRoundMs,
+                            suspended = full.suspended,
+                        )?.let { (alive, total) -> WorkingRead(selectorId, alive, total) }
+                    } catch (e: Exception) {
+                        Logs.d("simple home: no member table: ${e.message}")
+                        null
+                    }
+                }
+            }
+            // The selector may have changed while the table was read: a count of another one is dropped and read again.
+            val stillRunning = autoStatus.selectorId == selectorId && autoStatus.active
+            val count = read?.takeIf { stillRunning }
+            if (count != workingCount) {
+                workingCount = count
+                publish()
+            }
+            // Read again only for another selector that runs now (not after the service stopped: nothing to read).
+            if (autoStatus.active && autoStatus.selectorId != selectorId) workingAgain = true
+        }.also { job ->
+            job.invokeOnCompletion { cause ->
+                if (cause == null && workingAgain) viewModelScope.launch { refreshWorkingLater() }
+            }
+        }
+    }
+
     init {
         lost = DataStore.serviceError.takeIf { it.isNotBlank() }?.let { HomeProblem.ConnectionLost(it) }
         connection.connect(application, this)
@@ -116,7 +201,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 if (reselected) {
                     liveLatency = null
                     if (foreground && serviceState == BaseService.State.Connected) restartChecks(SOON_MS)
+                    lookUpPickCountry(status.selectedId)
                 }
+                refreshWorkingLater()
                 publish()
             }
         }
@@ -148,11 +235,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     fun toggle(requestStart: () -> Unit) {
         val phase = mutableState.value.phase
         when {
-            HomeStatus.buttonStops(phase) -> {
-                userStopping = true
-                publish()
-                SagerNet.stopService()
-            }
+            HomeStatus.buttonStops(phase) -> stop()
 
             phase == ConnectionPhase.DISCONNECTING -> Unit
             else -> viewModelScope.launch {
@@ -167,6 +250,56 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
 
     fun message(@StringRes text: Int) {
         mutableMessages.tryEmit(text)
+    }
+
+    /** Stops the service as the main button does: no «Соединение потеряно» follows. */
+    fun stop() {
+        userStopping = true
+        publish()
+        SagerNet.stopService()
+    }
+
+    /** The current count of connects; «Починка» waits for the next one after it starts or reloads the VPN. */
+    val connects: Int get() = mutableConnects.value
+
+    /**
+     * Waits until the service has connected more than [after] times and is still connected; false after [timeoutMs]
+     * («Починка»: a start or reload of the VPN it asked for).
+     */
+    suspend fun awaitConnected(after: Int, timeoutMs: Long): Boolean = withTimeoutOrNull(timeoutMs) {
+        mutableConnects.first { it > after }
+        serviceState == BaseService.State.Connected
+    } ?: false
+
+    /** Whether this app's VPN is connected now («Починка» checks through it only then). */
+    val vpnConnected: Boolean get() = serviceState == BaseService.State.Connected
+
+    /** Whether the service is off altogether: a VPN network seen now belongs to another app. */
+    val serviceOff: Boolean get() = !serviceState.started && serviceState != BaseService.State.Stopping
+
+    /**
+     * One URL test of the running connection, as the server checks of this screen do («Починка»'s «Сайты через VPN»):
+     * the delay (> 0), [FAILED], [VPN_EXIT_UNKNOWN], or null when the service cannot be asked or gives no answer
+     * within [timeoutMs]. The binder call blocks until the core is done and cannot be interrupted, so it runs on its own
+     * and only the wait for it is bounded and cancellable: a stop of «Починка» does not wait for it.
+     */
+    suspend fun testConnection(timeoutMs: Long): Int? {
+        val service = connection.service ?: return null
+        if (serviceState != BaseService.State.Connected) return null
+        val call = viewModelScope.async(Dispatchers.IO) {
+            try {
+                service.urlTest()
+            } catch (e: RemoteException) {
+                // The binder call itself broke (`:bg` died): no answer, not a failed test.
+                Logs.d("simple home: url test not answered: ${e.message}")
+                null
+            } catch (e: Exception) {
+                // A failed test comes back as the service's IllegalStateException (urlTestCurrent): the sites failed.
+                Logs.d("simple home: url test failed: ${e.message}")
+                FAILED
+            }
+        }
+        return withTimeoutOrNull(timeoutMs) { call.await() }
     }
 
     /** Hides the banner; a loss is forgotten like a swiped error of the classic UI. */
@@ -253,6 +386,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         serviceState = state
         val connected = state == BaseService.State.Connected
         if (connected && !wasConnected) {
+            mutableConnects.update { it + 1 }
             urlTestFailures = 0
             serverProblemHidden = false
             if (foreground) restartChecks(FIRST_CHECK_MS)
@@ -261,6 +395,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
             urlTestFailures = 0
             serverProblemHidden = false
             liveLatency = null
+            workingCount = null
         }
         mutableState.update {
             it.copy(
@@ -323,6 +458,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                         liveLatency = null
                     }
                 }
+                refreshWorkingLater()
                 publish()
                 delay(if (urlTestFailures > 0) RETRY_MS else INTERVAL_MS)
             }
@@ -336,6 +472,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     override suspend fun onUpdated(data: List<TrafficData>) = Unit
     override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
         if (profile.id == DataStore.selectedProxy || profile.id == fallbackProfile) refreshProfilesLater()
+        // The auto-selector's running member was renamed or re-tested: its name and country are read again.
+        if (profile.id == pick?.id) viewModelScope.launch { lookUpPickCountry(profile.id, force = true) }
     }
 
     override suspend fun onRemoved(groupId: Long, profileId: Long) = refreshProfilesLater()
@@ -349,30 +487,115 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     /** The managed auto-selectors of the traffic modes, read with the profiles. */
     private var managed: Managed? = null
 
+    /** The country of the selected plain server, and the country chosen in «Серверы» (read with the profiles). */
+    private var selectedCountry: String? = null
+    private var choiceCountry: String? = null
+
+    /** The auto-selector's pick as the list shows it: its id, country (ISO code or null), name, whitelist category. */
+    private class Pick(val id: Long, val country: String?, val name: String, val whitelist: Boolean = false)
+
+    /** The selected plain server is a server for whitelists. */
+    private var selectedWhitelist = false
+
+    private var pick: Pick? = null
+
+    /** Counts the pick lookups started; only the newest one may publish (a forced one may overtake an older one). */
+    private var pickLookups = 0L
+
+    /** The selected plain server's name as the list shows it (never its address). */
+    private var selectedName: String = ""
+
+    /** What one [refreshProfiles] read. */
+    private class ProfilesSnapshot(
+        val profile: ProxyEntity?,
+        val fallback: Long,
+        val hasServers: Boolean,
+        val managed: Managed,
+        val country: String?,
+        val name: String,
+        val choiceCountry: String?,
+        /** The shown plain server is a server for whitelists. */
+        val whitelist: Boolean,
+    )
+
+    /** Looks the running pick [id] up in the catalog; [force] reads it again (it may have been renamed or re-tested). */
+    private fun lookUpPickCountry(id: Long, force: Boolean = false) {
+        if (id <= 0L || !force && pick?.id == id) return
+        val lookup = ++pickLookups
+        viewModelScope.launch {
+            val found = withContext(Dispatchers.IO) {
+                try {
+                    ProfileManager.getProfile(id)?.let {
+                        Pick(
+                            id,
+                            CountryFromName.resolve(it.outbound.name, it.testCountry).code,
+                            ServerCatalog.nameOf(it, unnamed()),
+                            isWhitelistServer(it),
+                        )
+                    }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    null
+                }
+            }
+            // A lookup for a pick that is no longer running is dropped (a newer one is under way or done).
+            if (lookup != pickLookups || autoStatus.selectedId != id) return@launch
+            pick = found ?: Pick(id, null, "")
+            publish()
+        }
+    }
+
     /** Reads the selected server again (a traffic mode may have switched the managed auto-selector). */
     fun refreshServer() = refreshProfiles()
 
     private fun refreshProfiles() {
         profilesJob?.cancel()
         profilesJob = viewModelScope.launch {
-            val (profile, fallback, hasServers) = withContext(Dispatchers.IO) {
+            // Everything is read into one snapshot and assigned here on the main thread: a refresh cancelled while
+            // reading cannot leave its (older) metadata behind for the profile a newer refresh publishes.
+            val snapshot = withContext(Dispatchers.IO) {
                 try {
-                    managed = TrafficModes.managedIds()
+                    val managedIds = TrafficModes.managedIds()
                     val selected = ProfileManager.getProfile(DataStore.selectedProxy)
                     val first = if (selected == null) firstProfile() else null
+                    val shown = selected ?: first
                     // The managed auto-selectors of the traffic modes are no server of their own.
                     val hasServers = TrafficModes.hasServers() ||
                         selected != null && !TrafficModes.isManagedSelector(selected.id)
-                    Triple(selected ?: first, first?.id ?: 0L, hasServers)
+                    ProfilesSnapshot(
+                        profile = shown,
+                        fallback = first?.id ?: 0L,
+                        hasServers = hasServers,
+                        managed = managedIds,
+                        country = shown?.let { CountryFromName.resolve(it.outbound.name, it.testCountry).code },
+                        name = shown?.let { ServerCatalog.nameOf(it, unnamed()) }.orEmpty(),
+                        choiceCountry = TrafficModes.countryChoice()?.code
+                            ?.takeIf { selected != null && selected.id == managedIds.country },
+                        whitelist = shown != null && shown.type != AutoSelectorProfiles.TYPE && isWhitelistServer(shown),
+                    )
                 } catch (e: Exception) {
                     Logs.w(e)
-                    Triple(null, 0L, mutableState.value.hasServers ?: false)
+                    null
                 }
             }
-            selectedProfile = profile
-            fallbackProfile = fallback
-            mutableState.update { it.copy(hasServers = hasServers) }
+            if (snapshot == null) {
+                selectedProfile = null
+                fallbackProfile = 0L
+                mutableState.update { it.copy(hasServers = it.hasServers ?: false) }
+                publish()
+                return@launch
+            }
+            selectedProfile = snapshot.profile
+            fallbackProfile = snapshot.fallback
+            managed = snapshot.managed
+            selectedCountry = snapshot.country
+            selectedName = snapshot.name
+            choiceCountry = snapshot.choiceCountry
+            selectedWhitelist = snapshot.whitelist
+            mutableState.update { it.copy(hasServers = snapshot.hasServers) }
             publish()
+            // The profiles may have changed in :bg (a subscription update renamed the running member).
+            if (autoStatus.active && autoStatus.selectedId > 0L) lookUpPickCountry(autoStatus.selectedId, force = true)
         }
     }
 
@@ -401,17 +624,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         val profile = selectedProfile
         val auto = profile?.type == AutoSelectorProfiles.TYPE
         val running = autoStatus.takeIf { auto && it.active && it.selectorId == profile?.id }
+        val currentPick = pick?.takeIf { running != null && it.id == running.selectedId }
         val server = profile?.let {
             ServerCard(
-                name = it.displayName(),
+                name = selectedName.ifEmpty { CountryFromName.tidy(it.displayName()) },
                 auto = auto,
-                autoSelected = running?.selectedName.orEmpty(),
+                // The core reports an unnamed member by its address: the name as the list shows it, once looked up.
+                // The catalog's name only: the core reports an unnamed member by its address. Until the lookup is
+                // through the card says that Auto is choosing; a member the catalog does not know is «unnamed».
+                autoSelected = currentPick?.name?.ifEmpty { unnamed() }.orEmpty(),
                 latencyMs = if (connected) liveLatency else it.latency.takeIf { ms -> ms > 0 && !auto },
                 localizedName = when (it.id) {
                     managed?.auto -> R.string.simple_selector_auto_name
                     managed?.autoWhitelist -> R.string.simple_selector_auto_whitelist_name
                     else -> null
                 },
+                country = if (auto) {
+                    currentPick?.country
+                } else {
+                    selectedCountry
+                },
+                countryChoice = choiceCountry,
+                whitelistServer = if (auto) currentPick?.whitelist == true else selectedWhitelist,
+                working = workingCount?.takeIf { running != null && !running.suspended && it.selectorId == running.selectorId }
+                    ?.let { ServerCard.Working(it.alive, it.total) },
             )
         }
         val exhausted = running != null && running.exhaustedSinceMs > 0L
@@ -434,11 +670,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
+    private fun unnamed(): String = getApplication<Application>().getString(R.string.simple_server_unnamed)
+
+    /** By the name the list sorts it with («Для белых списков», ServerCatalog); blocking. */
+    private fun isWhitelistServer(profile: ProxyEntity): Boolean =
+        WhitelistKeywords.isWhitelistServer(profile.outbound.name.trim(), SimpleConfigRepo.current().wlKeywords)
+
     private companion object {
         const val FIRST_CHECK_MS = 2_000L
         const val SOON_MS = 1_000L
         const val INTERVAL_MS = 30_000L
         const val RETRY_MS = 10_000L
+        const val WORKING_DELAY_MS = 500L
         const val FAILED = -1
         const val VPN_EXIT_UNKNOWN = -2
     }

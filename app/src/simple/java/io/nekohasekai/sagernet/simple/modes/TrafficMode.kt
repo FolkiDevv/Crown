@@ -67,8 +67,9 @@ object TrafficModePlan {
         if (mode == TrafficMode.APPS && selectedApps.none { it.isNotBlank() }) TrafficMode.AUTO else mode
 
     /**
-     * The routing of [mode]. «Авто» follows the network check ([whitelistsDetected], from batch 6; until then it is
-     * always false and «Авто» routes like «Умный»); «Только выбранные приложения» uses the smart profile.
+     * The routing of [mode]. «Авто» follows the network check ([whitelistsDetected]: whitelists were found in the
+     * current physical network, design.md D6; otherwise it routes like «Умный»); «Только выбранные приложения» uses
+     * the smart profile.
      */
     fun routing(mode: TrafficMode, whitelistsDetected: Boolean): Routing = when (mode) {
         TrafficMode.WHITELIST -> Routing.WHITELIST
@@ -174,5 +175,14 @@ object TrafficModePlan {
     fun parseList(text: String?): List<String> = clean(text.orEmpty().lines())
 }
 
-/** The ids of the managed entities (design.md D5); 0 = missing (could not be created). */
-data class Managed(val smartRoute: Long, val whitelistRoute: Long, val auto: Long, val autoWhitelist: Long)
+/**
+ * The ids of the managed entities (design.md D5); 0 = missing (could not be created). [country] is the auto-selector
+ * behind a country chosen in «Серверы» (batch 5), 0 until one was chosen.
+ */
+data class Managed(
+    val smartRoute: Long,
+    val whitelistRoute: Long,
+    val auto: Long,
+    val autoWhitelist: Long,
+    val country: Long = 0L,
+)

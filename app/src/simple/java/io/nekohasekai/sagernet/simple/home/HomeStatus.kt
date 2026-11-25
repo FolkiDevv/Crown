@@ -129,6 +129,23 @@ object HomeStatus {
     /** Whether a Stopped carrying [msg] is a loss the banner reports: not asked for here, and with a reason. */
     fun isLoss(msg: String?, userStopping: Boolean): Boolean = !userStopping && !msg.isNullOrBlank()
 
+    /** What [working] needs of one member of the running auto-selector (AutoSelectorStatus.Member). */
+    data class MemberHealth(val usable: Boolean, val lastOkMs: Long, val lastProbeMs: Long)
+
+    /**
+     * «Работают в этой сети: N из M» (unix ms throughout): N = members that answered since the physical network was
+     * first seen by this session ([since]), M = all members. Health from before [since] — another network, an earlier
+     * session, or health the auto-selector restored from storage at its start — does not count. Nothing (null) until a
+     * round of checks has finished in this network ([lastRoundMs]) and at least one member was probed in it, while the
+     * selector is [suspended], or when [since] is unknown.
+     */
+    fun working(members: List<MemberHealth>, since: Long?, lastRoundMs: Long, suspended: Boolean): Pair<Int, Int>? {
+        if (since == null || suspended || members.isEmpty()) return null
+        if (lastRoundMs < since || members.none { it.lastProbeMs >= since }) return null
+        val alive = members.count { it.usable && it.lastOkMs >= since }
+        return alive to members.size
+    }
+
     /** `h:mm:ss`, or `m:ss` under an hour, for the connection time. */
     fun formatDuration(millis: Long): String {
         val total = (millis / 1000).coerceAtLeast(0)

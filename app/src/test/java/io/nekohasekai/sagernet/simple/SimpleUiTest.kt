@@ -45,12 +45,22 @@ class SimpleUiTest {
         assertFalse(
             SimpleUi.shouldRedirect(store, "android.service.quicksettings.action.QS_TILE_PREFERENCES", emptySet())
         )
-        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
-        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.SEND", emptySet()))
         assertFalse(SimpleUi.shouldRedirect(store, null, setOf(SimpleUi.EXTRA_OPEN_CLASSIC)))
-        assertFalse(SimpleUi.shouldRedirect(store, null, setOf("importTexts")))
         assertFalse(SimpleUi.shouldRedirect(store, null, setOf("wifiPermissionFlow")))
         assertTrue(SimpleUi.shouldRedirect(store, null, setOf("someOtherExtra")))
+    }
+
+    @Test
+    fun importsOpenTheSimpleInterface() {
+        // Batch 4: links, files, shares and the QR scanner's texts are imported by the simple interface.
+        val store = MapStore()
+        assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
+        assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.SEND", setOf("android.intent.extra.TEXT")))
+        assertTrue(SimpleUi.shouldRedirect(store, null, setOf("importTexts")))
+        // A backup the simple interface hands to the classic restore carries the classic flag on its VIEW.
+        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", setOf(SimpleUi.EXTRA_OPEN_CLASSIC)))
+        SimpleUi.select(store, simple = false)
+        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
     }
 
     @Test
@@ -75,5 +85,46 @@ class SimpleUiTest {
         val store = MapStore()
         SimpleUi.isUpgrade(store, firstInstallTime = 1000, lastUpdateTime = 5000)
         assertTrue(SimpleUi.isSimpleSelected(store))
+    }
+
+    @Test
+    fun classicHintShowsOnceAfterAnUpgrade() {
+        val store = MapStore()
+        val upgrade = SimpleUi.isUpgrade(store, firstInstallTime = 1000, lastUpdateTime = 5000)
+        assertTrue(SimpleUi.showsClassicHint(store, upgrade))
+        // still there until it is closed (a restart before closing shows it again)
+        assertTrue(SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(store, 1000, 5000)))
+        SimpleUi.closeClassicHint(store)
+        assertFalse(SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(store, 1000, 9000)))
+    }
+
+    @Test
+    fun classicHintNeverShowsOnAFreshInstall() {
+        val store = MapStore()
+        assertFalse(SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(store, 1000, 1000)))
+        // nor after a later update of a version that started fresh
+        assertFalse(SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(store, 1000, 5000)))
+    }
+
+    @Test
+    fun advancedModeIsOffUntilTurnedOn() {
+        val store = MapStore()
+        assertFalse(SimpleUi.isAdvanced(store))
+        SimpleUi.setAdvanced(store, true)
+        assertTrue(SimpleUi.isAdvanced(store))
+        SimpleUi.setAdvanced(store, false)
+        assertFalse(SimpleUi.isAdvanced(store))
+    }
+
+    @Test
+    fun classicScreensStayInMainActivity() {
+        // The advanced mode's links carry the classic flag and the screen; the redirect leaves them to MainActivity.
+        val store = MapStore()
+        assertFalse(
+            SimpleUi.shouldRedirect(
+                store, null,
+                setOf(SimpleUi.EXTRA_OPEN_CLASSIC, "io.nekohasekai.sagernet.simple.CLASSIC_SCREEN"),
+            )
+        )
     }
 }

@@ -1,0 +1,652 @@
+package io.nekohasekai.sagernet.simple.repair
+
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * The cleaning of the «Починка» report (connection-repair "Отчёт без секретов") on a synthetic report: a password, a
+ * UUID, keys, the servers' addresses (a domain, a public and a private IP), a URL with a server's domain as its host,
+ * a subscription link (also JSON-escaped) — none of them may be left, and the labels stay consistent.
+ */
+class ReportRedactorTest {
+
+    private val password = "hunter2-Sup3rSecret"
+    private val uuid = "b831381d-6324-4d53-ad4f-8cda48b30811"
+    private val publicKey = "Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw"
+    private val privateKey = "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+    private val serverDomain = "vpn.example-provider.net"
+    private val sni = "front.example-provider.net"
+    private val serverIp = "203.0.113.45"
+    private val privateServerIp = "192.168.77.10"
+    private val subscriptionHost = "sub.provider-panel.io"
+    private val subscriptionToken = "AbCdEf0123456789xyzTOKENqwerty"
+    private val subscription = "https://$subscriptionHost/api/sub/$subscriptionToken"
+    private val shortId = "6ba85179e30d4fc2"
+    private val seed = "kcp-seed-Batch9"
+
+    private val profile = """
+        {"type":"vless","name":"NL 1","server":"$serverDomain","server_port":443,"uuid":"$uuid",
+         "tls":{"enabled":true,"server_name":"$sni","reality":{"enabled":true,"public_key":"$publicKey","short_id":"0123abcd"}},
+         "transport":{"type":"ws","host":"$sni","path":"/ws?ed=2048"}}
+    """.trimIndent()
+
+    private fun redactor(): ReportRedactor {
+        val servers = ReportRedactor.serverNames(serverDomain, profile) +
+            ReportRedactor.serverNames(serverIp, """{"type":"shadowsocks","server":"$serverIp","password":"$password"}""") +
+            ReportRedactor.serverNames(privateServerIp, """{"type":"wireguard","peers":[{"address":"$privateServerIp:51820"}]}""")
+        return ReportRedactor(servers, listOf(subscription))
+    }
+
+    /** A report as RepairReportExport puts it together: report lines, core log lines, a one-line config. */
+    private val report = listOf(
+        "note: IOException: connect to $serverDomain:443 failed",
+        "[Info] outbound/vless[proxy]: handshake with $serverDomain:443 failed: EOF",
+        "[Info] outbound/vless[proxy]: dial tcp cdn.$serverDomain:443: i/o timeout",
+        "[Debug] dns: exchanged $serverDomain A 60",
+        "[Info] connection to $serverIp:8388 refused",
+        "[Info] wireguard: peer $privateServerIp:51820 handshake did not complete",
+        "[Info] http: GET https://$serverDomain:8443/ws?ed=2048 -> 502",
+        "[Info] url test: https://user:$password@$serverDomain/probe failed",
+        "[Info] subscription: fetching $subscription",
+        "[Info] subscription: host $subscriptionHost answered 200",
+        "[Info] import vless://$uuid@$serverDomain:443?security=reality&pbk=$publicKey&sni=$sni#NL",
+        "[Info] url test https://www.gstatic.com/generate_204 via proxy: 120 ms",
+        "[Info] clash api listening at http://127.0.0.1:9090/ui",
+        "[Warn] shadowsocks: password=$password rejected",
+        "[Warn] wireguard private key $privateKey",
+        """{"outbounds":[{"type":"vless","server":"$serverDomain","uuid":"$uuid","tls":{"server_name":"$sni","reality":{"public_key":"$publicKey"}}}],"route":{"rule_set":[{"url":"https:\/\/$subscriptionHost\/api\/sub\/$subscriptionToken"}]}}""",
+        """{"remote":"https:\/\/$serverDomain\/dns-query"}""",
+        // Xray's own spelling of the Reality settings and the mKCP seed.
+        """[Info] Start Xray: {"realitySettings":{"serverName":"$sni","publicKey":"$publicKey","shortId":"$shortId","shortIds":["$shortId"]},"kcpSettings":{"seed":"$seed"}}""",
+    )
+
+    private val secrets = listOf(
+        password, uuid, publicKey, privateKey, serverDomain, sni, serverIp, privateServerIp, subscriptionHost,
+        subscriptionToken, subscription, "example-provider", "provider-panel", shortId, seed,
+    )
+
+    @Test
+    fun noSecretIsLeft() {
+        val out = redactor().redactText(report.joinToString("\n"))
+        for (secret in secrets) {
+            assertFalse("left: $secret in\n$out", out.contains(secret, ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun serversAndLinksBecomeLabels() {
+        val r = redactor()
+        // A server's domain anywhere, as the host of a URL and its subdomains: one label.
+        assertEquals("[Info] outbound/vless[proxy]: handshake with <server-1>:443 failed: EOF", r.redact(report[1]))
+        assertEquals("[Info] outbound/vless[proxy]: dial tcp <server-1>:443: i/o timeout", r.redact(report[2]))
+        assertEquals("[Info] http: GET https://<server-1>:8443/<redacted> -> 502", r.redact(report[6]))
+        assertEquals("[Info] url test: https://<redacted>@<server-1>/<redacted> failed", r.redact(report[7]))
+        // A private address the log export keeps is a server here.
+        assertTrue(r.redact(report[5]).contains("peer <server-"))
+        // The subscription link whole, its host alone.
+        assertEquals("[Info] subscription: fetching <subscription-1>", r.redact(report[8]))
+        assertEquals("[Info] subscription: host <subscription-1-host> answered 200", r.redact(report[9]))
+        // A host no profile names: a label of its own; the same host, the same label.
+        val gstatic = r.redact(report[11])
+        assertTrue(gstatic, gstatic.contains("https://<host-1>/<redacted>"))
+        assertEquals(gstatic, r.redact(report[11]))
+        // Loopback stays readable.
+        assertTrue(r.redact(report[12]).contains("http://127.0.0.1:9090/<redacted>"))
+    }
+
+    @Test
+    fun xrayCamelCaseSecrets() {
+        val json = JSONObject(redactor().redact(report[17]).substringAfter("Start Xray: "))
+        val reality = json.getJSONObject("realitySettings")
+        assertEquals("<redacted>", reality.getString("shortId"))
+        assertEquals("<redacted>", reality.getJSONArray("shortIds").getString(0))
+        assertEquals("<redacted>", reality.getString("serverName"))
+        assertEquals("<redacted>", json.getJSONObject("kcpSettings").getString("seed"))
+    }
+
+    /** The final configuration: one JSON document that still parses, with nothing of the servers in it. */
+    @Test
+    fun configStaysValidJson() {
+        val config = """
+            {"sing_box":{"log":{"level":"info"},
+              "inbounds":[{"type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],"auto_route":true,"mtu":9000}],
+              "outbounds":[{"type":"vless","tag":"proxy","server":"$serverDomain","server_port":443,"uuid":"$uuid",
+                "tls":{"enabled":true,"server_name":"$sni","reality":{"enabled":true,"public_key":"$publicKey","short_id":"$shortId"}},
+                "transport":{"type":"ws","path":"/ws","headers":{"Host":"$sni"}}},
+               {"type":"shadowsocks","tag":"ss","server":"$privateServerIp","server_port":8388,"password":"$password"},
+               {"type":"hysteria2","tag":"hy","server":"$serverIp","up_mbps":100,"auth_timeout":30,"obfs":{"type":"salamander","password":"$password"}}],
+              "route":{"rule_set":[{"tag":"sub","type":"remote","url":"$subscription"}],"rules":[{"wifi_ssid":["Home WiFi"],"outbound":"direct"}]},
+              "dns":{"servers":[{"tag":"dns-remote","address":"https://$serverDomain/dns-query"}]}},
+             "xray":[{"outbounds":[{"protocol":"vless","settings":{"vnext":[{"address":"$serverDomain","port":443,"users":[{"id":"$uuid"}]}]},
+               "streamSettings":{"realitySettings":{"serverName":"$sni","publicKey":"$publicKey","shortId":"$shortId","spiderX":"/"},"kcpSettings":{"seed":"$seed"}}}]}]}
+        """.trimIndent().replace("\n", "")
+        val out = redactor().redactJson(config)
+        for (secret in secrets + "Home WiFi") assertFalse("left: $secret in\n$out", out.contains(secret, ignoreCase = true))
+        val json = JSONObject(out)
+        val tun = json.getJSONObject("sing_box").getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(9000, tun.getInt("mtu"))
+        assertEquals("tun", tun.getString("type"))
+        assertEquals(443, json.getJSONObject("sing_box").getJSONArray("outbounds").getJSONObject(0).getInt("server_port"))
+        assertTrue(out.lines().size > 10)
+    }
+
+    /** Free text at the end of a JSON string ("…auth: xyz") must not take the closing quote with it (review #10). */
+    @Test
+    fun freeTextInJsonStringsKeepsTheJsonValid() {
+        val r = redactor()
+        val report = JSONObject()
+            .put("note", "IOException: invalid auth: $password")
+            .put("error", "connect failed, address: $serverDomain")
+            .put("values", JSONObject().put("latency_ms", 120))
+        val out = r.redactJson(report.toString())
+        val json = JSONObject(out)
+        assertFalse(out, out.contains(password))
+        assertFalse(out, out.contains(serverDomain))
+        assertTrue(json.getString("note").startsWith("IOException: invalid auth: "))
+        assertEquals(120, json.getJSONObject("values").getInt("latency_ms"))
+        // The error object of config(): the message alone is cleaned, the JSON is built around it.
+        val error = JSONObject().put("error", r.redact("IllegalStateException: bad password: $password")).toString(2)
+        assertFalse(error, error.contains(password))
+        JSONObject(error)
+    }
+
+    /** Xray's gRPC `serviceName` (camelCase) like the sing-box `service_name`, in the config and in a log line. */
+    @Test
+    fun grpcServiceName() {
+        val r = redactor()
+        val serviceName = "grpc-Svc-b9secret"
+        val config = """{"sing_box":{"outbounds":[{"type":"vless","transport":{"type":"grpc","service_name":"$serviceName"}}]},""" +
+            """"xray":[{"outbounds":[{"streamSettings":{"network":"grpc","grpcSettings":{"serviceName":"$serviceName","multiMode":true}}}]}]}"""
+        val out = r.redactJson(config)
+        assertFalse(out, out.contains(serviceName))
+        val grpc = JSONObject(out).getJSONArray("xray").getJSONObject(0).getJSONArray("outbounds").getJSONObject(0)
+            .getJSONObject("streamSettings").getJSONObject("grpcSettings")
+        assertEquals("<redacted>", grpc.getString("serviceName"))
+        assertTrue(grpc.getBoolean("multiMode"))
+        val line = r.redact("""[Info] Start Xray: {"grpcSettings":{"serviceName":"$serviceName"}}""")
+        assertFalse(line, line.contains(serviceName))
+    }
+
+    /**
+     * Xray's own debug lines name the gRPC service and the server in plain words (device re-check of review #10): the
+     * profile's secret values go anywhere, and a server name after "tcp:" gets its label.
+     */
+    @Test
+    fun xrayDebugLines() {
+        val xrayService = "XrSvc-b9rv-3390"
+        val xrayHost = "xr.b9vx-test.example"
+        val vcn = "vcn.b9vx-test.example"
+        val xrayProfile = """{"type":"vless","server":"$xrayHost","server_port":443,"uuid":"$uuid",
+            "tls":{"enabled":true,"server_name":"$sni","verifyPeerCertByName":"$vcn"},
+            "transport":{"type":"grpc","serviceName":"$xrayService"}}"""
+        assertTrue(ReportRedactor.secretValues(xrayProfile).containsAll(listOf(uuid, xrayService)))
+        assertFalse(ReportRedactor.secretValues(xrayProfile).contains(xrayHost))
+        val r = ReportRedactor(
+            ReportRedactor.serverNames(xrayHost, xrayProfile),
+            emptyList(),
+            ReportRedactor.secretValues(xrayProfile),
+        )
+        val grpc = r.redact("[Debug] transport/internet/grpc: using gRPC tun mode service name: `$xrayService` stream name: `Tun`")
+        assertEquals("[Debug] transport/internet/grpc: using gRPC tun mode service name: `<redacted>` stream name: `Tun`", grpc)
+        val dial = r.redact("[Debug] transport/internet: dialing to tcp:$xrayHost:443")
+        assertEquals("[Debug] transport/internet: dialing to tcp:<server-1>:443", dial)
+        val config = r.redactJson("""{"xray":[{"streamSettings":{"tlsSettings":{"verifyPeerCertByName":"$vcn"},"grpcSettings":{"serviceName":"$xrayService"}}}]}""")
+        for (secret in listOf(xrayService, vcn, "b9vx-test")) assertFalse(config, config.contains(secret, ignoreCase = true))
+        JSONObject(config)
+        // Short config words are no secrets: "/ws" under "path" stays readable elsewhere.
+        assertFalse(ReportRedactor.secretValues("""{"transport":{"path":"/ws"}}""").contains("/ws"))
+    }
+
+    /** A key that names a server (DNS hosts) is cleaned like a value; the document stays JSON. */
+    @Test
+    fun hostKeysAreCleaned() {
+        val out = redactor().redactJson("""{"dns":{"hosts":{"$serverDomain":["$serverIp"],"$sni":"$privateServerIp"}}}""")
+        for (secret in listOf(serverDomain, sni, serverIp, privateServerIp)) assertFalse(out, out.contains(secret))
+        val hosts = JSONObject(out).getJSONObject("dns").getJSONObject("hosts")
+        assertTrue(hosts.toString(), hosts.has("<server-1>") && hosts.has("<server-2>"))
+    }
+
+    /** A password with an "@": LogRedactor cuts the credentials at the first one; nothing of the rest may stay (review). */
+    @Test
+    fun passwordWithAtSign() {
+        val url = "[Info] url test: https://user:pa@ssword@$serverDomain/probe failed"
+        val expected = "[Info] url test: https://<redacted>@<server-1>/<redacted> failed"
+        val withoutSecrets = redactor().redact(url)
+        assertEquals(expected, withoutSecrets)
+        val servers = ReportRedactor.serverNames(serverDomain, profile)
+        val withSecret = ReportRedactor(servers, emptyList(), listOf("pa@ssword")).redact(url)
+        assertEquals(expected, withSecret)
+        // An unknown host behind such credentials gets a label too.
+        val unknown = ReportRedactor(emptyList(), emptyList()).redact("https://u:p@ss@intranet.example.org:8443/x")
+        assertEquals("https://<redacted>@<host-1>:8443/<redacted>", unknown)
+    }
+
+    /** Every URL host but loopback is labelled, also one that free text would not take for a host (review). */
+    @Test
+    fun singleLabelUrlHosts() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        assertEquals("[Info] GET http://<host-1>:8080/<redacted> -> 200", r.redact("[Info] GET http://gateway:8080/status -> 200"))
+        assertEquals("[Info] GET http://<host-2>/<redacted>", r.redact("[Info] GET http://router.lan.example/admin"))
+        assertEquals("[Info] GET http://<host-1>/<redacted>", r.redact("[Info] GET http://GATEWAY/"))
+        // Loopback stays readable (LogRedactor's own "host:" rule takes the port after "localhost" — not this pass).
+        val localhost = r.redact("[Info] GET http://localhost:9090/ui")
+        assertTrue(localhost, localhost.startsWith("[Info] GET http://localhost:"))
+        assertFalse(localhost, localhost.contains("<host-"))
+        assertEquals("[Info] GET http://[::1]:9090/<redacted>", r.redact("[Info] GET http://[::1]:9090/ui"))
+    }
+
+    /** A secret with an IP-like part: masked before LogRedactor turns that part into "<ip>" (review). */
+    @Test
+    fun secretWithAnIpInside() {
+        val secret = "pw-203.0.113.9-Zq"
+        val profile = """{"type":"shadowsocks","server":"$serverDomain","password":"$secret"}"""
+        val r = ReportRedactor(ReportRedactor.serverNames(serverDomain, profile), emptyList(), ReportRedactor.secretValues(profile))
+        for (line in listOf(
+            "[Warn] auth failed for $secret",
+            "[Info] ss://aes:$secret@$serverDomain:8388 failed",
+            """{"note":"bad $secret here"}""",
+        )) {
+            val out = r.redact(line)
+            for (part in listOf(secret, "pw-", "-Zq", "203.0.113.9")) assertFalse(out, out.contains(part))
+            assertTrue(out, out.contains("<redacted>"))
+            assertFalse(out, out.contains("\uE000"))
+        }
+    }
+
+    /** A server with a single-label name ("gateway"): labelled as a host and as a plain word (review). */
+    @Test
+    fun singleLabelServer() {
+        val profile = """{"type":"vless","server":"gateway","server_port":443,"uuid":"$uuid","transport":{"type":"ws","host":"none"}}"""
+        val names = ReportRedactor.serverNames("gateway:443", profile)
+        assertEquals(setOf("gateway"), names)
+        val r = ReportRedactor(names + ReportRedactor.serverNames("vpn", "{}"), emptyList())
+        assertEquals("[Debug] dialing to tcp:<server-1>:443", r.redact("[Debug] dialing to tcp:gateway:443"))
+        assertEquals("[Info] connect to <server-1>:8443 failed", r.redact("[Info] connect to GATEWAY:8443 failed"))
+        assertEquals("[Info] GET http://<server-1>/<redacted>", r.redact("[Info] GET http://gateway/status"))
+        assertTrue(r.redact("[Info] import vless://$uuid@gateway:443?type=ws#gw").contains("vless://<redacted>@<server-1>:443"))
+        assertTrue(r.redact("[Info] user@vpn connected").contains("user@<server-2>"))
+        // Even a generic name is the user's server: as a plain word it is labelled too (the spec allows no server address).
+        assertEquals("[Info] the <server-1> is down, <server-2> service on", r.redact("[Info] the gateway is down, VPN service on"))
+        // The server's own address counts whatever it is called; under the keys a "no address" word or a port does not.
+        assertEquals(setOf("none"), ReportRedactor.serverNames("none", """{"address":"auto","endpoint":"8080"}"""))
+    }
+
+    /**
+     * Every single-label server name ("mybox7", "дача5", also the generic "proxy") is replaced as a whole word, never
+     * inside a longer word or the report's own labels (review).
+     */
+    @Test
+    fun distinctiveSingleLabelServer() {
+        val names = ReportRedactor.serverNames("mybox7", "{}") + ReportRedactor.serverNames("дача5", "{}") +
+            ReportRedactor.serverNames("proxy", "{}")
+        assertEquals(setOf("mybox7", "дача5", "proxy"), names)
+        val r = ReportRedactor(names, emptyList())
+        assertEquals("[Info] <server-1> handshake failed", r.redact("[Info] mybox7 handshake failed"))
+        assertEquals("[Info] outbound <server-1> down", r.redact("[Info] outbound MYBOX7 down"))
+        assertEquals("[Info] сервер <server-2> не отвечает", r.redact("[Info] сервер дача5 не отвечает"))
+        assertEquals("[Info] tcp:<server-1>:443 and https://<server-1>/<redacted>", r.redact("[Info] tcp:mybox7:443 and https://mybox7/x"))
+        // Part of a longer word is not the name.
+        assertEquals("[Info] mybox77 and xmybox7 and дача55", r.redact("[Info] mybox77 and xmybox7 and дача55"))
+        // A generic name is labelled as a word and as a host.
+        assertEquals("[Info] <server-3> started, dial tcp:<server-3>:1080", r.redact("[Info] proxy started, dial tcp:proxy:1080"))
+        // Labels stay whole even for servers called "server" or "host".
+        assertEquals("[Info] password=<redacted> uuid <uuid>", r.redact("[Info] password=secret12 uuid $uuid"))
+        val labelled = ReportRedactor(listOf("server", "host", "vpn.example.org"), emptyList())
+        assertEquals(
+            "[Info] <server-1> <server-2> at <server-3> https://<host-1>/<redacted>",
+            labelled.redact("[Info] server host at vpn.example.org https://other.example.net/x"),
+        )
+    }
+
+    /**
+     * Servers named like a label ("server-1", "redacted") or with one character ("x") are kept and labelled as whole
+     * words; the labels already in the text stay intact (review).
+     */
+    @Test
+    fun labelLikeAndOneCharacterServers() {
+        val names = ReportRedactor.serverNames("server-1", "{}") + ReportRedactor.serverNames("x", "{}") +
+            ReportRedactor.serverNames("redacted", """{"address":"server-1"}""")
+        assertEquals(setOf("server-1", "x", "redacted"), names)
+        val r = ReportRedactor(names, emptyList())
+        assertEquals("[Info] <server-1> handshake failed", r.redact("[Info] server-1 handshake failed"))
+        assertEquals(
+            "[Info] GET https://<server-1>/<redacted> and <server-1>",
+            r.redact("[Info] GET https://server-1/x and server-1"),
+        )
+        assertEquals(
+            "[Info] <server-2> is down; box x2 x-ray x.y password=<redacted>",
+            r.redact("[Info] X is down; box x2 x-ray x.y password=pw1"),
+        )
+        assertEquals("[Info] password=<redacted> <server-3> <uuid>", r.redact("[Info] password=secret12 redacted $uuid"))
+        // A configured loopback server is labelled too; an unconfigured one stays readable.
+        val loopback = ReportRedactor(listOf("127.0.0.1:1080"), emptyList())
+        assertEquals("socks5://<server-1>:1080 http://127.0.0.2:9/<redacted>", loopback.redact("socks5://127.0.0.1:1080 http://127.0.0.2:9/x"))
+    }
+
+    /**
+     * Short credentials are masked too (review): up to 5 characters as a whole token anywhere, with or without a
+     * credential word before; parts of longer words and numbers stay.
+     */
+    @Test
+    fun shortCredentials() {
+        val profile = """{"type":"shadowsocks","server":"$serverDomain","password":"12345","users":[{"id":"7"}],"transport":{"path":"/ws"}}"""
+        val secrets = ReportRedactor.secretValues(profile)
+        assertTrue(secrets.toString(), secrets.containsAll(listOf("12345", "7")))
+        assertFalse(secrets.contains("/ws"))
+        val r = ReportRedactor(ReportRedactor.serverNames(serverDomain, profile), emptyList(), secrets)
+        assertEquals("[Warn] authentication failed for credential <redacted>", r.redact("[Warn] authentication failed for credential 12345"))
+        assertEquals("[Info] port 123456 open, 12345ms", r.redact("[Info] port 123456 open, 12345ms"))
+        assertEquals("[Warn] password <redacted> rejected", r.redact("[Warn] password 7 rejected"))
+        assertEquals("[Warn] user=<redacted> ok, id: <redacted>", r.redact("[Warn] user=7 ok, id: 7"))
+        assertEquals("[Warn] authentication failed for <redacted>", r.redact("[Warn] authentication failed for 7"))
+        assertEquals("[Info] connected <redacted> times in 17 s", r.redact("[Info] connected 7 times in 17 s"))
+        assertEquals("[Info] 17 7ms v7 x7y 1.7 7.5 10.0.0.7", r.redact("[Info] 17 7ms v7 x7y 1.7 7.5 10.0.0.7"))
+        // A numeric credential in the profile JSON counts as well.
+        assertTrue(ReportRedactor.secretValues("""{"type":"socks","password":4321}""").contains("4321"))
+    }
+
+    /**
+     * A secret spelled like a URL scheme or a network prefix ("https", "tcp") must not hide the URL or the address from
+     * the later passes: the host is labelled, the credentials go, and the secret itself is masked at the end (review).
+     */
+    @Test
+    fun secretsSpelledLikeSchemes() {
+        val vpn = "vpn.example.net"
+        val profile = """{"type":"vless","server":"$vpn","password":"https","uuid":"tcp"}"""
+        val r = ReportRedactor(
+            ReportRedactor.serverNames(vpn, profile) + ReportRedactor.serverNames("fd00::1", "{}"),
+            emptyList(),
+            ReportRedactor.secretValues(profile),
+        )
+        val url = r.redact("[Info] GET https://user:https@$vpn/x failed")
+        assertEquals("[Info] GET <redacted>://<redacted>@<server-1>/<redacted> failed", url)
+        for (gone in listOf("https", "user", vpn)) assertFalse(url, url.contains(gone))
+        assertEquals("[Debug] dialing to <redacted>:<server-1>:443", r.redact("[Debug] dialing to tcp:$vpn:443"))
+        assertEquals("[Debug] dialing to <redacted>:<server-2>", r.redact("[Debug] dialing to tcp:fd00:0::1"))
+        assertEquals("[Debug] dialing to <redacted>:<ip>", r.redact("[Debug] dialing to tcp:2a00:1450::1"))
+        // Labels are never touched by the second pass, and an IP-like secret before ":" is still masked first.
+        val ipLike = ReportRedactor(emptyList(), emptyList(), listOf("pw-1.2.3.4"))
+        assertEquals("[Warn] bad <redacted>: denied", ipLike.redact("[Warn] bad pw-1.2.3.4: denied"))
+        // A dotted scheme (RFC 3986) before "://" is left for the URL pass as well (review).
+        val dotted = ReportRedactor(emptyList(), emptyList(), listOf("foo.bar"))
+        val dottedUrl = dotted.redact("GET foo.bar://unlisted.example.net/account/opaque-access-value")
+        assertEquals("GET <redacted>://<host-1>/<redacted>", dottedUrl)
+        for (gone in listOf("foo.bar", "unlisted", "opaque")) assertFalse(dottedUrl, dottedUrl.contains(gone))
+        // A secret that is no network word, masked first right before an address: the address is still recognized.
+        val before = ReportRedactor(ReportRedactor.serverNames("fd00::1", "{}"), emptyList(), listOf("pw-x"))
+        assertEquals("[Debug] via <redacted>:<server-1>", before.redact("[Debug] via pw-x:fd00:0::1"))
+    }
+
+    /**
+     * A secret that is part of a configured server name must not hide the name: all matchers see the same text, and
+     * the name (which contains the secret) wins; the secret alone is still masked (review).
+     */
+    @Test
+    fun secretInsideServerName() {
+        val server = "vpn-alpha.example.net"
+        val profile = """{"type":"trojan","server":"$server","password":"alpha","uuid":"example"}"""
+        val r = ReportRedactor(ReportRedactor.serverNames(server, profile), emptyList(), ReportRedactor.secretValues(profile))
+        assertEquals(
+            "[Debug] dialing to tcp:<server-1>:443, auth with <redacted> failed",
+            r.redact("[Debug] dialing to tcp:$server:443, auth with alpha failed"),
+        )
+        assertEquals("[Info] GET https://<server-1>/<redacted> for <redacted>", r.redact("[Info] GET https://$server/x for example"))
+        assertEquals("[Info] cdn <server-1> up", r.redact("[Info] cdn cdn.$server up"))
+    }
+
+    /**
+     * No early masking any more (review): a UUID secret that is the first label of a server name, and an IP-like
+     * secret used as a URL scheme, neither hide the name / URL — in free text and in JSON.
+     */
+    @Test
+    fun shapedSecretsInsideNamesAndSchemes() {
+        val server = "$uuid.customer-42.example.net"
+        val profile = """{"type":"vless","server":"$server","uuid":"$uuid","password":"pw-1.2.3.4"}"""
+        val r = ReportRedactor(ReportRedactor.serverNames(server, profile), emptyList(), ReportRedactor.secretValues(profile))
+        assertEquals("[Debug] dialing to tcp:<server-1>:443", r.redact("[Debug] dialing to tcp:$server:443"))
+        assertEquals("[Warn] bad uuid <redacted> for <server-1>", r.redact("[Warn] bad uuid $uuid for $server"))
+        val url = r.redact("GET pw-1.2.3.4://unlisted.example.net/account/opaque-access-value")
+        assertEquals("GET <redacted>://<host-1>/<redacted>", url)
+        val json = JSONObject(
+            r.redactJson("""{"note":"dial $server:443 via pw-1.2.3.4://unlisted.example.net/account/opaque-access-value"}"""),
+        )
+        assertEquals("dial <server-1>:443 via <redacted>://<host-1>/<redacted>", json.getString("note"))
+        for (out in listOf(url, json.toString())) {
+            for (gone in listOf(uuid, "customer-42", "pw-1", "1.2.3.4", "unlisted", "opaque")) assertFalse(out, out.contains(gone))
+        }
+    }
+
+    /**
+     * A known secret in the text a replacement keeps — a loopback host, a port, the top-level domain of a destination,
+     * a network prefix — is masked too; the labels stay whole, and loopback without a secret stays readable (review).
+     */
+    @Test
+    fun secretsInKeptText() {
+        val r = ReportRedactor(emptyList(), emptyList(), listOf("localhost", "com", "8443", "udp"))
+        assertEquals("[Info] GET http://<redacted>/<redacted>", r.redact("[Info] GET http://localhost/x"))
+        assertEquals(
+            "xray: [Info] [1] proxy/socks: TCP Connect request to tcp:<domain>.<redacted>:443",
+            r.redact("xray: [Info] [1] proxy/socks: TCP Connect request to tcp:www.example.com:443"),
+        )
+        assertEquals("GET https://<host-1>:<redacted>/<redacted>", r.redact("GET https://vpn.example.org:8443/x"))
+        assertEquals("dialing to <redacted>:<ip>", r.redact("dialing to udp:2a00:1450::1"))
+        // A pathless URL rebuilds to the same text: its kept host and scheme are still checked (review).
+        assertEquals("[Info] GET http://<redacted> ok", r.redact("[Info] GET http://localhost ok"))
+        val scheme = ReportRedactor(emptyList(), emptyList(), listOf("https"))
+        assertEquals("[Info] GET <redacted>://<host-1> ok", scheme.redact("[Info] GET https://example.net ok"))
+        val plain = ReportRedactor(emptyList(), emptyList())
+        assertEquals("[Info] GET http://localhost:9/<redacted>", plain.redact("[Info] GET http://localhost:9/x"))
+        assertEquals("[Info] GET http://localhost ok", plain.redact("[Info] GET http://localhost ok"))
+    }
+
+    /** Loopback is an address in 127/8, localhost or ::1 — not a host name that starts with "127." (review). */
+    @Test
+    fun loopbackIsAnAddress() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        assertEquals("GET http://<host-1>/<redacted>", r.redact("GET http://127.customer.example/support"))
+        assertEquals("GET http://127.0.0.1:9090/<redacted>", r.redact("GET http://127.0.0.1:9090/ui"))
+        assertEquals("GET http://<host-2>/<redacted>", r.redact("GET http://127.0.0.999/x"))
+    }
+
+    /** A configured IPv6 server in a spelling none of its listed forms has: compared by value in free text (review). */
+    @Test
+    fun ipv6ServerByValueInFreeText() {
+        val r = ReportRedactor(ReportRedactor.serverNames("fd00::1", "{}"), emptyList())
+        assertEquals("[Debug] dial tcp [<server-1>]:443: connection refused", r.redact("[Debug] dial tcp [fd00:0::1]:443: connection refused"))
+        assertEquals("[Debug] peer <server-1> up", r.redact("[Debug] peer FD00:0:0::0:1 up"))
+        // Unconfigured addresses, loopback and times stay.
+        assertEquals("[Debug] fe80::1 and ::1 at 12:30:45", r.redact("[Debug] fe80::1 and ::1 at 12:30:45"))
+        // After a network prefix (Xray: "dialing to tcp:…"), with and without brackets.
+        assertEquals("[Debug] dialing to tcp:<server-1>", r.redact("[Debug] dialing to tcp:fd00:0::1"))
+        assertEquals("[Debug] dialing to tcp:[<server-1>]:443", r.redact("[Debug] dialing to tcp:[fd00:0::1]:443"))
+        assertEquals("[Debug] sent to udp:<server-1>", r.redact("[Debug] sent to udp:FD00::0:1"))
+        // An address that starts with letters is not taken for a prefix.
+        val letters = ReportRedactor(ReportRedactor.serverNames("fdab:beef::1", "{}"), emptyList())
+        assertEquals("peer <server-1> and tcp:<server-1>", letters.redact("peer fdab:beef:0::1 and tcp:fdab:beef::0:1"))
+        // A public address after a prefix, which LogRedactor's IPv6 rule does not see there, is masked; a private one stays.
+        assertEquals("dialing to tcp:<ip> and udp:fe80::5", r.redact("dialing to tcp:2a00:1450::1 and udp:fe80::5"))
+        // An unconfigured private address is not split into a "prefix" and a public-looking rest.
+        assertEquals("peer fd00:1234::5 up", r.redact("peer fd00:1234::5 up"))
+        assertEquals("fd00::1", ReportRedactor.canonicalIpv6("fd00:0000:0::1"))
+        assertEquals("2001:db8::1:0:0:1", ReportRedactor.canonicalIpv6("2001:db8:0:0:1:0:0:1"))
+    }
+
+    /**
+     * Xray names the destinations of connections in its own words, which LogRedactor's destination lines miss (seen in
+     * the device archives): their domains are hidden as LogRedactor hides them; other lines keep their file names.
+     */
+    @Test
+    fun xrayDestinationLines() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        assertEquals(
+            "xray: [Info] [123] proxy/socks: TCP Connect request to tcp:<domain>.com:443",
+            r.redact("xray: [Info] [123] proxy/socks: TCP Connect request to tcp:www.example.com:443"),
+        )
+        assertEquals(
+            "xray: [Info] [123] app/dispatcher: taking detour [proxy] for [tcp:<domain>.net:443]",
+            r.redact("xray: [Info] [123] app/dispatcher: taking detour [proxy] for [tcp:testingcf.jsdelivr.net:443]"),
+        )
+        assertEquals(
+            "xray: [Info] [123] transport/internet/grpc: creating connection to tcp:<domain>.org:443",
+            r.redact("xray: [Info] [123] transport/internet/grpc: creating connection to tcp:cdn.site.org:443"),
+        )
+        assertEquals("xray: [Info] loaded geosite.dat", r.redact("xray: [Info] loaded geosite.dat"))
+    }
+
+    /** An IPv6 server in any spelling — compressed, full, zero-padded, with brackets and port (neighbouring case). */
+    @Test
+    fun ipv6ServerInAnySpelling() {
+        val names = ReportRedactor.serverNames("[fd00:0:0:0::1]:443", """{"type":"vless"}""")
+        val r = ReportRedactor(names, emptyList())
+        for (spelling in listOf("fd00::1", "fd00:0:0:0:0:0:0:1", "fd00:0000:0000:0000:0000:0000:0000:0001")) {
+            val out = r.redact("[Debug] dial tcp [$spelling]:443: connection refused")
+            assertEquals("[Debug] dial tcp [<server-1>]:443: connection refused", out)
+        }
+        assertEquals("http://<server-1>:8080/<redacted>", r.redact("http://[fd00:0::1]:8080/x"))
+        assertEquals(setOf("fd00::1", "fd00:0:0:0:0:0:0:1", "fd00:0000:0000:0000:0000:0000:0000:0001"), ReportRedactor.forms("fd00::1"))
+    }
+
+    /** An IDN server: the cores print punycode, the profile may hold Unicode, or the other way round (neighbouring case). */
+    @Test
+    fun idnServer() {
+        val r = ReportRedactor(ReportRedactor.serverNames("сервер.пример.рф", "{}"), emptyList())
+        val punycode = java.net.IDN.toASCII("сервер.пример.рф")
+        assertEquals("[Debug] dialing to tcp:<server-1>:443", r.redact("[Debug] dialing to tcp:$punycode:443"))
+        assertEquals("[Info] connect to <server-1>:443", r.redact("[Info] connect to СЕРВЕР.пример.рф:443"))
+        assertEquals("https://<server-1>/<redacted>", r.redact("https://$punycode/x"))
+        val fromPunycode = ReportRedactor(ReportRedactor.serverNames(punycode, "{}"), emptyList())
+        assertEquals("[Info] connect to <server-1>:443", fromPunycode.redact("[Info] connect to сервер.пример.рф:443"))
+    }
+
+    /** Servers written with their port, and endpoint lists (neighbouring case). */
+    @Test
+    fun serversWithPorts() {
+        val profile = """{"type":"wireguard","server":"vpn.example.org:8443","peers":[{"endpoint":"wg1.example.org:51820,wg2.example.org:51820"}]}"""
+        val names = ReportRedactor.serverNames("vpn.example.org:8443", profile)
+        assertEquals(setOf("vpn.example.org", "wg1.example.org", "wg2.example.org"), names)
+        val out = ReportRedactor(names, emptyList()).redact("[Info] peer wg2.example.org:51820 and vpn.example.org:8443")
+        assertEquals("[Info] peer <server-3>:51820 and <server-1>:8443", out)
+    }
+
+    @Test
+    fun escapedJsonIsCleanedAndStillParses() {
+        val line = redactor().redact(report[16])
+        assertEquals("<server-1>", JSONObject(line).getString("remote").substringAfter("https://").substringBefore('/'))
+    }
+
+    @Test
+    fun withoutServersTheLogRulesStillApply() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        val out = r.redact("[Info] url test: https://user:$password@$serverDomain/probe uuid $uuid")
+        assertFalse(out, out.contains(password))
+        assertFalse(out, out.contains(uuid))
+        assertFalse(out, out.contains(serverDomain))
+    }
+
+    @Test
+    fun aServerSwitchKeepsItsIdsAndADnsChangeHidesTheAddresses() {
+        // Batch 8: the fixes in report.txt name the setting before and after; a server is named by its id only.
+        val r = ReportRedactor(listOf(serverIp), emptyList())
+        val switched = r.redact("   fixed: switched to a working server (server was 67, now 21)")
+        assertTrue(switched, switched.contains("server was 67, now 21"))
+        val line = "   fixed: direct DNS changed to a whitelisted one (direct DNS was $serverIp, now 77.88.8.8)"
+        val dns = r.redact(line)
+        assertFalse(dns, dns.contains(serverIp))
+        assertFalse(dns, dns.contains("77.88.8.8"))
+        assertTrue(dns, dns.contains("direct DNS was "))
+        // The public IPs go by the log rules alone, without any server known.
+        val plain = ReportRedactor(emptyList(), emptyList()).redact(line)
+        assertFalse(plain, plain.contains(serverIp))
+        assertFalse(plain, plain.contains("77.88.8.8"))
+        assertTrue(plain, plain.contains("direct DNS was "))
+    }
+
+    @Test
+    fun serverNamesOfAProfile() {
+        val names = ReportRedactor.serverNames(serverDomain, profile)
+        assertEquals(setOf(serverDomain, sni), names)
+        assertEquals(
+            setOf("2001:db8::7", "wg.example.org"),
+            ReportRedactor.serverNames(
+                "[2001:db8::7]:51820",
+                """{"type":"wireguard","peers":[{"endpoint":"wg.example.org:51820"}],"address":"none"}""",
+            ),
+        )
+    }
+
+    /** A DNS tunnel keeps its server under "domain" (no "server"): it is a server name all the same (opus-loop S1). */
+    @Test
+    fun dnsTunnelServer() {
+        val profile = """{"type":"dnstt","server":"","domain":"t.tunnel-b9.example","public_key":"abc"}"""
+        assertEquals(setOf("t.tunnel-b9.example"), ReportRedactor.serverNames("", profile))
+        val r = ReportRedactor(ReportRedactor.serverNames("", profile), emptyList())
+        val config = r.redactJson("""{"outbounds":[{"type":"dnstt","domain":"t.tunnel-b9.example"}],"dns":{"rules":[{"domain_suffix":["t.tunnel-b9.example"]}]}}""")
+        assertFalse(config, config.contains("tunnel-b9"))
+        assertTrue(config, config.contains("<server-1>"))
+    }
+
+    /**
+     * A destination word that is itself a known secret ("lookup", "connection") is masked first, so LogRedactor would
+     * not see the line as a destination line any more: its domains are hidden by the report's pass, decided on the
+     * original line, in any case (review).
+     */
+    @Test
+    fun destinationLinesWithSecretWords() {
+        val lookup = ReportRedactor(emptyList(), emptyList(), listOf("lookup"))
+        assertEquals("[Debug] <redacted> <domain>.example", lookup.redact("[Debug] lookup www.customer.example"))
+        val connection = ReportRedactor(emptyList(), emptyList(), listOf("connection"))
+        assertEquals("[Info] <redacted> to <domain>.org:443", connection.redact("[Info] connection to shop.example.org:443"))
+        val plain = ReportRedactor(emptyList(), emptyList())
+        assertEquals(
+            "xray: [Info] [1] proxy/socks: TCP Connect request to tcp:<domain>.COM:443",
+            plain.redact("xray: [Info] [1] proxy/socks: TCP Connect request to tcp:WWW.EXAMPLE.COM:443"),
+        )
+        assertEquals("[Debug] dns: lookup <domain>.NET failed", plain.redact("[Debug] dns: lookup Mixed.Example.NET failed"))
+    }
+
+    /** A scoped IPv6 URL host ("[fe80::1%25wlan0]") is labelled whole; a configured address keeps its label (review). */
+    @Test
+    fun scopedIpv6Hosts() {
+        val plain = ReportRedactor(emptyList(), emptyList())
+        assertEquals("GET http://<host-1>/<redacted>", plain.redact("GET http://[fe80::1%25wlan0]/status"))
+        // The same address without its zone has the same label (opus-loop S2).
+        assertEquals("GET http://<host-1>/<redacted>", plain.redact("GET http://[fe80::1]/other"))
+        // Only a bracketed host has a zone: "%" in a name is part of it, never a way to look like loopback (opus-loop S1).
+        assertEquals("GET http://<host-2>/<redacted>", plain.redact("GET http://localhost%2Eevil.com/x"))
+        assertEquals("GET http://<host-3>/<redacted>", plain.redact("GET http://127.0.0.1%40evil.com/x"))
+        val configured = ReportRedactor(ReportRedactor.serverNames("fe80::1", "{}"), emptyList())
+        assertEquals("GET http://<server-1>:8080/<redacted>", configured.redact("GET http://[fe80::1%25wlan0]:8080/status"))
+        // Without brackets after a network prefix the address is labelled; the zone (an interface name) stays.
+        assertEquals("dialing to tcp:<server-1>%wlan0:443", configured.redact("dialing to tcp:fe80::1%wlan0:443"))
+    }
+
+    /** A Unicode subdomain of a configured server names the server too (review). */
+    @Test
+    fun unicodeSubdomainOfServer() {
+        val r = ReportRedactor(listOf("vpn.example.net"), emptyList())
+        assertEquals("[Info] handshake with <server-1> failed", r.redact("[Info] handshake with узел.vpn.example.net failed"))
+        assertEquals("[Debug] dial tcp <server-1>:443", r.redact("[Debug] dial tcp УЗЕЛ.cdn.vpn.example.net:443"))
+    }
+
+    /** Every spelling of one IPv6 host — zoned, upper case, expanded — shares one label (review). */
+    @Test
+    fun ipv6HostLabelByAddress() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        for (url in listOf("http://[fe80:0::1%25eth0]/a", "http://[FE80::1]/b", "http://[fe80:0:0:0:0:0:0:1]:8080/c")) {
+            assertTrue(url, r.redact("GET $url").startsWith("GET http://<host-1>"))
+        }
+    }
+
+    @Test
+    fun normalize() {
+        assertEquals("vpn.example.com", ReportRedactor.normalize("VPN.Example.com.:443"))
+        assertEquals("2001:db8::1", ReportRedactor.normalize("[2001:db8::1]:443"))
+        assertEquals("10.0.0.1", ReportRedactor.normalize("10.0.0.1/32"))
+        assertEquals("sub.example.com", ReportRedactor.normalize("https://u:p@sub.example.com:8443/x?y"))
+        assertEquals(null, ReportRedactor.normalize("ws"))
+        assertEquals(null, ReportRedactor.normalize("0.0.0.0"))
+    }
+}

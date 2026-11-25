@@ -3,10 +3,11 @@ package io.nekohasekai.sagernet.simple
 import android.os.SystemClock
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.regime.NetworkRegimeWatcher
 
 /**
  * Calls from the service in `:bg` (design.md D2, touch point 6 in `bg/BaseService.kt`). Batch 2 keeps the start of
- * the connection for the home screen's timer; the network watcher of later batches starts and stops here too.
+ * the connection for the home screen's timer; batch 6 starts and stops the network watcher (NetworkRegimeWatcher) here.
  *
  * State the UI process reads lives in DataStore keys with the `simple_` prefix (design.md D3), never in AIDL.
  */
@@ -33,6 +34,7 @@ object SimpleHooks {
         restarting = false
         DataStore.configurationStore.putLong(KEY_CONNECTED_SINCE, since)
         countStart()
+        NetworkRegimeWatcher.serviceStarted()
     }
 
     /**
@@ -46,6 +48,7 @@ object SimpleHooks {
         // The new core of a restart reads its settings after this, before it reports Connected: counting it here
         // already lets an app list edit see that the core may have taken the edit's staged per-app keys.
         if (restart) countStart()
+        if (!restart) NetworkRegimeWatcher.serviceStopped()
     }
 
     private fun countStart() {

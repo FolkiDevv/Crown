@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.service.quicksettings.TileService
+import io.nekohasekai.sagernet.simple.settings.ClassicVisit
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.utils.PlatformNotifications
 
@@ -26,21 +27,25 @@ object SimpleUi {
     const val INSTALL_FRESH = "fresh"
     const val INSTALL_UPGRADE = "upgrade"
 
+    /** The one hint after an upgrade, on the way back to the classic interface, was closed (simple-ui spec). */
+    const val KEY_CLASSIC_HINT_CLOSED = "classic_hint_closed"
+
+    /** «Расширенный режим» of the simple settings: links to the classic screens. */
+    const val KEY_ADVANCED = "advanced_mode"
+
     /** An intent extra that keeps [MainActivity] open whatever is chosen (screens of the advanced mode). */
     const val EXTRA_OPEN_CLASSIC = "io.nekohasekai.sagernet.simple.OPEN_CLASSIC"
 
     /**
-     * Intents only the classic interface handles for now: the tile's long press, file/link imports, shares, the QR
-     * scanner's texts and the Wi-Fi permission flow. They stay in [MainActivity] until the simple UI handles them.
+     * Intents only the classic interface handles: the tile's long press and the Wi-Fi permission flow. Links, files,
+     * shares and the QR scanner's texts ([MainActivity.EXTRA_IMPORT_TEXTS]) go to the simple UI's add flow since
+     * batch 4; a backup it recognises comes back here as a VIEW carrying [EXTRA_OPEN_CLASSIC].
      */
     private val CLASSIC_ACTIONS = setOf(
         TileService.ACTION_QS_TILE_PREFERENCES,
-        Intent.ACTION_VIEW,
-        Intent.ACTION_SEND,
     )
     private val CLASSIC_EXTRAS = setOf(
         EXTRA_OPEN_CLASSIC,
-        MainActivity.EXTRA_IMPORT_TEXTS,
         PlatformNotifications.EXTRA_WIFI_PERMISSION,
     )
 
@@ -79,6 +84,19 @@ object SimpleUi {
         return upgrade
     }
 
+    /**
+     * The hint on the way back to the classic interface shows after an upgrade from a version without the simple UI
+     * ([isUpgrade]), never on a fresh install, until it is closed once.
+     */
+    fun showsClassicHint(store: Store, upgrade: Boolean): Boolean =
+        upgrade && !store.getBoolean(KEY_CLASSIC_HINT_CLOSED, false)
+
+    fun closeClassicHint(store: Store) = store.putBoolean(KEY_CLASSIC_HINT_CLOSED, true)
+
+    fun isAdvanced(store: Store): Boolean = store.getBoolean(KEY_ADVANCED, false)
+
+    fun setAdvanced(store: Store, on: Boolean) = store.putBoolean(KEY_ADVANCED, on)
+
     /** Whether an intent must stay in the classic interface (see [CLASSIC_ACTIONS], [CLASSIC_EXTRAS]). */
     fun opensClassic(action: String?, extraKeys: Set<String>): Boolean =
         action in CLASSIC_ACTIONS || extraKeys.any { it in CLASSIC_EXTRAS }
@@ -95,7 +113,11 @@ object SimpleUi {
         val store = store(activity)
         recordInstallKind(activity, store)
         val extras = intent?.extras?.keySet().orEmpty()
-        if (!shouldRedirect(store, intent?.action, extras)) return false
+        if (!shouldRedirect(store, intent?.action, extras)) {
+            // A classic screen opened from the simple settings: show it, and back returns to the simple interface.
+            ClassicVisit.attach(activity, intent)
+            return false
+        }
         activity.startActivity(simpleIntent(activity, intent))
         activity.finish()
         noTransition(activity)
@@ -130,11 +152,16 @@ object SimpleUi {
         val intent = Intent(context, SimpleActivity::class.java)
         if (source != null) {
             intent.action = source.action
-            intent.data = source.data
+            intent.setDataAndType(source.data, source.type)
             source.extras?.let { intent.putExtras(it) }
+            // A shared or opened file: MainActivity's read grant goes on with the Uri (SEND keeps it in clipData).
+            intent.clipData = source.clipData
+            intent.addFlags(source.flags and URI_GRANTS)
         }
         return intent
     }
+
+    private const val URI_GRANTS = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
 
     @Suppress("DEPRECATION")
     private fun noTransition(activity: Activity) = activity.overridePendingTransition(0, 0)

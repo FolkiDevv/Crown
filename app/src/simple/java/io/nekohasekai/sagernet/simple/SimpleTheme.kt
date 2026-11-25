@@ -2,14 +2,20 @@ package io.nekohasekai.sagernet.simple
 
 import android.app.Activity
 import android.os.Build
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material.ripple.RippleAlpha
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RippleConfiguration
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -79,6 +85,7 @@ private val DarkColors: ColorScheme = darkColorScheme(
     surfaceContainerHighest = Color(0xFF3C3235),
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SimpleTheme(content: @Composable () -> Unit) {
     val systemDark = isSystemInDarkTheme()
@@ -98,5 +105,19 @@ fun SimpleTheme(content: @Composable () -> Unit) {
             isAppearanceLightNavigationBars = !dark
         }
     }
-    MaterialTheme(colorScheme = colors, content = content)
+    MaterialTheme(colorScheme = colors) {
+        // D-pad and keyboard (Android TV): rows show a ring while focused, every ripple a clearer focus layer (Focus.kt).
+        CompositionLocalProvider(
+            LocalIndication provides FocusRingIndication,
+            LocalFocusRingColor provides colors.primary,
+            LocalRippleConfiguration provides FocusRipple,
+            content = content,
+        )
+    }
 }
+
+/** Material's ripple alphas with a stronger focused layer (Material: 0.1), visible from a sofa. */
+@OptIn(ExperimentalMaterial3Api::class)
+private val FocusRipple = RippleConfiguration(
+    rippleAlpha = RippleAlpha(draggedAlpha = 0.16f, focusedAlpha = 0.2f, hoveredAlpha = 0.08f, pressedAlpha = 0.1f),
+)
