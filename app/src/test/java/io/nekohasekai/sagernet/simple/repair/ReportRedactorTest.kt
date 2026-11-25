@@ -594,6 +594,11 @@ class ReportRedactorTest {
     fun scopedIpv6Hosts() {
         val plain = ReportRedactor(emptyList(), emptyList())
         assertEquals("GET http://<host-1>/<redacted>", plain.redact("GET http://[fe80::1%25wlan0]/status"))
+        // The same address without its zone has the same label (opus-loop S2).
+        assertEquals("GET http://<host-1>/<redacted>", plain.redact("GET http://[fe80::1]/other"))
+        // Only a bracketed host has a zone: "%" in a name is part of it, never a way to look like loopback (opus-loop S1).
+        assertEquals("GET http://<host-2>/<redacted>", plain.redact("GET http://localhost%2Eevil.com/x"))
+        assertEquals("GET http://<host-3>/<redacted>", plain.redact("GET http://127.0.0.1%40evil.com/x"))
         val configured = ReportRedactor(ReportRedactor.serverNames("fe80::1", "{}"), emptyList())
         assertEquals("GET http://<server-1>:8080/<redacted>", configured.redact("GET http://[fe80::1%25wlan0]:8080/status"))
         // Without brackets after a network prefix the address is labelled; the zone (an interface name) stays.

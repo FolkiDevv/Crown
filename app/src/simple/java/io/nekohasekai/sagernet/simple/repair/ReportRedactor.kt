@@ -292,14 +292,15 @@ class ReportRedactor(
     private fun labelFor(host: String): String {
         val name = normalize(host) ?: host.trim().removePrefix("[").removeSuffix("]").trimEnd('.').lowercase()
         if (name.isEmpty()) return host
-        // A scoped IPv6 address ("fe80::1%25wlan0") is that address for the lookups; the whole host gets the label.
-        val address = name.substringBefore('%')
+        // A scoped IPv6 address ("[fe80::1%25wlan0]") is that address for the lookups and the label; the whole host gets
+        // the label. Only a bracketed host has a zone: elsewhere "%" is part of the name ("localhost%2Eevil.com").
+        val address = if (host.trim().startsWith("[")) name.substringBefore('%') else name
         // A configured server keeps its label even on loopback; another spelling of a known address or name (IPv6
         // written otherwise, punycode) has its label already.
         labels[address]?.let { return it }
         forms(address).firstNotNullOfOrNull { labels[it] }?.let { return it }
         if (isLoopback(address)) return host
-        return labels.getOrPut(name) { "<host-${++hosts}>" }
+        return labels.getOrPut(address) { "<host-${++hosts}>" }
     }
 
     companion object {
