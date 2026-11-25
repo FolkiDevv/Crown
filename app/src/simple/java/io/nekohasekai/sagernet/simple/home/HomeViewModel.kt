@@ -211,7 +211,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
 
     /** `:bg` stored a network check's result, or the physical network changed: the warning is read again. */
     private val zoneReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) = refreshZone()
+        override fun onReceive(context: Context, intent: Intent) {
+            // `:bg` names its physical network, which this process may learn of only later.
+            if (intent.hasExtra(WhitelistZoneState.EXTRA_NETWORK)) {
+                val network = intent.getLongExtra(WhitelistZoneState.EXTRA_NETWORK, WhitelistZoneState.NO_NETWORK)
+                refreshZone { network.takeIf { it != WhitelistZoneState.NO_NETWORK } }
+            } else {
+                refreshZone()
+            }
+        }
     }
 
     init {
@@ -384,12 +392,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     /** Reads again whether the whitelist card shows (the mode, the server, the network check and its network). */
-    private fun refreshZone() {
+    private fun refreshZone(network: () -> Long? = RegimeStore::currentNetwork) {
         zoneJob?.cancel()
         zoneJob = viewModelScope.launch {
             val read = withContext(Dispatchers.IO) {
                 try {
-                    WhitelistZoneState.warning(RegimeStore.currentNetwork())
+                    WhitelistZoneState.warning(network())
                 } catch (e: Exception) {
                     Logs.w(e)
                     null

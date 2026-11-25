@@ -54,6 +54,9 @@ object NetworkRegimeWatcher {
     /** The simple UI asks for a check (the user chose «Авто»); only a running watcher hears it. */
     private const val ACTION_CHECK = "io.nekohasekai.sagernet.simple.CHECK_REGIME"
 
+    /** The user left the configuration for whitelists (UI process): the repeating notification ends now. */
+    private const val ACTION_WARNING_OFF = "io.nekohasekai.sagernet.simple.WHITELIST_ZONE_OFF"
+
     /** The check in a mobile network repeats this often. */
     private const val MOBILE_INTERVAL_MS = 15 * 60_000L
 
@@ -108,7 +111,8 @@ object NetworkRegimeWatcher {
         session = started
         Logs.i("simple regime: watcher started with the VPN")
         started.receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) = onCheckRequested(started)
+            override fun onReceive(context: Context, intent: Intent) =
+                if (intent.action == ACTION_WARNING_OFF) onWarningOff(started) else onCheckRequested(started)
         }.also { register(it) }
         val monitor = PhysicalNetworkMonitor { onNetwork(started, it) }
         if (monitor.start()) {
@@ -190,6 +194,14 @@ object NetworkRegimeWatcher {
         context.sendBroadcast(Intent(ACTION_CHECK).setPackage(context.packageName))
     }
 
+    /**
+     * The user left the configuration for whitelists (UI process): a running watcher stops repeating the notification,
+     * so a configuration for whitelists chosen again soon after warns at once.
+     */
+    fun warningOff(context: Context) {
+        context.sendBroadcast(Intent(ACTION_WARNING_OFF).setPackage(context.packageName))
+    }
+
     // ------------------------------------------------------------------------------------------------ events
 
     /** The monitor's (or DefaultNetworkListener's) thread: a new physical network, the same one again, or none. */
@@ -200,7 +212,7 @@ object NetworkRegimeWatcher {
         owner.network = network
         // The warning was about the network before; the new one's check brings it back if it is found without whitelists.
         stopWarning(owner)
-        WhitelistZoneState.changed(app)
+        WhitelistZoneState.changed(app, network?.networkHandle, fromWatcher = true)
         if (network == null) {
             gate.invalidate()
             owner.check?.cancel()
@@ -217,6 +229,10 @@ object NetworkRegimeWatcher {
             runCatching { RegimeStore.writeNetworkSince(handle, seenAt) }.onFailure { Logs.w(it) }
         }
         start(owner, network, reason)
+    }
+
+    private fun onWarningOff(owner: Session) = synchronized(lock) {
+        if (session === owner) stopWarning(owner)
     }
 
     private fun onCheckRequested(owner: Session) = synchronized(lock) {
@@ -301,7 +317,7 @@ object NetworkRegimeWatcher {
                 ProbeGate.Verdict.ACCEPTED -> {
                     Logs.i("simple regime: $tag: ${regime.key} applied (service change: ${change.name.lowercase()})")
                     updateWarning(owner, ticket.network)
-                    WhitelistZoneState.changed(app)
+                    WhitelistZoneState.changed(app, ticket.network, fromWatcher = true)
                 }
 
                 ProbeGate.Verdict.SUPERSEDED ->
@@ -432,7 +448,7 @@ object NetworkRegimeWatcher {
     }
 
     private fun register(receiver: BroadcastReceiver) {
-        val filter = IntentFilter(ACTION_CHECK)
+        val filter = IntentFilter(ACTION_CHECK).apply { addAction(ACTION_WARNING_OFF) }
         val permission = "${app.packageName}.SERVICE"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             app.registerReceiver(receiver, filter, permission, null, Context.RECEIVER_NOT_EXPORTED)

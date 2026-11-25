@@ -62,6 +62,7 @@ object WhitelistZoneState {
             Logs.w(e)
         }
         WhitelistZoneNotifications.cancel(context)
+        NetworkRegimeWatcher.warningOff(context)
         changed(context)
     }
 
@@ -76,8 +77,9 @@ object WhitelistZoneState {
                 TrafficModeApplier.select(context, TrafficMode.AUTO)
             }
             if (selectedWhitelistServer()) {
+                // The selector may have been deleted in the classic interface and not made again yet.
                 val auto = TrafficModes.managedIds().auto
-                if (auto > 0L) TrafficModeApplier.selectServer(auto)
+                if (ProfileManager.getProfile(auto) != null) TrafficModeApplier.selectServer(auto)
             }
             use() == null
         } catch (e: Exception) {
@@ -103,11 +105,23 @@ object WhitelistZoneState {
             null
         }
         if (use != null || check) NetworkRegimeWatcher.requestCheck(context)
-        if (use == null) WhitelistZoneNotifications.cancel(context)
+        if (use == null) {
+            WhitelistZoneNotifications.cancel(context)
+            NetworkRegimeWatcher.warningOff(context)
+        }
     }
 
-    /** Tells the home screen to read the warning again. */
-    fun changed(context: Context) {
-        context.sendBroadcast(Intent(ACTION_CHANGED).setPackage(context.packageName), "${context.packageName}.SERVICE")
+    /** [ACTION_CHANGED] from `:bg`: the physical network the watcher is in, [NO_NETWORK] for none. */
+    const val EXTRA_NETWORK = "network"
+    const val NO_NETWORK = 0L
+
+    /**
+     * Tells the home screen to read the warning again. `:bg` passes its physical network ([fromWatcher]): the UI
+     * process learns of a new network on its own, maybe only after this arrives.
+     */
+    fun changed(context: Context, network: Long? = null, fromWatcher: Boolean = false) {
+        val intent = Intent(ACTION_CHANGED).setPackage(context.packageName)
+        if (fromWatcher) intent.putExtra(EXTRA_NETWORK, network ?: NO_NETWORK)
+        context.sendBroadcast(intent, "${context.packageName}.SERVICE")
     }
 }
