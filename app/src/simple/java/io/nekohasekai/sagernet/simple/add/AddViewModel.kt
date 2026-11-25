@@ -107,7 +107,7 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The QR scanner's texts (one per code): share links together, subscriptions and documents one by one. */
     fun importTexts(texts: List<String>) {
-        val payloads = texts.map { it.trim() }.filter { it.isNotEmpty() }
+        val payloads = texts.map { CrownLinks.toThrone(it).trim() }.filter { it.isNotEmpty() }
         if (payloads.size <= 1) return importText(payloads.firstOrNull())
         viewModelScope.launch {
             imports.withLock {

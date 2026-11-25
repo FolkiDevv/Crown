@@ -174,6 +174,11 @@
 - [x] 15.4 После слияния #19 (кнопка «Проверить обновления» последним пунктом «Общих»): группа «Обновления» (`simple_updates_header`) встаёт после «Общих» и перед экранами расширенного режима; в ней «Проверить обновления» — всегда (только сборки с встроенным обновлением, как в #19), переключатели 15.2 — под ней и только в расширенном режиме. Требование «Короткие настройки» без группы, для неё — отдельное «Группа «Обновления» в настройках». Проверка: устройство — без расширенного режима в группе только кнопка, с ним — кнопка и оба переключателя выше экранов классики; кнопка открывает проверку; `openspec validate --strict`, `i18n_coverage.py --scope simple` — код 0
   - Результат (2026-11-25, c3cde21f на 36199c38, эмулятор 5556, чистая установка `1.0.0`): без расширенного режима после «Общих» — группа «Обновления» с одним пунктом «Проверить обновления»; с ним — «Проверить обновления», «Проверять обновления ежедневно» (вкл) и «Предварительные версии» (выкл), затем «Экраны классического интерфейса». Нажатие на кнопку открывает диалог проверки («Throne is up to date», канал stable). Локально `app:testOssDebugUnitTest` 350/350; `openspec validate --strict` — valid, `i18n_coverage.py --scope simple` — 0, `upstream_touch_points.py` — вне списка 0. Скриншоты `12-updates-group-advanced-off.png`, `13-updates-group-advanced-on.png`.
 
+## 16. Ссылки crown://
+
+- [ ] 16.1 `simple.add.CrownLinks.toThrone`: `crown://addsub?url=…&name=…`, `crown://addsub/<URL>[#имя]`, `crown://install-config?url=…` → `clash://install-config?url=…&name=…`; прочие `crown://<команда>/…` → `throne://<команда>/…`. Подключение: фильтр `crown` на `MainActivity` (точка D2 3), `ACTION_VIEW` в `MainActivity` (точка D2 5), `SubscribeFlows.importText/importTexts` (новая точка Crown), `SimpleImport.plan` и `AddViewModel.importTexts`. JVM-тест `CrownLinksTest`; `openspec validate --strict`, `upstream_touch_points.py`.
+- [ ] 16.2 Устройство: ссылки `crown://addsub?url=…`, `crown://addsub/<URL>`, `crown://addsub/<base64>`, `crown://add/<base64>` открыты через `am start -a VIEW` в новом и классическом интерфейсе — предложено добавить подписку / сервер.
+
 ## Workflow follow-up
 
 - После приёмки — архивировать изменение (`openspec archive simple-ui-redesign`) и убедиться, что дельты перенесены в основные спецификации `openspec/specs/`.

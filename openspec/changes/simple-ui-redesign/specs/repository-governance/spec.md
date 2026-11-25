@@ -34,3 +34,14 @@
 #### Scenario: Выбор пользователя
 - **WHEN** пользователь выключил ежедневную проверку или beta-версии
 - **THEN** после перезапуска и обновления приложения значение остаётся выключенным
+
+### Requirement: Ссылки crown://
+Crown MUST принимать ссылки `crown://` из браузера, других приложений, буфера обмена и QR-кода в обоих интерфейсах. Подписку MUST добавлять `crown://addsub?url=<URL>&name=<имя>` (URL можно не кодировать), `crown://addsub/<URL>[#имя]` и `crown://install-config?url=…`; остальные `crown://<команда>/…` MUST работать как `throne://<команда>/…`. Правки upstream MUST ограничиваться точками D2 и `FORK_IDENTITY_POINTS`.
+
+#### Scenario: Подписка со страницы панели
+- **WHEN** на странице подписки нажата ссылка `crown://addsub?url=https://sub.example.com/abc&name=My%20VPN`
+- **THEN** открывается Crown и предлагает добавить подписку `https://sub.example.com/abc` с именем «My VPN»
+
+#### Scenario: Ссылка Throne под схемой Crown
+- **WHEN** открыта ссылка `crown://add/<base64>` или `crown://route/…`
+- **THEN** Crown обрабатывает её так же, как `throne://add/<base64>` или `throne://route/…`

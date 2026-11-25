@@ -62,6 +62,20 @@ Release plan также падает, если `versionCode` новой сбор
 
 Без секретов workflow Release падает. Сменить ключ после первой установки нельзя: Android не примет обновление с другой подписью, и встроенный механизм обновления тоже его отклонит. Храните keystore и пароли в резервной копии.
 
+## Ссылки crown://
+
+Crown открывается ссылками `crown://` из браузера и других приложений; их же можно вставить из буфера обмена или отсканировать QR-кодом.
+
+| Ссылка | Что делает |
+|---|---|
+| `crown://addsub?url=<URL>&name=<имя>` | добавить подписку; URL можно не кодировать, если в нём нет `&` и `#` |
+| `crown://addsub/<URL>` или `crown://addsub/<URL>#<имя>` | то же, URL целиком (с `?` и `&`) после `addsub/` |
+| `crown://install-config?url=<URL>&name=<имя>` | то же в написании clash |
+| `crown://addsub/<base64 строки "URL#имя">` | как `throne://addsub/…` |
+| `crown://add/…`, `crown://route/…`, `crown://remoteroute/…` | как одноимённые `throne://` |
+
+Remnawave (Subpage Builder): кнопка `subscriptionLink` со ссылкой `crown://addsub?url={{SUBSCRIPTION_LINK}}&name=My%20VPN` или `crown://addsub/{{SUBSCRIPTION_LINK}}`. Приложение всегда спрашивает подтверждение перед добавлением.
+
 ## Слияние upstream
 
 Как обычная фича: ветка от `develop`, merge upstream в неё, pull request в `develop`.
