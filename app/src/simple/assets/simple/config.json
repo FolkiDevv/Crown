@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "probes": {
     "allowed": [
       "https://ya.ru/",
@@ -26,7 +26,8 @@
     "whitelist",
     "white list",
     "WL",
-    "LTE"
+    "LTE",
+    "Обход"
   ],
   "timeHosts": [
     "ya.ru",
