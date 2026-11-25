@@ -7,7 +7,7 @@ Crown — форк ThroneForAndroid со своим идентификаторо
 - `fork.properties` — идентификатор, версия (`VERSION_NAME`), репозиторий обновлений, файл истории изменений, имя APK.
 - `nb4a.properties` — как в upstream: ядро (`THRONE_CORE_REF`) и версия Throne, на которой основана сборка. Не редактировать.
 - `CROWN_CHANGELOG.md` — заметки к релизам, разделы `#### <версия>`, новые сверху.
-- `app/src/oss/res/` — название приложения: Crown / Корона.
+- `app/src/oss/res/` — название приложения (Crown / Корона) и значки Crown: значок приложения (`mipmap-anydpi-v26/ic_launcher.xml` со слоями `drawable/crown_launcher_*.xml`, для Android 7 — `mipmap-*dpi/ic_launcher.png`), значок плитки быстрых настроек и строки состояния (`drawable/ic_throne_tile.xml`), баннер Android TV (`drawable-xhdpi/tv_banner.png`). Ресурсы с именами из `src/main` переопределяют их для сборки, файлы upstream не меняются.
 
 `versionCode` вычисляется из версии: `((MAJOR·100 + MINOR)·100 + PATCH)·1000 + N`, где N = 999 у релиза и 1..998 у preview.
 
