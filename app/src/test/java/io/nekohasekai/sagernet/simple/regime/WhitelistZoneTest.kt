@@ -34,36 +34,29 @@ class WhitelistZoneTest {
 
     @Test
     fun warnsInANetworkFoundWithoutWhitelists() {
-        assertTrue(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NORMAL, wifi), wifi, keptNetwork = null))
-        assertTrue(WhitelistZone.warns(Use.SERVER, RegimeRecord(Regime.NORMAL, mobile), mobile, keptNetwork = wifi))
+        assertTrue(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NORMAL, wifi), wifi))
+        assertTrue(WhitelistZone.warns(Use.SERVER, RegimeRecord(Regime.NORMAL, mobile), mobile))
     }
 
     @Test
     fun noWarningWhereWhitelistsAreOrNothingIsKnown() {
         // Whitelists found: the configuration is right.
-        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.WHITELIST, mobile), mobile, null))
+        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.WHITELIST, mobile), mobile))
         // No internet says nothing about whitelists (and is never stored), a network not checked yet neither.
-        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NO_INTERNET, mobile), mobile, null))
-        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(null, mobile), mobile, null))
-        assertFalse(WhitelistZone.warns(Use.MODE, null, mobile, null))
+        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NO_INTERNET, mobile), mobile))
+        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(null, mobile), mobile))
+        assertFalse(WhitelistZone.warns(Use.MODE, null, mobile))
     }
 
     /** The result of the Wi-Fi network says nothing once the device is in the mobile one (or in none). */
     @Test
     fun resultOfAnotherNetworkDoesNotWarn() {
-        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NORMAL, wifi), mobile, null))
-        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NORMAL, wifi), null, null))
+        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NORMAL, wifi), mobile))
+        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NORMAL, wifi), null))
     }
 
     @Test
     fun noConfigurationForWhitelistsNoWarning() {
-        assertFalse(WhitelistZone.warns(null, RegimeRecord(Regime.NORMAL, wifi), wifi, null))
-    }
-
-    /** «Не напоминать» keeps the configuration in that network only. */
-    @Test
-    fun keptNetworkWarnsNoMore() {
-        assertFalse(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NORMAL, wifi), wifi, keptNetwork = wifi))
-        assertTrue(WhitelistZone.warns(Use.MODE, RegimeRecord(Regime.NORMAL, mobile), mobile, keptNetwork = wifi))
+        assertFalse(WhitelistZone.warns(null, RegimeRecord(Regime.NORMAL, wifi), wifi))
     }
 }

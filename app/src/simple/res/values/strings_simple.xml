@@ -283,8 +283,8 @@
     <string name="simple_wl_zone_title">You are outside the whitelist zone</string>
     <string name="simple_wl_zone_text_mode">This network opens any site, but the Whitelists mode is on. Auto turns the whitelists on by itself when they are needed.</string>
     <string name="simple_wl_zone_text_server">This network opens any site, but a server for whitelists is chosen. Auto picks one by itself when whitelists are needed.</string>
-    <string name="simple_wl_zone_switch">Switch to Auto</string>
-    <string name="simple_wl_zone_keep">Don\'t remind</string>
+    <string name="simple_wl_zone_auto">Switch to Auto</string>
+    <string name="simple_wl_zone_smart">Switch to Smart</string>
     <string name="simple_wl_zone_channel">Whitelists</string>
     <string name="simple_wl_zone_channel_description">A whitelist setup is in use in a network without whitelists</string>
 

@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.modes.TrafficMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -60,8 +61,9 @@ object WhitelistZoneNotifications {
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)
             .setContentIntent(open)
-            .addAction(0, context.getString(R.string.simple_wl_zone_switch), action(context, WhitelistZoneReceiver.ACTION_LEAVE))
-            .addAction(0, context.getString(R.string.simple_wl_zone_keep), action(context, WhitelistZoneReceiver.ACTION_KEEP))
+            // «Авто» first: it is the recommended one (it turns the whitelists on by itself where they are).
+            .addAction(0, context.getString(R.string.simple_wl_zone_auto), action(context, WhitelistZoneReceiver.ACTION_AUTO))
+            .addAction(0, context.getString(R.string.simple_wl_zone_smart), action(context, WhitelistZoneReceiver.ACTION_SMART))
         try {
             NotificationManagerCompat.from(context).notify(ID, builder.build())
         } catch (e: Exception) {
@@ -88,14 +90,18 @@ class WhitelistZoneReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
-        if (action != ACTION_LEAVE && action != ACTION_KEEP) return
+        val mode = when (action) {
+            ACTION_AUTO -> TrafficMode.AUTO
+            ACTION_SMART -> TrafficMode.SMART
+            else -> return
+        }
         val app = context.applicationContext
         val pending = goAsync()
         GlobalScope.launch(Dispatchers.IO) {
             try {
                 // A server for whitelists without an «Авто» selector to take over stays, and so does the notification:
                 // a tap on it opens the app, where the server list is (Android lets no receiver open it from here).
-                if (action == ACTION_KEEP) WhitelistZoneState.keep(app) else WhitelistZoneState.leave(app)
+                WhitelistZoneState.leave(app, mode)
             } catch (e: Exception) {
                 Logs.w(e)
             } finally {
@@ -105,7 +111,7 @@ class WhitelistZoneReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        const val ACTION_LEAVE = "io.nekohasekai.sagernet.simple.WHITELIST_ZONE_LEAVE"
-        const val ACTION_KEEP = "io.nekohasekai.sagernet.simple.WHITELIST_ZONE_KEEP"
+        const val ACTION_AUTO = "io.nekohasekai.sagernet.simple.WHITELIST_ZONE_AUTO"
+        const val ACTION_SMART = "io.nekohasekai.sagernet.simple.WHITELIST_ZONE_SMART"
     }
 }

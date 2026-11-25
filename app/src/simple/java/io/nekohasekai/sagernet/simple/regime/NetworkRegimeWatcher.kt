@@ -382,7 +382,7 @@ object NetworkRegimeWatcher {
 
     /**
      * Posts the notification now and again every [REMIND_INTERVAL_MS] while the warning holds in [network]: the user
-     * may have switched in the meantime (or chosen to keep the configuration), which ends it.
+     * may have switched in the meantime, which ends it.
      */
     private suspend fun remind(owner: Session, network: Long) {
         while (true) {

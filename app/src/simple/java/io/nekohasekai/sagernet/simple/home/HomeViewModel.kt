@@ -30,6 +30,7 @@ import io.nekohasekai.sagernet.simple.ConnectionClock
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.modes.Managed
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
+import io.nekohasekai.sagernet.simple.modes.TrafficMode
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.simple.modes.WhitelistKeywords
 import io.nekohasekai.sagernet.simple.regime.RegimeStore
@@ -357,37 +358,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     /**
-     * The whitelist card's «Переключить на «Авто»»: the mode «Белые списки» becomes «Авто» and a server for whitelists
-     * chosen by hand gives way to the «Авто» selector. [onDone] gets false when a server for whitelists is still
-     * selected (no «Авто» selector to take over): the screen opens the server list.
+     * The whitelist card's «Авто» or «Умный»: [mode] becomes the traffic mode and a server for whitelists chosen by
+     * hand gives way to the «Авто» selector. [onDone] gets false when a server for whitelists is still selected (no
+     * «Авто» selector to take over): the screen opens the server list.
      */
-    fun leaveWhitelists(onDone: (Boolean) -> Unit) {
+    fun leaveWhitelists(mode: TrafficMode, onDone: (Boolean) -> Unit) {
         if (zoneBusy) return
         zoneBusy = true
         publish()
         viewModelScope.launch {
             val done = try {
-                WhitelistZoneState.leave(getApplication())
+                WhitelistZoneState.leave(getApplication(), mode)
             } finally {
                 zoneBusy = false
             }
             refreshProfiles()
             onDone(done)
-        }
-    }
-
-    /** The whitelist card's «Не напоминать»: the configuration stays, and this network warns no more. */
-    fun keepWhitelists() {
-        if (zoneBusy) return
-        zoneBusy = true
-        publish()
-        viewModelScope.launch {
-            try {
-                WhitelistZoneState.keep(getApplication())
-            } finally {
-                zoneBusy = false
-            }
-            refreshZone()
         }
     }
 

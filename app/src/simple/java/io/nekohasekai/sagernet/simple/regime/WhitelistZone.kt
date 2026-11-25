@@ -31,10 +31,10 @@ object WhitelistZone {
 
     /**
      * Whether to warn: [use] is set, the latest check of the physical network the device is in now ([currentNetwork],
-     * null = none) found no whitelists, and the user did not ask to keep the configuration in this network
-     * ([keptNetwork]). A result of another network, a network not checked yet, or one without internet never warns.
+     * null = none) found no whitelists. A result of another network, a network not checked yet, or one without internet
+     * never warns.
      */
-    fun warns(use: Use?, record: RegimeRecord?, currentNetwork: Long?, keptNetwork: Long?): Boolean =
+    fun warns(use: Use?, record: RegimeRecord?, currentNetwork: Long?): Boolean =
         use != null && currentNetwork != null && record != null && record.network == currentNetwork &&
-            record.regime == Regime.NORMAL && keptNetwork != currentNetwork
+            record.regime == Regime.NORMAL
 }
