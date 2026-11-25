@@ -997,6 +997,8 @@ private fun SettingsSection(
                 setAutoUpdate = settings::setAutoUpdate,
                 setNightMode = settings::setNightMode,
                 setAdvanced = settings::setAdvanced,
+                setUpdateCheck = settings::setUpdateCheck,
+                setBetaUpdates = settings::setBetaUpdates,
                 openClassicScreen = openClassicScreen,
                 openClassic = onOpenClassic,
                 openRepair = openRepair,

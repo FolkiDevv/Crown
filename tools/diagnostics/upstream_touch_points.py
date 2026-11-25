@@ -49,6 +49,9 @@ FORK_IDENTITY_POINTS: dict[str, str] = {
     "buildScript/release_notes.sh": "crown: fork changelog",
     ".github/workflows/preview.yml": "crown: previews published as pre-releases",
     ".github/workflows/release.yml": "crown: fork version, release notes fallback, patch bump",
+    "app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt": "crown: daily update check on by default",
+    "app/src/main/res/xml/settings_general.xml": "crown: daily update check switch on by default",
+    "app/src/main/java/io/nekohasekai/sagernet/database/SettingsRegistry.kt": "crown: pre-releases looked for by default on a preview build",
 }
 
 FORK_DIRS = (

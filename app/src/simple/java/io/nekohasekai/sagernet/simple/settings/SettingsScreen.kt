@@ -63,6 +63,9 @@ class SettingsActions(
     val setAutoUpdate: (Boolean) -> Unit,
     val setNightMode: (NightMode) -> Unit,
     val setAdvanced: (Boolean) -> Unit,
+    /** The daily update check and pre-releases (advanced mode, in-app updater builds). */
+    val setUpdateCheck: (Boolean) -> Unit,
+    val setBetaUpdates: (Boolean) -> Unit,
     /** A classic screen: the backup («Перенос на другое устройство») or a screen of the advanced mode. */
     val openClassicScreen: (ClassicScreen) -> Unit,
     val openClassic: () -> Unit,
@@ -139,16 +142,7 @@ fun SettingsScreen(
                 onChange = actions.setAdvanced,
             )
         }
-        actions.checkUpdates?.let { check ->
-            item {
-                NavigationItem(
-                    title = stringResource(R.string.simple_settings_check_updates),
-                    summary = stringResource(R.string.simple_settings_check_updates_summary, BuildConfig.VERSION_NAME),
-                    arrow = false,
-                    onClick = check,
-                )
-            }
-        }
+        actions.checkUpdates?.let { check -> updateItems(check, settings, actions) }
 
         if (settings.advanced) {
             item { SectionDivider() }
@@ -245,6 +239,41 @@ private fun LazyListScope.modeItems(state: ModesUiState, actions: SettingsAction
             },
             enabled = !state.busy,
         ) { actions.editApps(AppList.BYPASS) }
+    }
+}
+
+/**
+ * «Обновления», only where the in-app updater exists: «Проверить обновления» ([check]) always, and in the advanced
+ * mode the switches of the classic Settings › General › Updates on the same keys — the daily check and pre-releases
+ * (simple-ui "Короткие настройки упрощённого интерфейса", "Переключатели обновлений в расширенном режиме").
+ */
+private fun LazyListScope.updateItems(check: () -> Unit, settings: SettingsUiState, actions: SettingsActions) {
+    item { SectionDivider() }
+    item { Header(R.string.simple_updates_header) }
+    item {
+        NavigationItem(
+            title = stringResource(R.string.simple_settings_check_updates),
+            summary = stringResource(R.string.simple_settings_check_updates_summary, BuildConfig.VERSION_NAME),
+            arrow = false,
+            onClick = check,
+        )
+    }
+    if (!settings.advanced) return
+    item {
+        SwitchItem(
+            title = stringResource(R.string.simple_update_check),
+            summary = stringResource(R.string.simple_update_check_summary),
+            checked = settings.updateCheck,
+            onChange = actions.setUpdateCheck,
+        )
+    }
+    item {
+        SwitchItem(
+            title = stringResource(R.string.simple_update_beta),
+            summary = stringResource(R.string.simple_update_beta_summary),
+            checked = settings.betaUpdates,
+            onChange = actions.setBetaUpdates,
+        )
     }
 }
 

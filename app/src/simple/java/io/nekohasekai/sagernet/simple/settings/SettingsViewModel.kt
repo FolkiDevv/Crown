@@ -9,6 +9,7 @@ import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.add.SimpleImport
+import io.nekohasekai.sagernet.update.UpdateScheduler
 import io.nekohasekai.sagernet.utils.Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,6 +73,10 @@ data class SettingsUiState(
     val autoUpdate: Boolean = false,
     val nightMode: NightMode = NightMode.SYSTEM,
     val advanced: Boolean = false,
+    /** Advanced mode, in-app updater builds: the classic daily update check (`updateCheckAuto`). */
+    val updateCheck: Boolean = false,
+    /** Advanced mode, in-app updater builds: the classic «Allow updating to beta versions» (`allow_beta_update`). */
+    val betaUpdates: Boolean = false,
     /** The once-only hint after an upgrade on the way back to the classic interface. */
     val classicHint: Boolean = false,
 )
@@ -112,7 +117,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val autostart = DataStore.rememberEnable
         val autoUpdate = SettingsValues.autoUpdateOn(DataStore.subAutoUpdate)
         val night = NightMode.of(DataStore.nightTheme)
-        mutableState.update { it.copy(autostart = autostart, autoUpdate = autoUpdate, nightMode = night) }
+        val updateCheck = DataStore.updateCheckAuto
+        val betaUpdates = DataStore.allowBetaUpdate
+        mutableState.update {
+            it.copy(
+                autostart = autostart, autoUpdate = autoUpdate, nightMode = night,
+                updateCheck = updateCheck, betaUpdates = betaUpdates,
+            )
+        }
     }
 
     private companion object {
@@ -171,6 +183,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 Theme.applyNightTheme()
             }
         }
+    }
+
+    /** The daily check is (re)scheduled or cancelled at once, as in the classic Settings › General. */
+    fun setUpdateCheck(on: Boolean) {
+        mutableState.update { it.copy(updateCheck = on) }
+        write {
+            DataStore.updateCheckAuto = on
+            UpdateScheduler.schedule(enabled = on)
+        }
+    }
+
+    fun setBetaUpdates(on: Boolean) {
+        mutableState.update { it.copy(betaUpdates = on) }
+        write { DataStore.allowBetaUpdate = on }
     }
 
     fun setAdvanced(on: Boolean) {
