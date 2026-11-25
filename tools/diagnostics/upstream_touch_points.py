@@ -44,7 +44,7 @@ FORK_IDENTITY_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/update/UpdateChecker.kt": "crown: update repository and changelog file",
     "app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt": "crown: GitHub link to the update repository",
     "app/src/main/java/io/nekohasekai/sagernet/SagerNet.kt": "crown: displayed version with the Throne base",
-    "app/src/main/java/io/nekohasekai/sagernet/ktx/Nets.kt": "crown: User-Agent keeps the Throne version",
+    "app/src/main/java/io/nekohasekai/sagernet/ktx/Nets.kt": "crown: User-Agent Crown/Android/ with the Throne version",
     "buildScript/release_assets.py": "crown: update manifest for previews too",
     "buildScript/release_notes.sh": "crown: fork changelog",
     ".github/workflows/preview.yml": "crown: previews published as pre-releases",
