@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.simple.config
 
+import io.nekohasekai.sagernet.simple.modes.WhitelistKeywords
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -63,6 +64,14 @@ class SimpleConfigTest {
         assertTrue(bundled.version >= 1)
         assertTrue(bundled.probesAllowed.isNotEmpty() && bundled.probesBlocked.isNotEmpty())
         assertTrue(bundled.whitelistDns.isNotEmpty() && bundled.wlKeywords.isNotEmpty() && bundled.timeHosts.isNotEmpty())
+    }
+
+    @Test
+    fun bundledKeywordsMarkObkhodServers() {
+        val keywords = SimpleConfig.parse(File("src/simple/assets/simple/config.json").readText()).wlKeywords
+        assertTrue(WhitelistKeywords.isWhitelistServer("🇷🇺 Обход 1", keywords))
+        assertTrue(WhitelistKeywords.isWhitelistServer("ru обход", keywords))
+        assertFalse(WhitelistKeywords.isWhitelistServer("Обходной путь", keywords))
     }
 
     @Test
