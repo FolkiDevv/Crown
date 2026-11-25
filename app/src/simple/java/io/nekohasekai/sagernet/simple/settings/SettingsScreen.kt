@@ -63,6 +63,9 @@ class SettingsActions(
     val setAutoUpdate: (Boolean) -> Unit,
     val setNightMode: (NightMode) -> Unit,
     val setAdvanced: (Boolean) -> Unit,
+    /** The daily update check and pre-releases (advanced mode, in-app updater builds). */
+    val setUpdateCheck: (Boolean) -> Unit,
+    val setBetaUpdates: (Boolean) -> Unit,
     /** A classic screen: the backup («Перенос на другое устройство») or a screen of the advanced mode. */
     val openClassicScreen: (ClassicScreen) -> Unit,
     val openClassic: () -> Unit,
@@ -156,6 +159,7 @@ fun SettingsScreen(
             items(ClassicScreen.entries.filter { it.advanced }, key = { it.name }) { screen ->
                 ClassicScreenItem(screen, actions.openClassicScreen)
             }
+            if (BuildConfig.IN_APP_UPDATER) updateItems(settings, actions)
         }
     }
 
@@ -245,6 +249,31 @@ private fun LazyListScope.modeItems(state: ModesUiState, actions: SettingsAction
             },
             enabled = !state.busy,
         ) { actions.editApps(AppList.BYPASS) }
+    }
+}
+
+/**
+ * The update switches of the classic Settings › General › Updates, on the same keys: the daily check and pre-releases
+ * (simple-ui "Расширенный режим"). Shown only where the in-app updater exists, as in the classic settings.
+ */
+private fun LazyListScope.updateItems(settings: SettingsUiState, actions: SettingsActions) {
+    item { SectionDivider() }
+    item { Header(R.string.cag_updates) }
+    item {
+        SwitchItem(
+            title = stringResource(R.string.update_check_auto),
+            summary = stringResource(R.string.update_check_auto_sum),
+            checked = settings.updateCheck,
+            onChange = actions.setUpdateCheck,
+        )
+    }
+    item {
+        SwitchItem(
+            title = stringResource(R.string.allow_beta_update),
+            summary = stringResource(R.string.allow_beta_update_sum),
+            checked = settings.betaUpdates,
+            onChange = actions.setBetaUpdates,
+        )
     }
 }
 

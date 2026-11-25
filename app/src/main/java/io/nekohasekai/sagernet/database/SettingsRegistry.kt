@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.database
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SpeedTestSettings
 import io.nekohasekai.sagernet.database.preference.SettingsStore
+import io.nekohasekai.sagernet.ktx.isPreview
 import io.nekohasekai.sagernet.outbound.common.XRAY_MUX_MAX_COUNT
 import io.nekohasekai.sagernet.outbound.common.xrayXudpProxyUDP443Modes
 import io.nekohasekai.sagernet.outbound.link.Hosts
@@ -150,7 +151,8 @@ object SettingsRegistry {
     /** The selected group tab; resolved through GroupRepo (0 or a missing group = the first group). */
     @JvmField val CURRENT_GROUP = long("current_group", 0L) { it >= 0 }
     @JvmField val SHOW_CONFIG_SECURITY = bool("show_config_security", false)
-    @JvmField val ALLOW_BETA_UPDATE = bool("allow_beta_update", false)
+    /** Crown: a pre-release build looks for pre-releases until the user turns it off; a stable one does not. */
+    @JvmField val ALLOW_BETA_UPDATE = bool("allow_beta_update", isPreview)
 
     // ------------------------------------------------------------------------------------------------ inbound
 
