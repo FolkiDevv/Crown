@@ -24,6 +24,11 @@ class CrownLinksTest {
         assertEquals(sub("https%3A%2F%2Fa.b%2Fc", ""), CrownLinks.toThrone("crown://install-config?url=https://a.b/c"))
         // '+' is not a space: subscription tokens may hold it
         assertEquals(sub("https%3A%2F%2Fa.b%2Fc%2Bd", "a%2Bb"), CrownLinks.toThrone("crown://addsub?url=https://a.b/c+d&name=a+b"))
+        // an emoji next to an escape, a malformed escape kept as it is
+        assertEquals(
+            sub("https%3A%2F%2Fa.b%2Fc", "%F0%9F%91%91%20VPN%20%25-1"),
+            CrownLinks.toThrone("crown://addsub?url=https://a.b/c&name=👑%20VPN%20%-1"),
+        )
         // no URL: still a subscription link, so the classic interface says that the URL is missing
         assertEquals(sub("", "x"), CrownLinks.toThrone("crown://addsub?name=x"))
         assertEquals(sub("", ""), CrownLinks.toThrone("crown://addsub"))

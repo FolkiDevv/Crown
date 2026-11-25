@@ -60,17 +60,19 @@ object CrownLinks {
         val out = java.io.ByteArrayOutputStream()
         var i = 0
         while (i < text.length) {
-            val c = text[i]
-            if (c == '%' && i + 2 < text.length) {
-                val byte = text.substring(i + 1, i + 3).toIntOrNull(16)
-                if (byte != null) {
-                    out.write(byte)
+            if (text[i] == '%' && i + 2 < text.length) {
+                val hi = text[i + 1].digitToIntOrNull(16)
+                val lo = text[i + 2].digitToIntOrNull(16)
+                if (hi != null && lo != null) {
+                    out.write((hi shl 4) or lo)
                     i += 3
                     continue
                 }
             }
-            out.write(c.toString().toByteArray(Charsets.UTF_8))
-            i++
+            // Up to the next '%' at once, so a surrogate pair (an emoji) is encoded whole.
+            val next = text.indexOf('%', i + 1).let { if (it < 0) text.length else it }
+            out.write(text.substring(i, next).toByteArray(Charsets.UTF_8))
+            i = next
         }
         return out.toString(Charsets.UTF_8.name())
     }
