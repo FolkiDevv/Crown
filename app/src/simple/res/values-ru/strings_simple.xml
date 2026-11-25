@@ -234,6 +234,8 @@
     <string name="simple_settings_transfer_summary">Сохранить серверы и настройки в резервную копию или восстановить её</string>
     <string name="simple_settings_advanced">Расширенный режим</string>
     <string name="simple_settings_advanced_summary">Показать здесь технические экраны классического интерфейса</string>
+    <string name="simple_settings_check_updates">Проверить обновления</string>
+    <string name="simple_settings_check_updates_summary">Версия %1$s. Проверка сейчас, даже если автопроверка выключена</string>
     <string name="simple_advanced_header">Экраны классического интерфейса</string>
     <string name="simple_advanced_routes">Маршруты и правила</string>
     <string name="simple_advanced_routes_summary">Маршрутные профили и их правила</string>

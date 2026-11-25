@@ -246,6 +246,8 @@
     <string name="simple_settings_transfer_summary">Save servers and settings to a backup file, or restore one</string>
     <string name="simple_settings_advanced">Advanced mode</string>
     <string name="simple_settings_advanced_summary">Show the technical screens of the classic interface here</string>
+    <string name="simple_settings_check_updates">Check for updates</string>
+    <string name="simple_settings_check_updates_summary">Version %1$s. Checks now, even if automatic checks are off</string>
     <!-- Advanced mode: links to the screens of the classic interface -->
     <string name="simple_advanced_header">Classic interface screens</string>
     <string name="simple_advanced_routes">Routes and rules</string>

@@ -76,6 +76,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.window.core.layout.WindowHeightSizeClass
 import androidx.window.core.layout.WindowWidthSizeClass
+import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
@@ -117,6 +118,7 @@ import io.nekohasekai.sagernet.ui.AppManagerActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.ScannerActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
+import io.nekohasekai.sagernet.update.UpdateActivity
 import io.nekohasekai.sagernet.utils.BatteryOptimizations
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -991,6 +993,11 @@ private fun SettingsSection(
                 openClassicScreen = openClassicScreen,
                 openClassic = onOpenClassic,
                 openRepair = openRepair,
+                checkUpdates = if (BuildConfig.IN_APP_UPDATER) {
+                    { UpdateActivity.start(context) }
+                } else {
+                    null
+                },
             ),
             modifier = modifier,
         )
