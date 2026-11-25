@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,6 +72,7 @@ import io.nekohasekai.sagernet.simple.unavailable
 import io.nekohasekai.sagernet.simple.add.AddActions
 import io.nekohasekai.sagernet.simple.add.Welcome
 import io.nekohasekai.sagernet.simple.modes.ModeCard
+import io.nekohasekai.sagernet.simple.regime.WhitelistZone
 import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.simple.servers.CountryLabels
 import kotlinx.coroutines.delay
@@ -106,10 +109,18 @@ fun HomeScreen(
     focusKey: Any? = null,
     /** A notice at the top of the scrolling content (the hint after an upgrade), given the width of the cards. */
     hint: (@Composable (Modifier) -> Unit)? = null,
+    /** The whitelist card's «Переключить на «Авто»». */
+    onLeaveWhitelists: () -> Unit = {},
+    /** The whitelist card's «Не напоминать». */
+    onKeepWhitelists: () -> Unit = {},
 ) {
     val banner: @Composable (Modifier, Dp) -> Unit = { bannerModifier, gap ->
         state.problem?.let { problem ->
             ProblemBanner(problem, onRepair = actions.openRepair, onDismiss = onDismissProblem, modifier = bannerModifier)
+            Spacer(Modifier.height(gap))
+        }
+        state.whitelistZone?.let { use ->
+            WhitelistZoneCard(use, state.whitelistZoneBusy, onLeaveWhitelists, onKeepWhitelists, bannerModifier)
             Spacer(Modifier.height(gap))
         }
     }
@@ -506,6 +517,70 @@ private fun HomeCard(
                 tint = secondary,
                 modifier = Modifier.padding(start = 4.dp),
             )
+        }
+    }
+}
+
+/**
+ * A configuration for whitelists runs in a network found without them (traffic-modes «Подсказка вне зоны белых
+ * списков»): in the colours of the mode card's warning, with the switch to «Авто» and «Не напоминать».
+ */
+@Composable
+private fun WhitelistZoneCard(
+    use: WhitelistZone.Use,
+    busy: Boolean,
+    onLeave: () -> Unit,
+    onKeep: () -> Unit,
+    modifier: Modifier,
+) {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val container = if (dark) Color(0xFF4A3800) else Color(0xFFFFE6A6)
+    val content = if (dark) Color(0xFFFFE08F) else Color(0xFF3A2A00)
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = content),
+    ) {
+        Row(Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp)) {
+            Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.padding(top = 2.dp))
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+            ) {
+                Text(stringResource(R.string.simple_wl_zone_title), style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    stringResource(
+                        when (use) {
+                            WhitelistZone.Use.MODE -> R.string.simple_wl_zone_text_mode
+                            WhitelistZone.Use.SERVER -> R.string.simple_wl_zone_text_server
+                        }
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 12.dp, top = 4.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = { if (!busy) onKeep() },
+                colors = ButtonDefaults.textButtonColors(contentColor = content),
+                modifier = Modifier
+                    .focusRing(FocusShapes.Pill)
+                    .unavailable(busy),
+            ) { Text(stringResource(R.string.simple_wl_zone_keep)) }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = { if (!busy) onLeave() },
+                modifier = Modifier
+                    .focusRing(FocusShapes.Pill)
+                    .unavailable(busy),
+            ) { Text(stringResource(R.string.simple_wl_zone_switch)) }
         }
     }
 }

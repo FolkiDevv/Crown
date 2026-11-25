@@ -263,6 +263,13 @@
     <string name="simple_hint_classic_close">Понятно</string>
     <string name="simple_server_whitelist">Сервер для белых списков</string>
     <string name="simple_server_working">Работают в этой сети: %1$d из %2$d</string>
+    <string name="simple_wl_zone_title">Вы вне зоны белых списков</string>
+    <string name="simple_wl_zone_text_mode">Эта сеть открывает любые сайты, а включён режим «Белые списки». «Авто» сам включит белые списки, когда они понадобятся.</string>
+    <string name="simple_wl_zone_text_server">Эта сеть открывает любые сайты, а выбран сервер для белых списков. «Авто» сам выберет такой, когда белые списки понадобятся.</string>
+    <string name="simple_wl_zone_switch">Переключить на «Авто»</string>
+    <string name="simple_wl_zone_keep">Не напоминать</string>
+    <string name="simple_wl_zone_channel">Белые списки</string>
+    <string name="simple_wl_zone_channel_description">Настройки для белых списков включены в сети без белых списков</string>
 
     <!-- Починка (батч 7) -->
     <string name="simple_repair_entry">Что-то не работает?</string>

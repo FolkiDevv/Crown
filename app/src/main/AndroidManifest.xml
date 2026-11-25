@@ -462,6 +462,11 @@
             android:name="io.nekohasekai.sagernet.update.UpdateReceiver"
             android:exported="false" />
 
+        <!-- simple UI: the actions of the whitelist zone notification, where the UI applies modes and servers -->
+        <receiver
+            android:name="io.nekohasekai.sagernet.simple.regime.WhitelistZoneReceiver"
+            android:exported="false" />
+
         <!-- Widgets live in :bg, the only process that knows the service state. -->
         <receiver
             android:name="io.nekohasekai.sagernet.appwidget.ToggleWidgetProvider"
