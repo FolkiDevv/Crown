@@ -605,6 +605,23 @@ class ReportRedactorTest {
         assertEquals("dialing to tcp:<server-1>%wlan0:443", configured.redact("dialing to tcp:fe80::1%wlan0:443"))
     }
 
+    /** A Unicode subdomain of a configured server names the server too (review). */
+    @Test
+    fun unicodeSubdomainOfServer() {
+        val r = ReportRedactor(listOf("vpn.example.net"), emptyList())
+        assertEquals("[Info] handshake with <server-1> failed", r.redact("[Info] handshake with узел.vpn.example.net failed"))
+        assertEquals("[Debug] dial tcp <server-1>:443", r.redact("[Debug] dial tcp УЗЕЛ.cdn.vpn.example.net:443"))
+    }
+
+    /** Every spelling of one IPv6 host — zoned, upper case, expanded — shares one label (review). */
+    @Test
+    fun ipv6HostLabelByAddress() {
+        val r = ReportRedactor(emptyList(), emptyList())
+        for (url in listOf("http://[fe80:0::1%25eth0]/a", "http://[FE80::1]/b", "http://[fe80:0:0:0:0:0:0:1]:8080/c")) {
+            assertTrue(url, r.redact("GET $url").startsWith("GET http://<host-1>"))
+        }
+    }
+
     @Test
     fun normalize() {
         assertEquals("vpn.example.com", ReportRedactor.normalize("VPN.Example.com.:443"))

@@ -89,12 +89,12 @@ class ReportRedactor(
                 for (form in forms(host)) labels.putIfAbsent(form, "<subscription-${i + 1}-host>")
             }
         }
-        // A known name as a whole word; a subdomain of a server's domain names the server too: "cdn.vpn.example.com"
-        // becomes the label of "vpn.example.com". Word edges are Unicode letters and digits (IDN, Cyrillic names); a
-        // colon may come before a name ("dialing to tcp:host:443").
+        // A known name as a whole word; a subdomain of a server's domain names the server too: "cdn.vpn.example.com" or
+        // "узел.vpn.example.com" becomes the label of "vpn.example.com". Word edges and subdomain labels are Unicode
+        // letters and digits (IDN, Cyrillic names; punycode is ASCII); a colon may come before a name ("tcp:host:443").
         names = labels.keys.takeIf { it.isNotEmpty() }?.sortedByDescending { it.length }?.let { known ->
             Regex(
-                "(?iu)(?<![\\p{L}\\p{N}_.\\-])((?:[a-z0-9_\\-]+\\.)*)(" +
+                "(?iu)(?<![\\p{L}\\p{N}_.\\-])((?:[\\p{L}\\p{N}_\\-]+\\.)*)(" +
                     known.joinToString("|") { Regex.escape(it) } + ")(?![\\p{L}\\p{N}_\\-]|\\.[\\p{L}\\p{N}_\\-])",
             )
         }
@@ -294,9 +294,12 @@ class ReportRedactor(
         if (name.isEmpty()) return host
         // A scoped IPv6 address ("[fe80::1%25wlan0]") is that address for the lookups and the label; the whole host gets
         // the label. Only a bracketed host has a zone: elsewhere "%" is part of the name ("localhost%2Eevil.com").
-        val address = if (host.trim().startsWith("[")) name.substringBefore('%') else name
-        // A configured server keeps its label even on loopback; another spelling of a known address or name (IPv6
-        // written otherwise, punycode) has its label already.
+        val unzoned = if (host.trim().startsWith("[")) name.substringBefore('%') else name
+        // An IPv6 address is looked up and stored under its RFC 5952 spelling, so every spelling of it ("fe80:0::1",
+        // "FE80::1", zoned or not) shares one label.
+        val address = canonicalIpv6(unzoned) ?: unzoned
+        // A configured server keeps its label even on loopback; another spelling of a known address or name (punycode)
+        // has its label already.
         labels[address]?.let { return it }
         forms(address).firstNotNullOfOrNull { labels[it] }?.let { return it }
         if (isLoopback(address)) return host
