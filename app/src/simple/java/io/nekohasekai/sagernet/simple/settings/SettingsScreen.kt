@@ -42,6 +42,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.simple.FocusShapes
 import io.nekohasekai.sagernet.simple.focusRing
@@ -67,6 +68,8 @@ class SettingsActions(
     val openClassic: () -> Unit,
     /** «Починка» (batch 7). */
     val openRepair: () -> Unit,
+    /** The in-app updater's check, at once; null where the build has no in-app updater (fdroid). */
+    val checkUpdates: (() -> Unit)?,
 )
 
 /**
@@ -135,6 +138,16 @@ fun SettingsScreen(
                 checked = settings.advanced,
                 onChange = actions.setAdvanced,
             )
+        }
+        actions.checkUpdates?.let { check ->
+            item {
+                NavigationItem(
+                    title = stringResource(R.string.simple_settings_check_updates),
+                    summary = stringResource(R.string.simple_settings_check_updates_summary, BuildConfig.VERSION_NAME),
+                    arrow = false,
+                    onClick = check,
+                )
+            }
         }
 
         if (settings.advanced) {
