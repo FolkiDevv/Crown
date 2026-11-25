@@ -21,13 +21,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.utils.Theme
 
 /**
- * Material 3 colours of the simple UI: tonal palettes of the brand pink (#FB7299, the classic default theme), or the
- * wallpaper colours when the classic "system theme" (Monet) option is on. Light/dark follows the classic night theme
- * setting (system by default).
+ * Material 3 colours of the simple UI: the system accent (wallpaper) colours on Android 12+, unless the classic
+ * "system theme" (Monet) option was turned off — never stored counts as on (SimpleDefaults); otherwise tonal palettes
+ * of the brand pink (#FB7299, the classic default theme). Light/dark follows the classic night theme setting (system
+ * by default).
  */
 private val LightColors: ColorScheme = lightColorScheme(
     primary = Color(0xFFB0285A),
@@ -90,7 +92,9 @@ private val DarkColors: ColorScheme = darkColorScheme(
 fun SimpleTheme(content: @Composable () -> Unit) {
     val systemDark = isSystemInDarkTheme()
     val dark = if (DataStore.nightTheme == 0) systemDark else Theme.usingNightMode()
-    val colors = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && Theme.usingMonetTheme()) {
+    val colors = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        (DataStore.configurationStore.getBoolean(Key.USE_SYSTEM_THEME) ?: true)
+    ) {
         val context = LocalContext.current
         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
     } else {
