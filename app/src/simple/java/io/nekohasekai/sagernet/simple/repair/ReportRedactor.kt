@@ -179,9 +179,11 @@ class ReportRedactor(
             val name = m.groupValues[2]
             labels[normalize(name) ?: name.lowercase()]?.let { add(m.range, kindOf(it), it) }
         }
-        // The destinations Xray names in its own words, which LogRedactor's destination lines do not cover
-        // ("TCP Connect request to tcp:site:443", "taking detour [proxy] for [tcp:site:443]").
-        if (XRAY_DESTINATION_LINE.containsMatchIn(s)) {
+        // The domains of a destination line, decided on the ORIGINAL line: LogRedactor's own destination words
+        // ("lookup", "connection to", "dns"…) and the ones Xray uses ("TCP Connect request to tcp:site:443", "taking
+        // detour [proxy] for [tcp:site:443]"). Once a destination word is itself a secret and becomes a placeholder,
+        // LogRedactor no longer sees the line as one — so the domains are hidden here, before.
+        if (DESTINATION_LINE.containsMatchIn(s)) {
             for (m in DOMAIN.findAll(s)) add(m.range, Kind.HOST, "<domain>." + m.groupValues[1])
         }
         for (pattern in secretPatterns) for (m in pattern.findAll(s)) add(m.range, Kind.SECRET, "<redacted>")
@@ -290,11 +292,13 @@ class ReportRedactor(
     private fun labelFor(host: String): String {
         val name = normalize(host) ?: host.trim().removePrefix("[").removeSuffix("]").trimEnd('.').lowercase()
         if (name.isEmpty()) return host
+        // A scoped IPv6 address ("fe80::1%25wlan0") is that address for the lookups; the whole host gets the label.
+        val address = name.substringBefore('%')
         // A configured server keeps its label even on loopback; another spelling of a known address or name (IPv6
         // written otherwise, punycode) has its label already.
-        labels[name]?.let { return it }
-        forms(name).firstNotNullOfOrNull { labels[it] }?.let { return it }
-        if (isLoopback(name)) return host
+        labels[address]?.let { return it }
+        forms(address).firstNotNullOfOrNull { labels[it] }?.let { return it }
+        if (isLoopback(address)) return host
         return labels.getOrPut(name) { "<host-${++hosts}>" }
     }
 
@@ -406,13 +410,19 @@ class ReportRedactor(
             """(?<![\p{L}\p{N}_:.])(?:([a-zA-Z][a-zA-Z0-9+\-]{0,10}|<[a-z0-9\-]{1,30}>):)?([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?![\p{L}\p{N}_:])"""
         )
 
-        /** Xray's lines that name where a connection goes (its own wording, beyond LogRedactor's destination lines). */
-        private val XRAY_DESTINATION_LINE = Regex(
-            """(?i)connect request to|taking detour|dialing|creating connection to|tunnel(?:l)?ing request|received request for|sniffed domain|accepted (?:tcp|udp):"""
+        /**
+         * The lines that name where a connection goes: LogRedactor's destination words (the same list as its own, which
+         * is private) and Xray's own wording beyond them.
+         */
+        private val DESTINATION_LINE = Regex(
+            """(?i)connection (?:to|from)|domain|dns|exchang|lookup|resolv|sniff|connect request to|taking detour|dialing|creating connection to|tunnel(?:l)?ing request|received request for|accepted (?:tcp|udp):"""
         )
 
-        /** A domain name outside a label: the name is hidden, the top-level domain stays (as in LogRedactor). */
-        private val DOMAIN = Regex("""(?<![\w.\-<])(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+([a-z]{2,63})\.?(?![\w\-])""")
+        /**
+         * A domain name outside a label, in any case ("WWW.EXAMPLE.COM"): the name is hidden, the top-level domain stays
+         * (as in LogRedactor).
+         */
+        private val DOMAIN = Regex("""(?<![\w.\-<])(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+([a-zA-Z]{2,63})\.?(?![\w\-])""")
 
         /** Secret values this long are replaced anywhere, even inside a longer word; shorter ones as a whole token. */
         private const val MIN_ANYWHERE = 6
@@ -432,7 +442,8 @@ class ReportRedactor(
          * (group 5: path, query, fragment — what LogRedactor writes as "/<redacted>").
          */
         private val URL = Regex(
-            """\b([a-zA-Z][a-zA-Z0-9+.\-]*)://([^\s/?#"']*@)?(\[[0-9A-Fa-f:.%]+\]|[^\s/?#"'<>:@\[\]\\]+)(:\d{1,5})?([^\s"'<>]*)"""
+            // A bracketed IPv6 host may carry a zone id ("[fe80::1%25wlan0]"), part of the host.
+            """\b([a-zA-Z][a-zA-Z0-9+.\-]*)://([^\s/?#"']*@)?(\[[0-9A-Fa-f:.]+(?:%[^\s\]/?#"'<>]*)?\]|[^\s/?#"'<>:@\[\]\\]+)(:\d{1,5})?([^\s"'<>]*)"""
         )
 
         /** The keys whose values the line patterns clean (LogRedactor's SECRET, SERVER and Wi-Fi keys, and [SECRET]). */

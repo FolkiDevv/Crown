@@ -570,6 +570,36 @@ class ReportRedactorTest {
         assertTrue(config, config.contains("<server-1>"))
     }
 
+    /**
+     * A destination word that is itself a known secret ("lookup", "connection") is masked first, so LogRedactor would
+     * not see the line as a destination line any more: its domains are hidden by the report's pass, decided on the
+     * original line, in any case (review).
+     */
+    @Test
+    fun destinationLinesWithSecretWords() {
+        val lookup = ReportRedactor(emptyList(), emptyList(), listOf("lookup"))
+        assertEquals("[Debug] <redacted> <domain>.example", lookup.redact("[Debug] lookup www.customer.example"))
+        val connection = ReportRedactor(emptyList(), emptyList(), listOf("connection"))
+        assertEquals("[Info] <redacted> to <domain>.org:443", connection.redact("[Info] connection to shop.example.org:443"))
+        val plain = ReportRedactor(emptyList(), emptyList())
+        assertEquals(
+            "xray: [Info] [1] proxy/socks: TCP Connect request to tcp:<domain>.COM:443",
+            plain.redact("xray: [Info] [1] proxy/socks: TCP Connect request to tcp:WWW.EXAMPLE.COM:443"),
+        )
+        assertEquals("[Debug] dns: lookup <domain>.NET failed", plain.redact("[Debug] dns: lookup Mixed.Example.NET failed"))
+    }
+
+    /** A scoped IPv6 URL host ("[fe80::1%25wlan0]") is labelled whole; a configured address keeps its label (review). */
+    @Test
+    fun scopedIpv6Hosts() {
+        val plain = ReportRedactor(emptyList(), emptyList())
+        assertEquals("GET http://<host-1>/<redacted>", plain.redact("GET http://[fe80::1%25wlan0]/status"))
+        val configured = ReportRedactor(ReportRedactor.serverNames("fe80::1", "{}"), emptyList())
+        assertEquals("GET http://<server-1>:8080/<redacted>", configured.redact("GET http://[fe80::1%25wlan0]:8080/status"))
+        // Without brackets after a network prefix the address is labelled; the zone (an interface name) stays.
+        assertEquals("dialing to tcp:<server-1>%wlan0:443", configured.redact("dialing to tcp:fe80::1%wlan0:443"))
+    }
+
     @Test
     fun normalize() {
         assertEquals("vpn.example.com", ReportRedactor.normalize("VPN.Example.com.:443"))
