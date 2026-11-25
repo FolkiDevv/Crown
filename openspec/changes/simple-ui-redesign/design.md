@@ -42,7 +42,7 @@
 |---|---|---|
 | 1 | `build.gradle.kts` | объявление плагина `org.jetbrains.kotlin.plugin.compose` 2.0.21 (`apply false`) |
 | 2 | `app/build.gradle.kts` | применение плагина, `buildFeatures.compose`, зависимости Compose, три `srcDir` |
-| 3 | `app/src/main/AndroidManifest.xml` | объявление `simple.SimpleActivity` (фильтры лаунчера остаются на `MainActivity`) |
+| 3 | `app/src/main/AndroidManifest.xml` | объявление `simple.SimpleActivity` (фильтры лаунчера остаются на `MainActivity`) и приёмника действий уведомления `simple.regime.WhitelistZoneReceiver` |
 | 4 | `app/src/main/res/menu/main_drawer_menu.xml` | пункт «Новый интерфейс» (заголовок — строка из `strings_simple.xml`) |
 | 5 | `app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt` | в начале `onCreate` — `if (SimpleUi.redirect(this)) return`, в начале `onNewIntent` — `if (SimpleUi.redirect(this, intent)) return` (повторно используемый singleTask-экземпляр); обработчик пункта меню — `SimpleUi.switchTo(this, simple = true)` |
 | 6 | `app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt` | вызовы `SimpleHooks.onServiceStarted/onServiceStopped` перед сменой состояния на Connected/Stopped (время начала подключения для главной в ключе `DataStore` `simple_connected_since`, с батча 2; запуск и остановка наблюдателя сети) |

@@ -36,19 +36,26 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Finds out whether the physical network has whitelists while the VPN is on (design.md D6, traffic-modes "Моменты
  * проверки белых списков"). Lives in `:bg`: SimpleHooks starts it with the service and stops it with the service, so
  * with the VPN off nothing is checked. A check runs when the VPN connects, when the physical network changes, when the
- * user chooses «Авто» ([requestCheck]) and every 15 minutes in a mobile network.
+ * user chooses «Авто» ([requestCheck]) and every 15 minutes in a mobile network. Checks run in «Авто», and in any mode
+ * while a configuration for whitelists is in effect (the mode «Белые списки», a server for whitelists chosen by hand:
+ * traffic-modes «Подсказка вне зоны белых списков»); a choice of one asks for a check too.
  *
  * The physical network comes from a ConnectivityManager callback of its own on its own thread (PhysicalNetworkMonitor,
  * the request DefaultNetworkListener makes; DefaultNetworkListener itself only if the system refuses it), so the
  * upstream listeners queued on DefaultNetworkListener's thread never delay it. Checks run one at a time through
  * [ProbeGate]: a new one cancels the one in flight, and a result is stored (`simple_regime`) and applied only when it is the latest check, its network is still
  * the physical network and the user did not change the mode meanwhile (TrafficModeApplier.applyRegime decides that in
- * one database transaction with the mode's own writes). No notification is shown; the home screen's mode card tells.
+ * one database transaction with the mode's own writes). «Авто» shows no notification; the home screen's mode card
+ * tells. A configuration for whitelists in a network found without them gets a notification with sound, repeated every
+ * 15 minutes while it stays so ([updateWarning]), next to the home screen's card.
  */
 object NetworkRegimeWatcher {
 
     /** The simple UI asks for a check (the user chose «Авто»); only a running watcher hears it. */
     private const val ACTION_CHECK = "io.nekohasekai.sagernet.simple.CHECK_REGIME"
+
+    /** The user left the configuration for whitelists (UI process): the repeating notification ends now. */
+    private const val ACTION_WARNING_OFF = "io.nekohasekai.sagernet.simple.WHITELIST_ZONE_OFF"
 
     /** The check in a mobile network repeats this often. */
     private const val MOBILE_INTERVAL_MS = 15 * 60_000L
@@ -62,6 +69,9 @@ object NetworkRegimeWatcher {
 
     /** How long the stop of the service waits for «Авто» to go back to the smart rules. */
     private const val REVERT_WAIT_MS = 2_000L
+
+    /** How often the notification about a configuration for whitelists outside the whitelists comes again. */
+    private const val REMIND_INTERVAL_MS = 15 * 60_000L
 
     private val gate = ProbeGate<Long>()
     private val lock = Any()
@@ -89,6 +99,9 @@ object NetworkRegimeWatcher {
 
         /** A result changed the routing while the service was not connected: waits for Connected, then reloads. */
         var pendingReload: Job? = null
+
+        /** Posts the notification about a configuration for whitelists and repeats it; null while there is none. */
+        var warning: Job? = null
     }
 
     /** SimpleHooks: a core is about to report Connected; the first one of a connection starts the watcher. */
@@ -98,7 +111,8 @@ object NetworkRegimeWatcher {
         session = started
         Logs.i("simple regime: watcher started with the VPN")
         started.receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) = onCheckRequested(started)
+            override fun onReceive(context: Context, intent: Intent) =
+                if (intent.action == ACTION_WARNING_OFF) onWarningOff(started) else onCheckRequested(started)
         }.also { register(it) }
         val monitor = PhysicalNetworkMonitor { onNetwork(started, it) }
         if (monitor.start()) {
@@ -129,6 +143,8 @@ object NetworkRegimeWatcher {
         gate.invalidate()
         if (stopped.check?.isActive == true) Logs.i("simple regime: the VPN stopped, the check in flight is cancelled")
         stopped.scope.cancel()
+        // With the VPN off no configuration runs, and nothing would take the notification away later.
+        WhitelistZoneNotifications.cancel(app)
         stopped.receiver?.let { runCatching { app.unregisterReceiver(it) }.onFailure { Logs.w(it) } }
         stopped.monitor?.stop()
         val listener = stopped.listener
@@ -171,11 +187,19 @@ object NetworkRegimeWatcher {
     }
 
     /**
-     * The user chose «Авто» in the simple UI (UI process): a running watcher checks the current network. With the VPN
-     * off nobody receives it, and the check runs when the VPN connects.
+     * The user chose «Авто», or a configuration for whitelists, in the simple UI (UI process): a running watcher checks
+     * the current network. With the VPN off nobody receives it, and the check runs when the VPN connects.
      */
     fun requestCheck(context: Context) {
         context.sendBroadcast(Intent(ACTION_CHECK).setPackage(context.packageName))
+    }
+
+    /**
+     * The user left the configuration for whitelists (UI process): a running watcher stops repeating the notification,
+     * so a configuration for whitelists chosen again soon after warns at once.
+     */
+    fun warningOff(context: Context) {
+        context.sendBroadcast(Intent(ACTION_WARNING_OFF).setPackage(context.packageName))
     }
 
     // ------------------------------------------------------------------------------------------------ events
@@ -186,6 +210,9 @@ object NetworkRegimeWatcher {
         val previous = owner.network
         if (network == previous) return@synchronized
         owner.network = network
+        // The warning was about the network before; the new one's check brings it back if it is found without whitelists.
+        stopWarning(owner)
+        WhitelistZoneState.changed(app, network?.networkHandle, fromWatcher = true)
         if (network == null) {
             gate.invalidate()
             owner.check?.cancel()
@@ -204,10 +231,14 @@ object NetworkRegimeWatcher {
         start(owner, network, reason)
     }
 
+    private fun onWarningOff(owner: Session) = synchronized(lock) {
+        if (session === owner) stopWarning(owner)
+    }
+
     private fun onCheckRequested(owner: Session) = synchronized(lock) {
         if (session !== owner) return@synchronized
-        val network = owner.network ?: return@synchronized Logs.i("simple regime: «Авто» chosen, no physical network to check")
-        start(owner, network, "«Авто» chosen")
+        val network = owner.network ?: return@synchronized Logs.i("simple regime: check asked for, no physical network to check")
+        start(owner, network, "«Авто» or a configuration for whitelists chosen")
     }
 
     private fun onTimer(owner: Session) = synchronized(lock) {
@@ -222,13 +253,15 @@ object NetworkRegimeWatcher {
 
     /** Under [lock]: cancels the check in flight and starts the next one on [network]. */
     private fun start(owner: Session, network: Network, reason: String) {
+        var mode: TrafficMode? = null
         val revision = try {
+            mode = if (TrafficModes.isModeStored()) TrafficModes.mode() else null
             TrafficModes.modeRevision()
         } catch (e: Exception) {
             Logs.w(e)
             -1L
         }
-        val ticket = gate.begin(network.networkHandle, revision)
+        val ticket = gate.begin(network.networkHandle, revision, mode)
         owner.check?.cancel()
         owner.check = owner.scope.launch { run(owner, network, ticket, reason) }
     }
@@ -246,8 +279,14 @@ object NetworkRegimeWatcher {
             // of this very network is kept.
             forgetOtherNetwork(owner, ticket)
             val mode = if (TrafficModes.isModeStored()) TrafficModes.mode() else null
-            if (mode != TrafficMode.AUTO) {
-                Logs.i("simple regime: $tag ($reason) skipped: the mode is «${mode?.key ?: "not chosen"}», not «Авто»")
+            // Outside «Авто» a check only serves the hint about a configuration for whitelists.
+            val use = WhitelistZoneState.use()
+            if (mode != TrafficMode.AUTO && use == null) {
+                Logs.i(
+                    "simple regime: $tag ($reason) skipped: the mode is «${mode?.key ?: "not chosen"}», not «Авто», " +
+                        "and no configuration for whitelists is in effect"
+                )
+                updateWarning(owner, ticket.network)
                 return
             }
             Logs.i("simple regime: $tag ($reason) started")
@@ -275,8 +314,11 @@ object NetworkRegimeWatcher {
                 gate.verdict(ticket, currentNetwork(owner), m, rev)
             }
             when (verdict) {
-                ProbeGate.Verdict.ACCEPTED ->
+                ProbeGate.Verdict.ACCEPTED -> {
                     Logs.i("simple regime: $tag: ${regime.key} applied (service change: ${change.name.lowercase()})")
+                    updateWarning(owner, ticket.network)
+                    WhitelistZoneState.changed(app, ticket.network, fromWatcher = true)
+                }
 
                 ProbeGate.Verdict.SUPERSEDED ->
                     Logs.i("simple regime: $tag: result ${regime.key} discarded, a newer check replaced it")
@@ -313,6 +355,59 @@ object NetworkRegimeWatcher {
             )
         }
         oweReload(owner, change)
+    }
+
+    // ------------------------------------------------------------------------------------------------ warning
+
+    /**
+     * After a check of [network] (also one skipped for want of a reason to check): a configuration for whitelists in a
+     * network found without them starts the notification (traffic-modes «Подсказка вне зоны белых списков»), anything
+     * else takes it away. A notification already repeating keeps its rhythm: the same finding sounds no second time.
+     */
+    private fun updateWarning(owner: Session, network: Long) {
+        val use = try {
+            WhitelistZoneState.warning(network)
+        } catch (e: Exception) {
+            Logs.w(e)
+            null
+        }
+        synchronized(lock) {
+            if (session !== owner || owner.network?.networkHandle != network) return
+            if (use == null) return stopWarning(owner)
+            if (owner.warning?.isActive == true) return
+            Logs.i("simple wl zone: configuration for whitelists (${use.name.lowercase()}) in network $network without whitelists")
+            owner.warning = owner.scope.launch { remind(owner, network) }
+        }
+    }
+
+    /**
+     * Posts the notification now and again every [REMIND_INTERVAL_MS] while the warning holds in [network]: the user
+     * may have switched in the meantime, which ends it.
+     */
+    private suspend fun remind(owner: Session, network: Long) {
+        while (true) {
+            val use = try {
+                WhitelistZoneState.warning(network.takeIf { currentNetwork(owner) == it })
+            } catch (e: Exception) {
+                Logs.w(e)
+                null
+            }
+            if (use == null) {
+                Logs.i("simple wl zone: nothing to warn about in network $network any more, the notification goes")
+                WhitelistZoneNotifications.cancel(app)
+                return
+            }
+            WhitelistZoneNotifications.show(app, use)
+            delay(REMIND_INTERVAL_MS)
+        }
+    }
+
+    /** Under [lock]: ends the repeating notification and takes it away. */
+    private fun stopWarning(owner: Session) {
+        val job = owner.warning ?: return
+        owner.warning = null
+        job.cancel()
+        WhitelistZoneNotifications.cancel(app)
     }
 
     /**
@@ -353,7 +448,7 @@ object NetworkRegimeWatcher {
     }
 
     private fun register(receiver: BroadcastReceiver) {
-        val filter = IntentFilter(ACTION_CHECK)
+        val filter = IntentFilter(ACTION_CHECK).apply { addAction(ACTION_WARNING_OFF) }
         val permission = "${app.packageName}.SERVICE"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             app.registerReceiver(receiver, filter, permission, null, Context.RECEIVER_NOT_EXPORTED)

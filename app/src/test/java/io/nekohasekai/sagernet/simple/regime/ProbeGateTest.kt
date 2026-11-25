@@ -66,6 +66,23 @@ class ProbeGateTest {
         assertEquals(Verdict.MODE_CHANGED, gate.verdict(ticket, mobile, null, 1))
     }
 
+    /**
+     * traffic-modes «Подсказка вне зоны белых списков»: a check made for a configuration for whitelists counts in the
+     * mode it started in, and not once the user picked another one.
+     */
+    @Test
+    fun checkOutsideAutoCountsInItsOwnMode() {
+        val gate = ProbeGate<String>()
+        val ticket = gate.begin(wifi, modeRevision = 4, mode = TrafficMode.WHITELIST)
+        assertEquals(Verdict.ACCEPTED, gate.verdict(ticket, wifi, TrafficMode.WHITELIST, 4))
+        assertEquals(Verdict.MODE_CHANGED, gate.verdict(ticket, wifi, TrafficMode.AUTO, 5))
+        assertEquals(Verdict.MODE_CHANGED, gate.verdict(ticket, wifi, TrafficMode.SMART, 4))
+        // A server for whitelists with no mode chosen yet.
+        val unset = gate.begin(wifi, modeRevision = 0, mode = null)
+        assertEquals(Verdict.ACCEPTED, gate.verdict(unset, wifi, null, 0))
+        assertEquals(Verdict.MODE_CHANGED, gate.verdict(unset, wifi, TrafficMode.AUTO, 0))
+    }
+
     @Test
     fun invalidateMakesEveryTicketStale() {
         val gate = ProbeGate<String>()
