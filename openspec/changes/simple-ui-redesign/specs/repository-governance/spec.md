@@ -40,7 +40,7 @@ Crown MUST принимать ссылки `crown://` из браузера, д�
 
 #### Scenario: Подписка со страницы панели
 - **WHEN** на странице подписки нажата ссылка `crown://addsub?url=https://sub.example.com/abc&name=My%20VPN`
-- **THEN** открывается Crown и предлагает добавить подписку `https://sub.example.com/abc` с именем «My VPN»
+- **THEN** открывается Crown и добавляет подписку `https://sub.example.com/abc` с именем «My VPN» (классический интерфейс сначала спрашивает)
 
 #### Scenario: Ссылка Throne под схемой Crown
 - **WHEN** открыта ссылка `crown://add/<base64>` или `crown://route/…`

@@ -176,8 +176,10 @@
 
 ## 16. Ссылки crown://
 
-- [ ] 16.1 `simple.add.CrownLinks.toThrone`: `crown://addsub?url=…&name=…`, `crown://addsub/<URL>[#имя]`, `crown://install-config?url=…` → `clash://install-config?url=…&name=…`; прочие `crown://<команда>/…` → `throne://<команда>/…`. Подключение: фильтр `crown` на `MainActivity` (точка D2 3), `ACTION_VIEW` в `MainActivity` (точка D2 5), `SubscribeFlows.importText/importTexts` (новая точка Crown), `SimpleImport.plan` и `AddViewModel.importTexts`. JVM-тест `CrownLinksTest`; `openspec validate --strict`, `upstream_touch_points.py`.
-- [ ] 16.2 Устройство: ссылки `crown://addsub?url=…`, `crown://addsub/<URL>`, `crown://addsub/<base64>`, `crown://add/<base64>` открыты через `am start -a VIEW` в новом и классическом интерфейсе — предложено добавить подписку / сервер.
+- [x] 16.1 `simple.add.CrownLinks.toThrone`: `crown://addsub?url=…&name=…`, `crown://addsub/<URL>[#имя]`, `crown://install-config?url=…` → `clash://install-config?url=…&name=…`; прочие `crown://<команда>/…` → `throne://<команда>/…`. Подключение: фильтр `crown` на `MainActivity` (точка D2 3), `ACTION_VIEW` в `MainActivity` (точка D2 5), `SubscribeFlows.importText/importTexts` (новая точка Crown), `SimpleImport.plan` и `AddViewModel.importTexts`. JVM-тест `CrownLinksTest`; `openspec validate --strict`, `upstream_touch_points.py`.
+  - Результат (2026-11-25): локально в Docker `app:testOssDebugUnitTest app:assembleOssDebug` — 362 теста, 0 падений (`CrownLinksTest` 5/5); `openspec validate simple-ui-redesign --strict` — valid; `upstream_touch_points.py --base upstream/main` — вне списка 0, код 0.
+- [x] 16.2 Устройство: страница в Chrome со ссылками `crown://addsub?url=…&name=…`, `crown://addsub/<base64>`, `crown://addsub/<URL>?x=1&y=2#имя`, `crown://install-config?url=…&name=…`, `crown://add/<base64>`; в новом и классическом интерфейсе.
+  - Результат (2026-11-25, эмулятор Android 17 x86_64, 5554, локальный HTTP-сервер на 10.0.2.2): в новом интерфейсе каждая ссылка подписки сразу добавила группу с именем из ссылки и 2 серверами («My VPN», «Base64 Sub», «Path Sub», «Clash Style»; сервер получил `GET /sub3?x=1&y=2` целиком), `crown://add/…` — «1 server added» («Crown add test» в «My servers»); в классическом — диалог «Add subscription» (Name: My VPN, URL: http://10.0.2.2:8765/sub), «Import profile … Crown add test?», и «Import from clipboard» со скопированной в Chrome ссылкой `crown://addsub/<URL>#Path%20Sub` — «Add subscription», после OK подписка загружена.
 
 ## Workflow follow-up
 
