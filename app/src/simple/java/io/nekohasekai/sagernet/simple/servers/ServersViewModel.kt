@@ -332,6 +332,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val name = GroupRepo.get(groupId)?.displayName() ?: return@manage
         if (GroupRepo.delete(groupId)) {
             SubscriptionState.forget(groupId)
+            // A running «Авто» may still connect through its servers.
+            TrafficModeApplier.serversRemoved()
             mutableMessages.tryEmit(ServersMessage(R.string.simple_sub_deleted, name))
             mutableEvents.tryEmit(ServersEvent.Updated)
         } else {
@@ -355,6 +357,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val wasSelected = DataStore.selectedProxy == id
         val name = ServerCatalog.nameOf(profile, getApplication<Application>().getString(R.string.simple_server_unnamed))
         ProfileManager.deleteProfile(profile.groupId, id)
+        TrafficModeApplier.serversRemoved()
         mutableEvents.tryEmit(ServersEvent.Chosen)
         mutableMessages.tryEmit(
             ServersMessage(R.string.simple_server_deleted, name, R.string.simple_server_undo) {
