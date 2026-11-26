@@ -20,15 +20,20 @@ object SubscriptionFetch {
     /** The body of an HTTP error status is logged up to this size. */
     private const val MAX_LOGGED_BODY = 4096
 
+    /** Remnawave's device limit headers (docs.rw "HWID device limit"); `x-hwid-limit` is the v2RayTun one. */
+    private val DEVICE_LIMIT_HEADERS = listOf("x-hwid-max-devices-reached", "x-hwid-limit")
+
     /**
      * [error] is null on success; [subInfo] is what the headers and the body's head said ([SubscriptionMetadata]);
-     * [routing] is the trimmed `routing` header (GroupUpdater.cpp fetch), "" when absent.
+     * [routing] is the trimmed `routing` header (GroupUpdater.cpp fetch), "" when absent; [deviceLimit]: the panel
+     * said its device limit is reached (`x-hwid-max-devices-reached` / `x-hwid-limit`), also with an error status.
      */
     class Result(
         @JvmField val body: String,
         @JvmField val subInfo: SubUserInfo,
         @JvmField val error: String?,
         @JvmField val routing: String = "",
+        @JvmField val deviceLimit: Boolean = false,
     )
 
     fun fetch(url: String, rawName: String, identity: RequestIdentity): Result {
@@ -39,7 +44,7 @@ object SubscriptionFetch {
         if (result.error != null) {
             val reason = withoutUrls(result.error, url)
             Logs.w("<<<<<<<< " + app.getString(R.string.subs_request_error, name, reason + "\n" + withoutUrls(result.body, url)))
-            return Result("", SubUserInfo(), reason)
+            return Result("", SubUserInfo(), reason, deviceLimit = result.deviceLimit)
         }
         Logs.i("<<<<<<<< " + app.getString(R.string.subs_request_finished, name))
         if (result.subInfo.serverInterval > 0) {
@@ -73,12 +78,14 @@ object SubscriptionFetch {
                 http2 = identity.httpVersion != SubHttpVersion.HTTP11,
             ),
         )
+        val deviceLimit = DEVICE_LIMIT_HEADERS.any { response.header(it).trim().equals("true", ignoreCase = true) }
         if (!response.ok) {
             val body = String(response.data, 0, minOf(response.data.size, MAX_LOGGED_BODY), Charsets.UTF_8)
-            return Result(body, SubUserInfo(), response.error)
+            return Result(body, SubUserInfo(), response.error, deviceLimit = deviceLimit)
         }
         val body = String(response.data, Charsets.UTF_8)
-        return Result(body, SubscriptionMetadata.read(response::header, body), null, response.header(SubscriptionRoute.HEADER).trim())
+        val routing = response.header(SubscriptionRoute.HEADER).trim()
+        return Result(body, SubscriptionMetadata.read(response::header, body), null, routing, deviceLimit)
     }
 
     private fun readContent(url: String): Result = try {

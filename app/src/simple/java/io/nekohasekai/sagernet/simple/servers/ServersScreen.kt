@@ -1,8 +1,11 @@
 package io.nekohasekai.sagernet.simple.servers
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,20 +21,24 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -57,6 +64,7 @@ import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -72,6 +80,10 @@ import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
 import io.nekohasekai.sagernet.simple.rememberFocusWhenShown
 import io.nekohasekai.sagernet.simple.unavailable
+import io.nekohasekai.sagernet.simple.subs.Notice
+import io.nekohasekai.sagernet.simple.subs.NoticeReason
+import io.nekohasekai.sagernet.simple.subs.NoticeTexts
+import io.nekohasekai.sagernet.simple.subs.Quote
 import io.nekohasekai.sagernet.simple.trafficSize
 import kotlinx.coroutines.delay
 import java.text.DateFormat
@@ -86,6 +98,10 @@ class ServersActions(
     val update: (Long) -> Unit,
     val updateAll: () -> Unit,
     val add: () -> Unit,
+    /** The menus of the subscriptions and of the own servers. */
+    val manage: ManageActions,
+    /** Opens the whole announcement of a subscription. */
+    val announce: (Long) -> Unit,
 )
 
 /**
@@ -136,6 +152,13 @@ private fun ServerListView(state: ServersUiState, sections: ServerSections, acti
     fun toggle(key: String) {
         expandedKeys = (if (key in expanded) expanded - key else expanded + key).joinToString("\n")
     }
+    // The open menu, dialog or rename: "sub:<group id>" / "server:<id>" (saveable as strings).
+    var sheet by rememberSaveable { mutableStateOf("") }
+    var renaming by rememberSaveable { mutableStateOf("") }
+    var deleting by rememberSaveable { mutableLongStateOf(0L) }
+    val manage = actions.manage
+    ManageOverlays(state, sections, locale, manage, sheet, renaming, deleting,
+        setSheet = { sheet = it }, setRenaming = { renaming = it }, setDeleting = { deleting = it })
     // Asked here, not in the item: «Авто» scrolling back into view must not take the focus again.
     val list = rememberLazyListState()
     val autoFocus = rememberFocusWhenShown(enabled = focus, bringIntoComposition = { list.scrollToItem(0) })
@@ -155,9 +178,21 @@ private fun ServerListView(state: ServersUiState, sections: ServerSections, acti
         }
         for (subscription in sections.subscriptions) {
             val group = subscription.group
+            val card = state.cards[group.id]
             item(key = "sub-${group.id}") {
-                state.cards[group.id]?.let { SubscriptionCardView(it, locale) { actions.update(group.id) } }
+                card?.let {
+                    SubscriptionCardView(
+                        it,
+                        locale,
+                        onUpdate = { actions.update(group.id) },
+                        onMore = { sheet = "sub:${group.id}" },
+                        onAnnounce = { actions.announce(group.id) },
+                        onProvider = manage.openProvider,
+                    )
+                }
             }
+            // A subscription the VPN cannot work through: its card says why, its servers are of no use.
+            if (card?.blocked != null) continue
             if (subscription.countries.isEmpty()) {
                 item(key = "sub-empty-${group.id}") {
                     Text(
@@ -179,7 +214,7 @@ private fun ServerListView(state: ServersUiState, sections: ServerSections, acti
         }
         if (sections.mine.isNotEmpty()) {
             item(key = "mine") { SectionHeader(stringResource(R.string.simple_group_my_servers)) }
-            servers(sections.mine, "mine", state, locale, actions)
+            servers(sections.mine, "mine", state, locale, actions, menu = { sheet = "server:${it.id}" })
         }
         if (sections.whitelist.isNotEmpty()) {
             item(key = "whitelist") {
@@ -200,6 +235,8 @@ private fun LazyListScope.servers(
     locale: Locale,
     actions: ServersActions,
     indent: Boolean = false,
+    /** «Мои серверы»: the ⋮ of a row, in the place where a country has its arrow (a remote reaches it with right). */
+    menu: ((ServerEntry) -> Unit)? = null,
 ) {
     items(list, key = { "$prefix-${it.id}" }) { server ->
         ChoiceRow(
@@ -212,8 +249,92 @@ private fun LazyListScope.servers(
             enabled = !state.busy,
             indent = indent,
             onClick = { actions.chooseServer(server) },
+            extra = menu?.let { open ->
+                { extraModifier ->
+                    IconButton(
+                        onClick = { open(server) },
+                        modifier = extraModifier.focusRing(FocusShapes.Pill, outset = (-3).dp),
+                    ) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.simple_server_more))
+                    }
+                }
+            },
         )
     }
+}
+
+/** The menus and dialogs of the list: [sheet] "sub:<id>" or "server:<id>", [renaming] likewise, [deleting] a group. */
+@Composable
+private fun ManageOverlays(
+    state: ServersUiState,
+    sections: ServerSections,
+    locale: Locale,
+    manage: ManageActions,
+    sheet: String,
+    renaming: String,
+    deleting: Long,
+    setSheet: (String) -> Unit,
+    setRenaming: (String) -> Unit,
+    setDeleting: (Long) -> Unit,
+) {
+    fun idOf(key: String, prefix: String): Long? = key.takeIf { it.startsWith(prefix) }?.removePrefix(prefix)?.toLongOrNull()
+    fun serverOf(id: Long?) = id?.let { sections.mine.firstOrNull { s -> s.id == it } }
+    // A subscription or server gone meanwhile (deleted in the classic interface) closes its menu.
+    idOf(sheet, "sub:")?.let { gid ->
+        state.cards[gid]?.let { card ->
+            SubscriptionSheet(
+                card,
+                advanced = state.advanced,
+                actions = manage,
+                onRename = {
+                    setSheet("")
+                    setRenaming("sub:$gid")
+                },
+                onDelete = {
+                    setSheet("")
+                    setDeleting(gid)
+                },
+                onDismiss = { setSheet("") },
+            )
+        }
+    }
+    serverOf(idOf(sheet, "server:"))?.let { server ->
+        val supporting = listOfNotNull(countryText(server.country, locale), latencyText(server.latency)).joinToString(" · ")
+        ServerSheet(
+            server,
+            supporting = supporting,
+            advanced = state.advanced,
+            actions = manage,
+            onRename = {
+                setSheet("")
+                setRenaming("server:${server.id}")
+            },
+            onDismiss = { setSheet("") },
+        )
+    }
+    idOf(renaming, "sub:")?.let { gid ->
+        state.cards[gid]?.let { card ->
+            RenameDialog(card.name, onSave = { name ->
+                setRenaming("")
+                manage.renameSubscription(gid, name)
+            }, onDismiss = { setRenaming("") })
+        }
+    }
+    serverOf(idOf(renaming, "server:"))?.let { server ->
+        RenameDialog(server.name, onSave = { name ->
+            setRenaming("")
+            manage.renameServer(server.id, name)
+        }, onDismiss = { setRenaming("") })
+    }
+    if (deleting > 0L) {
+        state.cards[deleting]?.let { card ->
+            DeleteSubscriptionDialog(card, onDelete = {
+                setDeleting(0L)
+                manage.deleteSubscription(card.groupId)
+            }, onDismiss = { setDeleting(0L) })
+        }
+    }
+    state.share?.let { ShareDialog(it, onDismiss = manage.closeShare) }
 }
 
 @Composable
@@ -339,7 +460,14 @@ private fun SectionHeader(title: String, hint: String? = null) {
 }
 
 @Composable
-private fun SubscriptionCardView(card: SubscriptionCard, locale: Locale, onUpdate: () -> Unit) {
+private fun SubscriptionCardView(
+    card: SubscriptionCard,
+    locale: Locale,
+    onUpdate: () -> Unit,
+    onMore: () -> Unit,
+    onAnnounce: () -> Unit,
+    onProvider: (Long, String) -> Unit,
+) {
     val context = LocalContext.current
     val warning = warningColor()
     val error = MaterialTheme.colorScheme.error
@@ -393,6 +521,91 @@ private fun SubscriptionCardView(card: SubscriptionCard, locale: Locale, onUpdat
                         Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.simple_sub_update))
                     }
                 }
+            }
+            IconButton(onClick = onMore, modifier = Modifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
+                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.simple_sub_more))
+            }
+        }
+        card.blocked?.let { BlockedPart(it, onUpdate, onProvider, onAnnounce) }
+        // The provider's announcement, unless the red message quotes it already: one line, the whole in its sheet.
+        val announce = card.facts?.announce.orEmpty()
+        if (announce.isNotEmpty() && card.blocked?.message != announce) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button, onClick = onAnnounce)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    painterResource(R.drawable.simple_ic_campaign),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.simple_sub_announce_label),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(announce, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The red part of a subscription card the VPN cannot work through: why (when the lines above do not say it), what the
+ * provider said, «Проверить снова» and the provider's page.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BlockedPart(notice: Notice, onUpdate: () -> Unit, onProvider: (Long, String) -> Unit, onAnnounce: () -> Unit) {
+    val context = LocalContext.current
+    val texts = remember(notice) { NoticeTexts.of(context, notice) }
+    val error = MaterialTheme.colorScheme.error
+    val facts = notice.facts
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+        // The end and the traffic are on the card's lines already.
+        if (notice.reason != NoticeReason.EXPIRED && notice.reason != NoticeReason.EXHAUSTED) {
+            Text(texts.body, style = MaterialTheme.typography.bodyMedium, color = error)
+        }
+        if (texts.quote.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Quote(texts.quote, MaterialTheme.colorScheme.onSurface, onOpen = onAnnounce.takeIf { texts.quote == facts.announce })
+        }
+        FlowRow(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        ) {
+            OutlinedButton(onClick = onUpdate, modifier = Modifier.focusRing(FocusShapes.Pill)) {
+                Text(stringResource(R.string.simple_notice_recheck))
+            }
+            val renewing = notice.reason == NoticeReason.EXPIRED || notice.reason == NoticeReason.EXHAUSTED
+            when {
+                facts.webUrl.isNotEmpty() -> Button(
+                    onClick = { onProvider(facts.groupId, facts.webUrl) },
+                    modifier = Modifier.focusRing(FocusShapes.Pill),
+                ) { Text(if (renewing) texts.renewLabel else stringResource(R.string.simple_notice_account)) }
+
+                facts.supportUrl.isNotEmpty() -> Button(
+                    onClick = { onProvider(facts.groupId, facts.supportUrl) },
+                    modifier = Modifier.focusRing(FocusShapes.Pill),
+                ) { Text(stringResource(R.string.simple_notice_support)) }
             }
         }
     }

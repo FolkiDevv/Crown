@@ -1,9 +1,14 @@
 package io.nekohasekai.sagernet.simple
 
 import android.os.SystemClock
+import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.simple.regime.NetworkRegimeWatcher
+import io.nekohasekai.sagernet.simple.subs.FetchMark
+import io.nekohasekai.sagernet.simple.subs.SubscriptionAlerts
+import io.nekohasekai.sagernet.simple.subs.SubscriptionState
 
 /**
  * Calls from the service in `:bg` (design.md D2, touch point 6 in `bg/BaseService.kt`). Batch 2 keeps the start of
@@ -49,6 +54,35 @@ object SimpleHooks {
         // already lets an app list edit see that the core may have taken the edit's staged per-app keys.
         if (restart) countStart()
         if (!restart) NetworkRegimeWatcher.serviceStopped()
+    }
+
+    /**
+     * A subscription fetch ended (touch point 9 in `group/SubscriptionRefresh.kt`): [deviceLimit] the panel's device
+     * limit headers, [servers] the answer had servers, [announce] it had an announcement. Keeps the mark of
+     * simple-ui "Сообщения подписки" until a fetch brings servers again; a failed fetch changes nothing else.
+     */
+    @JvmStatic
+    fun onSubscriptionFetched(gid: Long, deviceLimit: Boolean, servers: Boolean, announce: Boolean) = guarded {
+        val mark = when {
+            deviceLimit -> FetchMark.LIMIT
+            servers -> FetchMark.NONE
+            announce -> FetchMark.EMPTY
+            else -> return@guarded
+        }
+        SubscriptionState.setMark(gid, mark)
+    }
+
+    /** What a refresh refused for the device limit reports (the classic diff or error, the simple snackbar). */
+    @JvmStatic
+    fun deviceLimitMessage(announce: String): String {
+        val text = app.getString(R.string.simple_notice_limit_text)
+        return if (announce.isBlank()) text else text + "\n\n" + announce.trim()
+    }
+
+    /** A subscription update is through, whatever its outcome: the notifications of its state (in `:bg`). */
+    @JvmStatic
+    fun onSubscriptionRefreshed(gid: Long) = guarded {
+        SubscriptionAlerts.check(app, gid)
     }
 
     private fun countStart() {
