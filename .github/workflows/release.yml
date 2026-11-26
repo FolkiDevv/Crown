@@ -1,21 +1,27 @@
 name: Release
-# Crown: a manual run publishes the stable release v<VERSION_NAME> (fork.properties) at the run's commit, then raises
-# PATCH in fork.properties on the default branch so that the next pushes publish previews of the next version.
+# Crown (GitOps): fork.properties declares the release — VERSION_NAME and RELEASE (stable or pre.<N>). When a change of
+# that file reaches main, this workflow publishes the declared release v<VERSION_NAME> or v<VERSION_NAME>-pre.<N>,
+# unless its tag already exists; merges that leave the declaration alone build and publish nothing. A manual run on
+# main does the same (e.g. to finish a declaration whose publishing failed); a manual run on another branch builds its
+# declaration and only uploads the APKs as a workflow artifact. ci.yml checks the declaration on every pull request.
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - fork.properties
   workflow_dispatch:
-    inputs:
-      publish:
-        description: Publish the release v<VERSION_NAME> at this commit (otherwise the APKs are only uploaded as a workflow artifact)
-        type: boolean
-        default: true
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 permissions:
   contents: write
+env:
+  # pre-releases kept on GitHub: the updater reads the newest 20 releases, so stable ones must stay among them
+  KEEP_PREVIEWS: 10
 jobs:
   release:
-    name: Build and publish a release
+    name: Build and publish the declared release
     runs-on: ubuntu-latest
     env:
       SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
@@ -28,86 +34,96 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-      # The tag is v<VERSION_NAME>; a published release never reuses an existing tag.
-      - name: Version
-        id: version
+      - name: Plan
+        id: plan
         env:
-          PUBLISH: ${{ inputs.publish }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          VERSION_NAME=$(sed -n 's/^VERSION_NAME=//p' fork.properties | tr -d '\r[:space:]')
-          test -n "$VERSION_NAME"
-          TAG="v$VERSION_NAME"
-          if [ "$PUBLISH" = "true" ] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
-            echo "::error::$TAG already exists: raise VERSION_NAME in fork.properties for a new release"
-            exit 1
+          bash buildScript/release_plan.sh | tee -a "$GITHUB_OUTPUT" > "$RUNNER_TEMP/plan"
+          cat "$RUNNER_TEMP/plan"
+          TAG=$(sed -n 's/^tag=//p' "$RUNNER_TEMP/plan")
+          EXISTS=$(sed -n 's/^exists=//p' "$RUNNER_TEMP/plan")
+          PUBLISH=false
+          if [ "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH" ]; then PUBLISH=true; fi
+          SKIP=false
+          if [ "$PUBLISH" = true ] && [ "$EXISTS" = true ]; then
+            echo "::notice::fork.properties declares $TAG, which is already published: nothing to do"
+            SKIP=true
           fi
-          echo "version=$VERSION_NAME" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
       - name: Build
+        if: steps.plan.outputs.skip != 'true'
         uses: ./.github/actions/android-build
         with:
           tasks: app:assembleOssRelease
-          channel: stable
-          build-number: '999'
+          channel: ${{ steps.plan.outputs.channel }}
+          build-number: ${{ steps.plan.outputs.build }}
           sign: 'true'
       - name: Release assets
-        run: python3 buildScript/release_assets.py app/build/outputs/apk/oss/release dist stable
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          CHANNEL: ${{ steps.plan.outputs.channel }}
+        run: python3 buildScript/release_assets.py app/build/outputs/apk/oss/release dist "$CHANNEL"
       - name: Upload artifact
-        if: ${{ !inputs.publish }}
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.publish != 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: Crown-${{ steps.version.outputs.tag }}
+          name: Crown-${{ steps.plan.outputs.tag }}
           path: dist/
           if-no-files-found: error
           retention-days: 14
-      # The notes are the version's section of the fork changelog (fork.properties CHANGELOG), else the commits since
-      # the previous stable release.
-      - name: Publish release
-        if: ${{ inputs.publish }}
+      # Notes: a stable release takes its version's section of the fork changelog (fork.properties CHANGELOG), else the
+      # commits since the previous stable release; a preview lists the commits since the previous release or preview
+      # (the in-app updater falls back to this body).
+      - name: Publish
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          VERSION_NAME: ${{ steps.version.outputs.version }}
-          TAG: ${{ steps.version.outputs.tag }}
+          VERSION_NAME: ${{ steps.plan.outputs.version }}
+          CHANNEL: ${{ steps.plan.outputs.channel }}
+          TAG: ${{ steps.plan.outputs.tag }}
         run: |
           set -euo pipefail
-          NOTES="$RUNNER_TEMP/release.md"
-          if ! bash buildScript/release_notes.sh "$VERSION_NAME" > "$NOTES"; then
-            echo "::warning::No '#### $VERSION_NAME' section in the changelog: the release notes list the commits"
-            PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' HEAD^ 2>/dev/null || true)
-            RANGE=${PREV:+$PREV..}HEAD
-            TOTAL=$(git rev-list --count --no-merges "$RANGE")
-            {
-              git log --no-merges --format='* %s' -n 50 "$RANGE"
-              if [ "$TOTAL" -gt 50 ]; then echo "* … and $((TOTAL - 50)) more"; fi
-            } > "$NOTES"
-          fi
-          gh release create "$TAG" dist/* --latest --target "$GITHUB_SHA" --title "$TAG" --notes-file "$NOTES"
-      # Next version: PATCH + 1, unless the default branch already moved VERSION_NAME on. A push with GITHUB_TOKEN
-      # starts no workflow, so the bump itself publishes no preview.
-      - name: Raise the patch version
-        if: ${{ inputs.publish && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-        env:
-          VERSION_NAME: ${{ steps.version.outputs.version }}
-          BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          git fetch origin "$BRANCH"
-          git checkout -q -B "$BRANCH" "origin/$BRANCH"
-          CURRENT=$(sed -n 's/^VERSION_NAME=//p' fork.properties | tr -d '\r[:space:]')
-          if [ "$CURRENT" != "$VERSION_NAME" ]; then
-            echo "::notice::$BRANCH already has VERSION_NAME=$CURRENT"
-            exit 0
-          fi
-          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION_NAME"
-          NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
-          sed -i "s/^VERSION_NAME=.*/VERSION_NAME=$NEXT/" fork.properties
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -q -am "fork.properties: VERSION_NAME=$NEXT after the release v$VERSION_NAME"
-          if git push origin "HEAD:$BRANCH"; then
-            echo "::notice::VERSION_NAME raised to $NEXT on $BRANCH: pull it before the next commit"
+          NOTES="$RUNNER_TEMP/notes.md"
+          commits() {
+            local range=${1:+$1..}HEAD total
+            total=$(git rev-list --count --no-merges "$range")
+            git log --no-merges --format='* %s' -n "$2" "$range"
+            if [ "$total" -gt "$2" ]; then echo "* … and $((total - $2)) more"; fi
+          }
+          if [ "$CHANNEL" = stable ]; then
+            if ! bash buildScript/release_notes.sh "$VERSION_NAME" > "$NOTES"; then
+              echo "::warning::No '#### $VERSION_NAME' section in the changelog: the release notes list the commits"
+              PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' HEAD^ 2>/dev/null || true)
+              commits "$PREV" 50 > "$NOTES"
+            fi
+            gh release create "$TAG" dist/* --latest --target "$GITHUB_SHA" --title "$TAG" --notes-file "$NOTES"
           else
-            echo "::warning::Could not push the version bump: set VERSION_NAME=$NEXT (or higher) in fork.properties yourself"
+            PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null || true)
+            {
+              echo "Preview build of \`$(git rev-parse --short HEAD)\`."
+              echo
+              commits "$PREV" 30
+              if [ -n "$PREV" ]; then
+                echo
+                echo "**Full changelog**: https://github.com/$GH_REPO/compare/$PREV...$TAG"
+              fi
+            } > "$NOTES"
+            gh release create "$TAG" dist/* --prerelease --target "$GITHUB_SHA" --title "$TAG" --notes-file "$NOTES"
           fi
+      - name: Prune old previews
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.publish == 'true' && steps.plan.outputs.channel == 'preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release list --limit 200 --json tagName,isPrerelease,createdAt \
+            --jq "[.[] | select(.isPrerelease)] | sort_by(.createdAt) | reverse | .[${KEEP_PREVIEWS}:] | .[].tagName" |
+          while read -r OLD; do
+            echo "Deleting the old preview $OLD"
+            gh release delete "$OLD" --cleanup-tag --yes
+          done

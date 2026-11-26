@@ -1,9 +1,11 @@
 name: CI
+# Crown: pull requests and main only (a push to a PR branch is already checked through its pull_request event).
 on:
   push:
     branches:
-      - '**'
+      - main
   pull_request:
+  workflow_dispatch:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,3 +22,16 @@ jobs:
         uses: ./.github/actions/android-build
         with:
           tasks: app:testOssDebugUnitTest app:assembleOssDebug
+  # Crown (GitOps): what merging the pull request publishes (release.yml); fails on a declaration that cannot be published.
+  release-plan:
+    name: Release plan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # the pull request's merge commit and its first parent, the base branch as it is now
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Release plan
+        run: bash buildScript/release_plan.sh --check HEAD^1
