@@ -134,7 +134,12 @@ class NoticesViewModel(application: Application, private val saved: SavedStateHa
             val before = withContext(Dispatchers.IO) { updatedAt(gid) }
             SubscriptionClient.refreshGroup(gid, false)
             withTimeoutOrNull(RECHECK_WATCH_MS) {
-                while (withContext(Dispatchers.IO) { updatedAt(gid) } == before) delay(RECHECK_POLL_MS)
+                while (true) {
+                    val now = withContext(Dispatchers.IO) { updatedAt(gid) }
+                    // A failed read (null) tells nothing: only a change between two good reads ends the wait early.
+                    if (before != null && now != null && now != before) break
+                    delay(RECHECK_POLL_MS)
+                }
             }
             reload()
         }
