@@ -109,7 +109,11 @@ object SubscriptionAlerts {
             .setAutoCancel(true)
             .setContentIntent(open)
         if (news) {
-            open?.let { builder.addAction(0, context.getString(R.string.simple_notice_more), it) }
+            // «Подробнее» shows the announcement in the new interface; the classic one has no such sheet, and the
+            // notification's own text holds the whole announcement there.
+            if (SimpleUi.isSimpleSelected(SimpleUi.store(context))) {
+                open?.let { builder.addAction(0, context.getString(R.string.simple_notice_more), it) }
+            }
         } else {
             val url = facts.webUrl.ifEmpty { facts.supportUrl }
             if (url.isNotEmpty()) {

@@ -356,7 +356,9 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val profile = ProfileManager.getProfile(id) ?: return@manage
         val wasSelected = DataStore.selectedProxy == id
         val name = ServerCatalog.nameOf(profile, getApplication<Application>().getString(R.string.simple_server_unnamed))
-        ProfileManager.deleteProfile(profile.groupId, id)
+        // The running server itself stops with it (as a subscription update deleting it does); any other deletion leaves
+        // the connection, and a running «Авто» is rebuilt without it.
+        ProfileManager.batchDeleteProfiles(listOf(id), stopRunning = true)
         TrafficModeApplier.serversRemoved()
         mutableEvents.tryEmit(ServersEvent.Chosen)
         mutableMessages.tryEmit(
