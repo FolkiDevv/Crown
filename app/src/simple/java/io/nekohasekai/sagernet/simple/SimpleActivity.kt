@@ -137,6 +137,7 @@ import io.nekohasekai.sagernet.ui.GroupSettingsActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.ScannerActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
+import io.nekohasekai.sagernet.ui.profile.ProfileSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.profileSettingsIntent
 import io.nekohasekai.sagernet.update.UpdateActivity
 import io.nekohasekai.sagernet.utils.BatteryOptimizations
@@ -394,10 +395,16 @@ class SimpleActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        // The provider's page now covers the app. Armed here, before the state is saved: on Android 8.1 and older that
+        // happens before onStop, and a process ended while the page is open must still check the subscription.
+        notices.stopped()
+        super.onPause()
+    }
+
     override fun onStop() {
         home.setForeground(false)
         if (leaving()) leftApp = true
-        notices.stopped()
         super.onStop()
     }
 
@@ -1100,6 +1107,10 @@ private fun ServersSection(
     val state by servers.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // The classic editors report a change the running connection must take (they reload it themselves only in classic).
+    val editor = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.data?.getBooleanExtra(ProfileSettingsActivity.EXTRA_RESTART_NEEDED, false) == true) servers.settingsChanged()
+    }
     LaunchedEffect(servers) {
         servers.messages.collect { message ->
             val text = message.arg?.let { context.getString(message.text, it) } ?: context.getString(message.text)
@@ -1145,7 +1156,7 @@ private fun ServersSection(
                         shareSubscription = servers::shareSubscription,
                         deleteSubscription = servers::deleteSubscription,
                         subscriptionSettings = { gid ->
-                            context.startActivity(
+                            editor.launch(
                                 Intent(context, GroupSettingsActivity::class.java).putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, gid)
                             )
                         },
@@ -1154,7 +1165,7 @@ private fun ServersSection(
                         renameServer = servers::renameServer,
                         shareServer = servers::shareServer,
                         deleteServer = servers::deleteServer,
-                        editServer = { id -> scope.launch { openServerEditor(context, id) } },
+                        editServer = { id -> scope.launch { openServerEditor(context, id) { editor.launch(it) } } },
                         closeShare = servers::closeShare,
                     )
                 },
@@ -1257,10 +1268,10 @@ private fun BatteryPromptDialog(onAllow: () -> Unit, onLater: () -> Unit) {
 }
 
 /** The classic editor of an own server («Изменить параметры», advanced mode); back returns to the list. */
-private suspend fun openServerEditor(context: Context, id: Long) {
+private suspend fun openServerEditor(context: Context, id: Long, launch: (Intent) -> Unit) {
     val profile = withContext(Dispatchers.IO) { ProfileManager.getProfile(id) } ?: return
     try {
-        context.startActivity(profile.profileSettingsIntent(context, false))
+        launch(profile.profileSettingsIntent(context, false))
     } catch (e: ActivityNotFoundException) {
         Logs.w(e)
     }
