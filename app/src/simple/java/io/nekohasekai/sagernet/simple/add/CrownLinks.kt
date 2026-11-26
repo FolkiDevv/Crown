@@ -5,7 +5,8 @@ package io.nekohasekai.sagernet.simple.add
  * import flows of upstream already handle, so no flow learns a new scheme. No Android types, so JVM unit tests cover it.
  *
  * - `crown://addsub?url=<URL>&name=<name>` (parameters in any order, percent-encoded or not) — a subscription, made
- *   for a panel that inserts the subscription URL as it is (Remnawave `{{SUBSCRIPTION_LINK}}`);
+ *   for a panel that inserts the subscription URL as it is (Remnawave `{{SUBSCRIPTION_LINK}}`); such a raw URL is
+ *   taken verbatim with its own `?…&…` and escapes, up to `&name=` or the end;
  * - `crown://addsub/<URL>` and `crown://addsub/<URL>#<name>` — the same with the URL as the path, query included;
  * - `crown://install-config?url=…&name=…` — the clash spelling, the same as the first form;
  * - `crown://addsub/<base64 of "URL#name">`, `crown://add/…`, `crown://route/…`, `crown://remoteroute/…` — the
@@ -41,12 +42,26 @@ object CrownLinks {
         if (tail.startsWith("/") && path.isNotEmpty() && !path.startsWith("?")) return "throne://addsub$tail"
 
         val query = path.removePrefix("?").substringBefore('#')
-        val params = query.split('&').filter { it.isNotEmpty() }.associate {
+        // A raw http(s) URL (a panel inserts it as it is) keeps its own query and escapes: it runs up to `&name=`
+        // or the end of the query, and is not decoded. An encoded URL is one parameter, decoded once.
+        RAW_URL.find(query)?.let { raw ->
+            val start = raw.groups[1]!!.range.first
+            val end = NAME_AFTER.find(query, start)?.range?.first ?: query.length
+            return subscribe(query.substring(start, end), params(query.removeRange(raw.range.first, end))["name"].orEmpty())
+        }
+        val params = params(query)
+        return subscribe(params["url"].orEmpty(), params["name"].orEmpty())
+    }
+
+    private val RAW_URL = Regex("(?:^|&)url=(https?://)", RegexOption.IGNORE_CASE)
+    private val NAME_AFTER = Regex("&name=", RegexOption.IGNORE_CASE)
+
+    /** Query parameters by lower-case name, values percent-decoded. */
+    private fun params(query: String): Map<String, String> =
+        query.split('&').filter { it.isNotEmpty() }.associate {
             val eq = it.indexOf('=')
             if (eq < 0) it.lowercase() to "" else it.substring(0, eq).lowercase() to decode(it.substring(eq + 1))
         }
-        return subscribe(params["url"].orEmpty(), params["name"].orEmpty())
-    }
 
     private fun subscribe(url: String, name: String): String =
         "clash://install-config?url=${encode(url.trim())}&name=${encode(name.trim())}"

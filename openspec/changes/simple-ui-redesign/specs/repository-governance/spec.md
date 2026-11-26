@@ -36,11 +36,15 @@
 - **THEN** после перезапуска и обновления приложения значение остаётся выключенным
 
 ### Requirement: Ссылки crown://
-Crown MUST принимать ссылки `crown://` из браузера, других приложений, буфера обмена и QR-кода в обоих интерфейсах. Подписку MUST добавлять `crown://addsub?url=<URL>&name=<имя>` (URL можно не кодировать), `crown://addsub/<URL>[#имя]` и `crown://install-config?url=…`; остальные `crown://<команда>/…` MUST работать как `throne://<команда>/…`. Правки upstream MUST ограничиваться точками D2 и `FORK_IDENTITY_POINTS`.
+Crown MUST принимать ссылки `crown://` из браузера, других приложений, буфера обмена и QR-кода в обоих интерфейсах. Подписку MUST добавлять `crown://addsub?url=<URL>&name=<имя>` (некодированный URL берётся как есть), `crown://addsub/<URL>[#имя]` и `crown://install-config?url=…`; остальные `crown://<команда>/…` MUST работать как `throne://<команда>/…`. Правки upstream MUST ограничиваться точками D2 и `FORK_IDENTITY_POINTS`.
 
 #### Scenario: Подписка со страницы панели
 - **WHEN** на странице подписки нажата ссылка `crown://addsub?url=https://sub.example.com/abc&name=My%20VPN`
 - **THEN** открывается Crown и добавляет подписку `https://sub.example.com/abc` с именем «My VPN» (классический интерфейс сначала спрашивает)
+
+#### Scenario: Некодированный URL со своими параметрами
+- **WHEN** открыта ссылка `crown://addsub?url=https://a.b/s?token=a%26c&b=1&name=n`
+- **THEN** Crown добавляет подписку `https://a.b/s?token=a%26c&b=1` с именем «n»: `&b=1` не теряется, `%26` не декодируется
 
 #### Scenario: Ссылка Throne под схемой Crown
 - **WHEN** открыта ссылка `crown://add/<base64>` или `crown://route/…`

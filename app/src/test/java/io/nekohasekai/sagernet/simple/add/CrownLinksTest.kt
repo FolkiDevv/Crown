@@ -29,6 +29,20 @@ class CrownLinksTest {
             sub("https%3A%2F%2Fa.b%2Fc", "%F0%9F%91%91%20VPN%20%25-1"),
             CrownLinks.toThrone("crown://addsub?url=https://a.b/c&name=👑%20VPN%20%-1"),
         )
+        // a raw URL keeps its own query and escapes, with the name after or before it
+        assertEquals(
+            sub("https%3A%2F%2Fa.b%2Fs%3Ftoken%3Da%2526c%26b%3D1", "n"),
+            CrownLinks.toThrone("crown://addsub?url=https://a.b/s?token=a%26c&b=1&name=n"),
+        )
+        assertEquals(
+            sub("https%3A%2F%2Fa.b%2Fs%3Ftoken%3Da%2526c%26b%3D1", "My%20VPN"),
+            CrownLinks.toThrone("crown://addsub?name=My%20VPN&URL=https://a.b/s?token=a%26c&b=1"),
+        )
+        // the same URL fully encoded: decoded once, so %2526 becomes %26
+        assertEquals(
+            sub("https%3A%2F%2Fa.b%2Fs%3Ftoken%3Da%2526c%26b%3D1", "n"),
+            CrownLinks.toThrone("crown://addsub?url=https%3A%2F%2Fa.b%2Fs%3Ftoken%3Da%2526c%26b%3D1&name=n"),
+        )
         // no URL: still a subscription link, so the classic interface says that the URL is missing
         assertEquals(sub("", "x"), CrownLinks.toThrone("crown://addsub?name=x"))
         assertEquals(sub("", ""), CrownLinks.toThrone("crown://addsub"))
