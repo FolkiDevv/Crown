@@ -41,8 +41,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -62,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,6 +86,8 @@ import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.GroupRepo
+import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.add.AddActions
 import io.nekohasekai.sagernet.simple.add.AddBusyDialog
@@ -109,6 +114,7 @@ import io.nekohasekai.sagernet.simple.repair.RepairEnvironment
 import io.nekohasekai.sagernet.simple.repair.RepairReportExport
 import io.nekohasekai.sagernet.simple.repair.RepairScreen
 import io.nekohasekai.sagernet.simple.repair.RepairViewModel
+import io.nekohasekai.sagernet.simple.servers.ManageActions
 import io.nekohasekai.sagernet.simple.servers.ServersActions
 import io.nekohasekai.sagernet.simple.servers.ServersEvent
 import io.nekohasekai.sagernet.simple.servers.ServersScreen
@@ -119,10 +125,19 @@ import io.nekohasekai.sagernet.simple.settings.ClassicScreen
 import io.nekohasekai.sagernet.simple.settings.ClassicVisit
 import io.nekohasekai.sagernet.simple.settings.SettingsScreen
 import io.nekohasekai.sagernet.simple.settings.SettingsViewModel
+import io.nekohasekai.sagernet.simple.subs.AnnouncementSheet
+import io.nekohasekai.sagernet.simple.subs.NoticeActions
+import io.nekohasekai.sagernet.simple.subs.NoticeCard
+import io.nekohasekai.sagernet.simple.subs.NoticesViewModel
+import io.nekohasekai.sagernet.simple.subs.SubscriptionAlerts
+import io.nekohasekai.sagernet.simple.subs.SubscriptionState
+import io.nekohasekai.sagernet.simple.subs.openLink
 import io.nekohasekai.sagernet.ui.AppManagerActivity
+import io.nekohasekai.sagernet.ui.GroupSettingsActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.ScannerActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
+import io.nekohasekai.sagernet.ui.profile.profileSettingsIntent
 import io.nekohasekai.sagernet.update.UpdateActivity
 import io.nekohasekai.sagernet.utils.BatteryOptimizations
 import kotlinx.coroutines.Dispatchers
@@ -152,6 +167,7 @@ class SimpleActivity : AppCompatActivity() {
     private val servers: ServersViewModel by viewModels()
     private val settings: SettingsViewModel by viewModels()
     private val repair: RepairViewModel by viewModels()
+    private val notices: NoticesViewModel by viewModels()
 
     /** The classic app list (AppManagerActivity) editing one of the simple UI's two app lists. */
     private val appList = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -194,7 +210,13 @@ class SimpleActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         // Subscription defaults of the simple UI (HWID, the provider's interval), once per install.
         lifecycleScope.launch(Dispatchers.IO) { SimpleDefaults.apply(applicationContext) }
+        // The notification channels of the subscription messages exist from the start, so Android lists them to set up.
+        SubscriptionAlerts.ensureChannels(applicationContext)
         if (savedInstanceState == null) requestedSection.value = sectionOf(intent)
+        if (savedInstanceState == null) {
+            openAnnouncement(intent)
+            openProvider(intent)
+        }
         setContent {
             SimpleTheme {
                 SimpleApp(
@@ -204,6 +226,7 @@ class SimpleActivity : AppCompatActivity() {
                     servers = servers,
                     settings = settings,
                     repair = repair,
+                    notices = notices,
                     openRepairTarget = ::openRepairTarget,
                     launchers = AddLaunchers(::pasteClipboard, ::openScanner, ::chooseFile),
                     openAppList = ::openAppList,
@@ -237,6 +260,8 @@ class SimpleActivity : AppCompatActivity() {
                             servers.reload(thenTest = true)
                             // The import may have switched automatic subscription updates on (never set before).
                             settings.refresh()
+                            // Its provider may have sent an announcement or a warning with the first download.
+                            notices.reload()
                         }
 
                         is AddEvent.OpenClassic -> openClassicImport(event.text)
@@ -254,6 +279,7 @@ class SimpleActivity : AppCompatActivity() {
                         ServersEvent.Updated -> {
                             modes.syncGroups()
                             home.refreshServer()
+                            notices.reload()
                         }
                     }
                 }
@@ -295,6 +321,8 @@ class SimpleActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         sectionOf(intent)?.let { requestedSection.value = it }
+        openAnnouncement(intent)
+        openProvider(intent)
         handleImportIntent(intent)
     }
 
@@ -304,6 +332,40 @@ class SimpleActivity : AppCompatActivity() {
     private fun sectionOf(intent: Intent?): SimpleSection? =
         intent?.getStringExtra(EXTRA_SECTION)?.let { name -> SimpleSection.entries.firstOrNull { it.name == name } }
 
+    /** A provider message notification's «Подробнее»: the announcement opens over the home screen, once. */
+    private fun openAnnouncement(intent: Intent?) {
+        val gid = intent?.getLongExtra(SubscriptionAlerts.EXTRA_ANNOUNCE, 0L) ?: 0L
+        if (gid <= 0L) return
+        intent?.removeExtra(SubscriptionAlerts.EXTRA_ANNOUNCE)
+        requestedSection.value = SimpleSection.HOME
+        notices.openAnnouncement(gid)
+    }
+
+    /**
+     * A subscription notification's «Продлить» / «Личный кабинет»: the provider's page opens, and the subscription is
+     * checked again when the user comes back, as from the home card.
+     */
+    private fun openProvider(intent: Intent?) {
+        val gid = intent?.getLongExtra(SubscriptionAlerts.EXTRA_PROVIDER_GROUP, 0L) ?: 0L
+        val url = intent?.getStringExtra(SubscriptionAlerts.EXTRA_PROVIDER_URL).orEmpty()
+        intent?.removeExtra(SubscriptionAlerts.EXTRA_PROVIDER_GROUP)
+        intent?.removeExtra(SubscriptionAlerts.EXTRA_PROVIDER_URL)
+        if (gid <= 0L || url.isEmpty()) return
+        requestedSection.value = SimpleSection.HOME
+        // The extras can come from any app (MainActivity passes them on): only a page this subscription itself names,
+        // as its buttons may open it, is opened.
+        lifecycleScope.launch {
+            val allowed = withContext(Dispatchers.IO) {
+                runCatching {
+                    GroupRepo.get(gid)?.takeIf { it.isSubscription }?.let { group ->
+                        SubscriptionState.factsOf(group, 0, emptyList()).let { url == it.webUrl || url == it.supportUrl }
+                    } == true
+                }.getOrDefault(false)
+            }
+            if (allowed && openLink(this@SimpleActivity, url)) notices.leavingFor(gid)
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         home.setForeground(true)
@@ -311,6 +373,8 @@ class SimpleActivity : AppCompatActivity() {
         // Groups added meanwhile in :bg (a subscription added in the classic interface) join the «Авто» selectors.
         modes.syncGroups()
         servers.reload()
+        // A subscription the user left to renew is checked again; the messages may have changed meanwhile.
+        notices.resumed()
         // Auto connect, updates and the theme may have been changed in the classic interface meanwhile.
         settings.refresh()
         clipboardCheck = true
@@ -333,6 +397,7 @@ class SimpleActivity : AppCompatActivity() {
     override fun onStop() {
         home.setForeground(false)
         if (leaving()) leftApp = true
+        notices.stopped()
         super.onStop()
     }
 
@@ -660,6 +725,7 @@ fun SimpleApp(
     servers: ServersViewModel,
     settings: SettingsViewModel,
     repair: RepairViewModel,
+    notices: NoticesViewModel,
     /** A system settings screen «Починка» leads to (only the user changes Android's settings). */
     openRepairTarget: (RepairAction) -> Unit,
     launchers: AddLaunchers,
@@ -703,6 +769,16 @@ fun SimpleApp(
     // One snackbar for every section: the add flow reports from wherever it was started.
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
+    // The subscription messages (simple-ui "Сообщения подписки"): a page of the provider is checked again on return.
+    val noticeActions = remember(notices, context) {
+        NoticeActions(
+            recheck = notices::recheck,
+            later = notices::later,
+            hide = notices::hide,
+            more = { notices.openAnnouncement(it.groupId) },
+            openProvider = { gid, url -> if (openLink(context, url)) notices.leavingFor(gid) },
+        )
+    }
     LaunchedEffect(add) {
         add.notices.collect { notice -> snackbar.showSnackbar(notice.resolve(context)) }
     }
@@ -841,10 +917,15 @@ fun SimpleApp(
                     snackbar,
                     focus = focus,
                     showSnackbar = showSnackbar,
+                    notices = notices,
+                    noticeActions = noticeActions,
                 )
             }
             val serversSection = @Composable { focus: Boolean, showSnackbar: Boolean ->
-                ServersSection(servers, onAdd = { addSheet = true }, snackbar, focus = focus, showSnackbar = showSnackbar)
+                ServersSection(
+                    servers, onAdd = { addSheet = true }, snackbar, focus = focus, showSnackbar = showSnackbar,
+                    openProvider = noticeActions.openProvider, announce = notices::openAnnouncement,
+                )
             }
             when {
                 // The section chosen gets the focus of a remote; the other pane keeps its place.
@@ -900,6 +981,16 @@ fun SimpleApp(
 
         offer != null -> ClipboardOfferDialog(offer, onAccept = add::acceptOffer, onDecline = add::declineOffer)
     }
+
+    // The whole announcement, from the home card, the subscription card or the notification.
+    val noticesState by notices.state.collectAsStateWithLifecycle()
+    noticesState.sheet?.let { announcement ->
+        AnnouncementSheet(
+            announcement,
+            onProvider = noticeActions.openProvider,
+            onDismiss = notices::closeAnnouncement,
+        )
+    }
 }
 
 private fun Notice.resolve(context: Context): String =
@@ -917,8 +1008,11 @@ private fun HomeSection(
     focus: Boolean,
     /** The section shows the snackbar itself (not when it shares the window with the server list). */
     showSnackbar: Boolean,
+    notices: NoticesViewModel,
+    noticeActions: NoticeActions,
 ) {
     val state by home.state.collectAsStateWithLifecycle()
+    val noticesState by notices.state.collectAsStateWithLifecycle()
     val modesState by modes.state.collectAsStateWithLifecycle()
     val settingsState by settings.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -967,6 +1061,9 @@ private fun HomeSection(
                 },
                 modifier = Modifier.weight(1f),
                 focus = focus,
+                notice = noticesState.home?.let { notice ->
+                    { noticeModifier -> NoticeCard(notice, noticeActions, noticeModifier) }
+                },
             )
         }
     }
@@ -997,14 +1094,27 @@ private fun ServersSection(
     snackbar: SnackbarHostState,
     focus: Boolean,
     showSnackbar: Boolean,
+    openProvider: (Long, String) -> Unit,
+    announce: (Long) -> Unit,
 ) {
     val state by servers.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     LaunchedEffect(servers) {
         servers.messages.collect { message ->
-            snackbar.showSnackbar(
-                message.arg?.let { context.getString(message.text, it) } ?: context.getString(message.text)
-            )
+            val text = message.arg?.let { context.getString(message.text, it) } ?: context.getString(message.text)
+            val action = message.action
+            if (action == null) {
+                snackbar.showSnackbar(text)
+            } else {
+                // Its own coroutine: the next message waits for this one, but the list keeps collecting.
+                launch {
+                    val result = snackbar.showSnackbar(
+                        text, actionLabel = context.getString(message.actionLabel), duration = SnackbarDuration.Long,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) action()
+                }
+            }
         }
     }
     // Opening the section reads the list again and starts the background delay check (simple-ui 5.3).
@@ -1027,6 +1137,28 @@ private fun ServersSection(
                 update = servers::update,
                 updateAll = servers::updateAll,
                 add = onAdd,
+                manage = remember(servers, context) {
+                    ManageActions(
+                        update = servers::update,
+                        openProvider = openProvider,
+                        renameSubscription = servers::renameSubscription,
+                        shareSubscription = servers::shareSubscription,
+                        deleteSubscription = servers::deleteSubscription,
+                        subscriptionSettings = { gid ->
+                            context.startActivity(
+                                Intent(context, GroupSettingsActivity::class.java).putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, gid)
+                            )
+                        },
+                        connect = servers::chooseServer,
+                        testServer = servers::testServer,
+                        renameServer = servers::renameServer,
+                        shareServer = servers::shareServer,
+                        deleteServer = servers::deleteServer,
+                        editServer = { id -> scope.launch { openServerEditor(context, id) } },
+                        closeShare = servers::closeShare,
+                    )
+                },
+                announce = announce,
             ),
             modifier = modifier,
             focus = focus,
@@ -1122,4 +1254,14 @@ private fun BatteryPromptDialog(onAllow: () -> Unit, onLater: () -> Unit) {
             TextButton(onClick = onLater, modifier = button) { Text(stringResource(R.string.simple_offer_later)) }
         },
     )
+}
+
+/** The classic editor of an own server («Изменить параметры», advanced mode); back returns to the list. */
+private suspend fun openServerEditor(context: Context, id: Long) {
+    val profile = withContext(Dispatchers.IO) { ProfileManager.getProfile(id) } ?: return
+    try {
+        context.startActivity(profile.profileSettingsIntent(context, false))
+    } catch (e: ActivityNotFoundException) {
+        Logs.w(e)
+    }
 }

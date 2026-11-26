@@ -11,14 +11,22 @@ import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorClient
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorStatus
 import io.nekohasekai.sagernet.bg.test.TestSpec
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
 import io.nekohasekai.sagernet.simple.modes.Managed
 import io.nekohasekai.sagernet.simple.modes.TrafficModeApplier
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
+import io.nekohasekai.sagernet.simple.subs.Notice
+import io.nekohasekai.sagernet.simple.subs.NoticeLevel
+import io.nekohasekai.sagernet.simple.subs.SubscriptionFacts
+import io.nekohasekai.sagernet.simple.subs.SubscriptionNotices
+import io.nekohasekai.sagernet.simple.subs.SubscriptionState
 import io.nekohasekai.sagernet.ui.test.RowPhase
 import io.nekohasekai.sagernet.ui.test.TestSessionClient
 import io.nekohasekai.sagernet.ui.test.TestUiState
@@ -51,7 +59,18 @@ data class SubscriptionCard(
     /** Epoch seconds of the last successful update, 0 = never. */
     val lastUpdate: Long,
     val refreshing: Boolean,
+    /** The subscription link (for «Поделиться ссылкой»). */
+    val url: String = "",
+    /** Its servers in the list (placeholders aside). */
+    val servers: Int = 0,
+    /** What its messages need (simple-ui "Сообщения подписки"): the provider's pages and announcement. */
+    val facts: SubscriptionFacts? = null,
+    /** A red message: the VPN cannot work through this subscription; its countries are hidden then. */
+    val blocked: Notice? = null,
 )
+
+/** «Поделиться»: [link] as a QR code and to copy, with [warning] about who may use it. */
+data class ShareRequest(@StringRes val title: Int, val name: String, val link: String, @StringRes val warning: Int)
 
 /** The server the running auto-selector picked, for «Авто» or the chosen country. */
 data class RunningPick(val selectorId: Long, val name: String, val country: String?)
@@ -68,13 +87,23 @@ data class ServersUiState(
     val refreshing: Boolean = false,
     /** A choice is being applied. */
     val busy: Boolean = false,
+    /** The advanced mode: the menus also lead to the classic editors. */
+    val advanced: Boolean = false,
+    /** The share dialog, null while it is closed. */
+    val share: ShareRequest? = null,
 ) {
     val autoSelected: Boolean get() = selected > 0L && (selected == managed.auto || selected == managed.autoWhitelist)
     val countrySelected: Boolean get() = selected > 0L && selected == managed.country && choice != null
 }
 
-/** A snackbar text: [text] with [arg] as its only argument, if any. */
-data class ServersMessage(@StringRes val text: Int, val arg: String? = null)
+/** A snackbar text: [text] with [arg] as its only argument, if any, and an optional action. */
+data class ServersMessage(
+    @StringRes val text: Int,
+    val arg: String? = null,
+    /** A snackbar action ([actionLabel]) and what it does. */
+    @StringRes val actionLabel: Int = 0,
+    val action: (() -> Unit)? = null,
+)
 
 /**
  * The «Серверы» section (simple-ui spec "Структура списка серверов", "Выбор сервера в списке", "Определение страны
@@ -201,7 +230,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             } ?: return@launch
             // The live results of a running test go over the stored ones here, on the main thread that owns them.
             val live = loaded.copy(sections = loaded.sections?.let(::withLiveLatency))
-            mutableState.update { live.copy(pick = it.pick, refreshing = it.refreshing, busy = it.busy) }
+            mutableState.update { live.copy(pick = it.pick, refreshing = it.refreshing, busy = it.busy, share = it.share) }
             publishCards()
             // Names and countries may have changed (an update in :bg): the running pick is looked up again.
             pickInfo = null
@@ -284,6 +313,124 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         super.onCleared()
     }
 
+    // ------------------------------------------------------------------------------------------------ management
+
+    /** «Переименовать» of a subscription: its own name, which later updates keep (Profile-Title names only a new one). */
+    fun renameSubscription(groupId: Long, name: String) = manage {
+        val group = GroupRepo.get(groupId) ?: return@manage
+        val text = name.trim().takeIf { it.isNotEmpty() && it != group.name } ?: return@manage
+        // Only the name: the rest of the row is :bg's to write (an update may be storing its metadata meanwhile).
+        SagerDatabase.instance.openHelper.writableDatabase
+            .execSQL("UPDATE `groups` SET `name` = ? WHERE `id` = ?", arrayOf<Any>(text, groupId))
+        GroupRepo.postUpdate(groupId)
+        // Home shows the subscription by its name too.
+        mutableEvents.tryEmit(ServersEvent.Updated)
+    }
+
+    /** «Удалить подписку» (after its dialog): the group and its servers; «Авто» follows the groups left. */
+    fun deleteSubscription(groupId: Long) = manage {
+        val name = GroupRepo.get(groupId)?.displayName() ?: return@manage
+        if (GroupRepo.delete(groupId)) {
+            SubscriptionState.forget(groupId)
+            // A running «Авто» may still connect through its servers.
+            TrafficModeApplier.serversChanged()
+            mutableMessages.tryEmit(ServersMessage(R.string.simple_sub_deleted, name))
+            mutableEvents.tryEmit(ServersEvent.Updated)
+        } else {
+            mutableMessages.tryEmit(ServersMessage(R.string.simple_delete_failed))
+        }
+    }
+
+    /** «Переименовать» of an own server. */
+    fun renameServer(id: Long, name: String) = manage {
+        val profile = ProfileManager.getProfile(id) ?: return@manage
+        val text = name.trim().takeIf { it.isNotEmpty() && it != profile.outbound.name } ?: return@manage
+        val outbound = profile.outbound
+        outbound.name = text
+        ProfileManager.updateOutbound(profile.putOutbound(outbound))
+        mutableEvents.tryEmit(ServersEvent.Chosen)
+    }
+
+    /** «Удалить» of an own server: at once, with «Вернуть» in the snackbar (a new copy, chosen again if it was). */
+    fun deleteServer(id: Long) = manage {
+        val profile = ProfileManager.getProfile(id) ?: return@manage
+        val wasSelected = DataStore.selectedProxy == id
+        val name = ServerCatalog.nameOf(profile, getApplication<Application>().getString(R.string.simple_server_unnamed))
+        // The running server itself stops with it (as a subscription update deleting it does); any other deletion leaves
+        // the connection, and a running «Авто» is rebuilt without it.
+        val outcome = ProfileManager.batchDeleteProfiles(listOf(id), stopRunning = true)
+        if (!outcome.ok || id !in outcome.deleted) {
+            mutableMessages.tryEmit(ServersMessage(R.string.simple_delete_failed))
+            return@manage
+        }
+        TrafficModeApplier.serversChanged()
+        mutableEvents.tryEmit(ServersEvent.Chosen)
+        mutableMessages.tryEmit(
+            ServersMessage(R.string.simple_server_deleted, name, R.string.simple_server_undo) {
+                manage {
+                    val copy = ProfileManager.createProfile(profile.groupId, profile.outbound)
+                    TrafficModeApplier.serverRestored(copy.id, wasSelected)
+                    mutableEvents.tryEmit(ServersEvent.Chosen)
+                }
+            }
+        )
+    }
+
+    /** «Проверить задержку» of one server, unless a check of this section or another one runs. */
+    fun testServer(id: Long) {
+        if (ownTest != NONE || roundBusy) {
+            mutableMessages.tryEmit(ServersMessage(R.string.simple_server_test_busy))
+            return
+        }
+        val before = TestSessionClient.state.value
+        if (!TestSessionClient.startProfiles(TestSpec.KIND_URL, listOf(id))) {
+            mutableMessages.tryEmit(ServersMessage(R.string.simple_server_test_busy))
+            return
+        }
+        testedIds += id
+        stateBeforeTest = before
+        ownTest = TestSpec.KIND_URL
+        roundBusy = true
+        liveLatency.clear()
+    }
+
+    /** «Поделиться ссылкой» of a subscription. */
+    fun shareSubscription(card: SubscriptionCard) {
+        if (card.url.isBlank()) return
+        mutableState.update {
+            it.copy(share = ShareRequest(R.string.simple_share_sub_title, card.name, card.url.trim(), R.string.simple_share_sub_warning))
+        }
+    }
+
+    /** «Поделиться» of an own server: its link, when its type has one. */
+    fun shareServer(id: Long) = manage {
+        val profile = ProfileManager.getProfile(id) ?: return@manage
+        val link = profile.exportLink()
+        if (link.isEmpty()) {
+            mutableMessages.tryEmit(ServersMessage(R.string.simple_share_no_link))
+            return@manage
+        }
+        val name = ServerCatalog.nameOf(profile, getApplication<Application>().getString(R.string.simple_server_unnamed))
+        mutableState.update {
+            it.copy(share = ShareRequest(R.string.simple_share_server_title, name, link, R.string.simple_share_server_warning))
+        }
+    }
+
+    fun closeShare() = mutableState.update { it.copy(share = null) }
+
+    /** A change of the user's in the database, then the list read again. */
+    private fun manage(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { block() }
+            } catch (e: Exception) {
+                Logs.w("simple servers: management failed", e)
+                mutableMessages.tryEmit(ServersMessage(R.string.simple_change_failed))
+            }
+            reload()
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ choice
 
     private fun choose(block: suspend () -> Unit) {
@@ -315,10 +462,17 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val locale = context.resources.configuration.locales[0]
         val sections = ServerList.build(snapshot.entries, servers) { CountryLabels.name(it, locale) }
         val now = System.currentTimeMillis() / 1000
+        val byGroup = servers.groupBy { it.groupId }
         val cards = snapshot.groups.filter { it.isSubscription }.associate { group ->
             val info = group.subInfo
             val valid = info.valid
+            val (placeholders, usable) = byGroup[group.id].orEmpty().partition { it.placeholder }
+            val facts = SubscriptionState.factsOf(group, usable.size, placeholders.map { it.name })
             group.id to SubscriptionCard(
+                url = group.url,
+                servers = usable.size,
+                facts = facts,
+                blocked = SubscriptionNotices.of(facts, now).firstOrNull { it.level == NoticeLevel.BLOCKED },
                 groupId = group.id,
                 name = group.displayName(),
                 remaining = if (valid && info.hasQuota && info.total > 0L) info.remaining else null,
@@ -336,6 +490,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             selected = DataStore.selectedProxy,
             managed = TrafficModes.managedIds(),
             choice = TrafficModes.countryChoice(),
+            advanced = SimpleUi.isAdvanced(SimpleUi.store(context)),
         )
     }
 

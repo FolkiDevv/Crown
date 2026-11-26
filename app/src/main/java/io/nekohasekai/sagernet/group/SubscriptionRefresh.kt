@@ -68,6 +68,14 @@ internal object SubscriptionRefresh {
      * report goes to the log, and with [Surface.Diff] / [Surface.Report] to a popup.
      */
     suspend fun refresh(gid: Long, surface: Surface, notifyErrors: Boolean) {
+        try {
+            update(gid, surface, notifyErrors)
+        } finally {
+            io.nekohasekai.sagernet.simple.SimpleHooks.onSubscriptionRefreshed(gid)
+        }
+    }
+
+    private suspend fun update(gid: Long, surface: Surface, notifyErrors: Boolean) {
         val group = GroupRepo.get(gid) ?: return
         if (group.archive) return
         val options = group.subOptions
@@ -234,6 +242,10 @@ internal object SubscriptionRefresh {
         val gid = group.id
         val fetched = SubscriptionFetch.fetch(url, group.name, RequestIdentity.resolve(group))
         if (fetched.error != null) {
+            // An answer for a URL the user has replaced meanwhile says nothing about the subscription.
+            if (GroupRepo.get(gid)?.url?.trim() == url) {
+                io.nekohasekai.sagernet.simple.SimpleHooks.onSubscriptionFetched(gid, fetched.deviceLimit, servers = false, announce = false)
+            }
             if (surface == Surface.Report) {
                 // The group is stored before the download: a failed one is fixed through its own TLS, HTTP and User Agent settings.
                 val report = ImportReport()
@@ -254,6 +266,17 @@ internal object SubscriptionRefresh {
         // abort before the first write (no deletion, no update time). Parsing writes nothing, so it runs first.
         val info = fetched.subInfo
         val result = parse(fetched.body)
+        val announced = info.valid && info.announce.isNotEmpty()
+        io.nekohasekai.sagernet.simple.SimpleHooks.onSubscriptionFetched(gid, fetched.deviceLimit, result.outbounds.isNotEmpty(), announced)
+        // A panel refusing for its device limit sends placeholders at most: the servers of the last update stay.
+        if (fetched.deviceLimit) {
+            if (info.valid) saveMetadata(group, info)
+            val message = io.nekohasekai.sagernet.simple.SimpleHooks.deviceLimitMessage(if (info.valid) info.announce else "")
+            Logs.w("${group.name}: $message")
+            if (surface != Surface.Log) SubscriptionQueue.report(gid, reportTitle(surface, group.name), message, true)
+            else if (notifyErrors) SubscriptionQueue.error(gid, message)
+            return null
+        }
         if (result.outbounds.isEmpty()) {
             val probe = result.report()
             if (looksLikeWebPage(fetched.body)) probe.addFatal(str(R.string.subs_web_page))

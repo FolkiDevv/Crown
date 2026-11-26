@@ -6,11 +6,13 @@ import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.simple.modes.WhitelistKeywords
+import io.nekohasekai.sagernet.simple.subs.SubscriptionState
 import java.util.regex.Pattern
 
 /**
  * Reads the groups and servers «Серверы» shows from the database (blocking: call it off the main thread). Auto-selectors
- * are left out (the simple interface has its own «Авто»), and so are archived groups.
+ * are left out (the simple interface has its own «Авто»), and so are archived groups. A subscription's placeholders
+ * are marked ([SubscriptionState.isPlaceholder]): the list leaves them out.
  */
 object ServerCatalog {
 
@@ -34,6 +36,7 @@ object ServerCatalog {
                     latency = profile.latency,
                     country = CountryFromName.resolve(nameOf(profile), profile.testCountry, profile.id in detecting),
                     whitelist = whitelist.matcher(nameOf(profile)).find(),
+                    placeholder = group.isSubscription && SubscriptionState.isPlaceholder(profile),
                 )
             }
         }
@@ -48,8 +51,10 @@ object ServerCatalog {
         val whitelist = whitelistPattern(keywords)
         val (chosen, others) = SagerDatabase.proxyDao.getByGroup(choice.groupId)
             .filter { it.type != AutoSelectorProfiles.TYPE }
+            // A placeholder is never chosen, but a name it shares is not a name of the country alone.
             .partition {
-                !whitelist.matcher(nameOf(it)).find() &&
+                !SubscriptionState.isPlaceholder(it) &&
+                    !whitelist.matcher(nameOf(it)).find() &&
                     CountryFromName.resolve(nameOf(it), it.testCountry).code == choice.code
             }
         // The selector tells its members apart by name only: a name another server of the group (another country, a

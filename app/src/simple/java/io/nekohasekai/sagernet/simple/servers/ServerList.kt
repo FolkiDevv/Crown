@@ -9,6 +9,8 @@ data class ServerEntry(
     val latency: Int,
     val country: ServerCountry,
     val whitelist: Boolean,
+    /** A subscription's placeholder (simple-ui "Сообщения подписки"): in no section, no check, no country. */
+    val placeholder: Boolean = false,
 )
 
 /** A group as the list needs it, in the user's group order. */
@@ -56,8 +58,9 @@ object ServerList {
         servers: List<ServerEntry>,
         countryName: (String) -> String,
     ): ServerSections {
-        val byGroup = servers.groupBy { it.groupId }
-        val whitelist = servers.filter { it.whitelist && groups.any { g -> g.id == it.groupId } }.sortedWith(byName)
+        val real = servers.filter { !it.placeholder }
+        val byGroup = real.groupBy { it.groupId }
+        val whitelist = real.filter { it.whitelist && groups.any { g -> g.id == it.groupId } }.sortedWith(byName)
         val subscriptions = ArrayList<SubscriptionSection>()
         val mine = ArrayList<ServerEntry>()
         for (group in groups) {

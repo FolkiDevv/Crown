@@ -36,6 +36,8 @@ TOUCH_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt": "6: SimpleHooks service start/stop",
     "app/src/main/java/io/nekohasekai/sagernet/group/RemoteRouteUpdater.kt": "7: SimpleConfigRepo.refresh",
     "app/src/main/java/moe/matsuri/nb4a/NativeInterface.kt": "8: network listener keyed by the gomobile refnum (leak fix)",
+    "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionFetch.kt": "9: device limit headers of a subscription answer",
+    "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionRefresh.kt": "9: SimpleHooks.onSubscriptionFetched/onSubscriptionRefreshed",
 }
 
 # openspec/specs/repository-governance, requirement "Идентичность форка Crown". Keep both in sync.
@@ -61,7 +63,7 @@ FORK_DIRS = (
     "app/src/simple/", "openspec/", "tools/diagnostics/",
     # fork identity files
     "fork.properties", "CROWN_CHANGELOG.md", "CROWN.md", "buildSrc/src/main/kotlin/Fork.kt", "app/src/oss/res/",
-    "buildScript/release_plan.sh", ".github/images/crown/", ".coderabbit.yaml",
+    "buildScript/release_plan.sh", ".github/images/crown/", ".coderabbit.yaml", "AGENTS.md", "CLAUDE.md",
 )
 NEW_ONLY_DIRS = ("app/src/test/",)
 
