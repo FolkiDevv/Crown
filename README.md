@@ -6,14 +6,14 @@
 
 **Простой VPN-клиент для Android, который сам подстраивается под сеть, включая мобильные белые списки.<br>Сборка [Throne for Android](https://github.com/throneproj/ThroneForAndroid) на ядре [sing-box](https://github.com/SagerNet/sing-box).**
 
-[![Release](https://img.shields.io/github/v/release/FolkiDevv/ThroneForAndroid?include_prereleases&style=flat-square&label=release&color=8E2A5C)](https://github.com/FolkiDevv/ThroneForAndroid/releases)
-[![License](https://img.shields.io/github/license/FolkiDevv/ThroneForAndroid?style=flat-square&color=6E7781)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/FolkiDevv/Crown?include_prereleases&style=flat-square&label=release&color=8E2A5C)](https://github.com/FolkiDevv/Crown/releases)
+[![License](https://img.shields.io/github/license/FolkiDevv/Crown?style=flat-square&color=6E7781)](LICENSE)
 [![Upstream](https://img.shields.io/badge/upstream-throneproj%2FThroneForAndroid-2F80ED?style=flat-square&logo=github)](https://github.com/throneproj/ThroneForAndroid)
 
 </div>
 
 > [!IMPORTANT]
-> **Crown — это форк, а не Throne.** В нём собран свой набор функций для определённой аудитории: пользователей из России, которым нужен VPN «в одну кнопку» и которые сталкиваются с белыми списками в мобильных сетях. Изменения форка **не будут влиты в оригинальный Throne**, а авторы Throne его не поддерживают. С вопросами о Crown приходите в [Issues этого репозитория](https://github.com/FolkiDevv/ThroneForAndroid/issues), а не к авторам Throne. Если вам нужен полноценный клиент со всеми настройками, берите [оригинальный Throne for Android](https://github.com/throneproj/ThroneForAndroid).
+> **Crown — это форк, а не Throne.** В нём собран свой набор функций для определённой аудитории: пользователей из России, которым нужен VPN «в одну кнопку» и которые сталкиваются с белыми списками в мобильных сетях. Изменения форка **не будут влиты в оригинальный Throne**, а авторы Throne его не поддерживают. С вопросами о Crown приходите в [Issues этого репозитория](https://github.com/FolkiDevv/Crown/issues), а не к авторам Throne. Если вам нужен полноценный клиент со всеми настройками, берите [оригинальный Throne for Android](https://github.com/throneproj/ThroneForAndroid).
 
 <p align="center">
   <img width="210" alt="Главная: подключено" src=".github/images/crown/home.png" />
@@ -46,14 +46,14 @@
 
 ### Отдельное приложение
 - Свой идентификатор `dev.folki.crown`, свой ключ подписи и значок. Crown ставится **рядом** с оригинальным Throne и не конфликтует с ним.
-- Обновляется внутри приложения из [релизов этого репозитория](https://github.com/FolkiDevv/ThroneForAndroid/releases). Preview-сборки приходят, если в настройках обновлений разрешены бета-версии.
+- Обновляется внутри приложения из [релизов этого репозитория](https://github.com/FolkiDevv/Crown/releases). Preview-сборки приходят, если в настройках обновлений разрешены бета-версии.
 - Запросы подписок по умолчанию уходят с User-Agent `Crown/Android/<версия Throne>`.
 
 Ядро, протоколы, форматы подписок, маршрутизация и резервные копии — те же, что в Throne. Список протоколов и форматов есть в [README оригинала](https://github.com/throneproj/ThroneForAndroid#supported-protocols), а руководства — в [документации Throne](https://throneproj.github.io).
 
 ## Установка
 
-APK для arm64-v8a, armeabi-v7a и x86_64 лежат в [Releases](https://github.com/FolkiDevv/ThroneForAndroid/releases) вместе с файлом `SHA256SUMS` для проверки. Если не знаете, какой нужен, берите arm64-v8a: он подходит почти всем современным телефонам. Нужен Android 7.0 (API 24) или новее, поддерживается Android TV.
+APK для arm64-v8a, armeabi-v7a и x86_64 лежат в [Releases](https://github.com/FolkiDevv/Crown/releases) вместе с файлом `SHA256SUMS` для проверки. Если не знаете, какой нужен, берите arm64-v8a: он подходит почти всем современным телефонам. Нужен Android 7.0 (API 24) или новее, поддерживается Android TV.
 
 ## Разработка
 
