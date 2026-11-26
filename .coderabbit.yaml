@@ -1,0 +1,8 @@
+# Crown (CROWN.md, "Ветки и выпуск"): features are reviewed in pull requests into develop (the default branch),
+# releases and hotfixes in pull requests into main.
+reviews:
+  auto_review:
+    enabled: true
+    base_branches:
+      - main
+      - develop
