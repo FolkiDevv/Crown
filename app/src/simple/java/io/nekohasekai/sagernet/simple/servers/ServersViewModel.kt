@@ -333,7 +333,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         if (GroupRepo.delete(groupId)) {
             SubscriptionState.forget(groupId)
             // A running «Авто» may still connect through its servers.
-            TrafficModeApplier.serversRemoved()
+            TrafficModeApplier.serversChanged()
             mutableMessages.tryEmit(ServersMessage(R.string.simple_sub_deleted, name))
             mutableEvents.tryEmit(ServersEvent.Updated)
         } else {
@@ -359,13 +359,14 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         // The running server itself stops with it (as a subscription update deleting it does); any other deletion leaves
         // the connection, and a running «Авто» is rebuilt without it.
         ProfileManager.batchDeleteProfiles(listOf(id), stopRunning = true)
-        TrafficModeApplier.serversRemoved()
+        TrafficModeApplier.serversChanged()
         mutableEvents.tryEmit(ServersEvent.Chosen)
         mutableMessages.tryEmit(
             ServersMessage(R.string.simple_server_deleted, name, R.string.simple_server_undo) {
                 manage {
                     val copy = ProfileManager.createProfile(profile.groupId, profile.outbound)
                     if (wasSelected) TrafficModeApplier.selectServer(copy.id)
+                    else TrafficModeApplier.serversChanged()
                     mutableEvents.tryEmit(ServersEvent.Chosen)
                 }
             }

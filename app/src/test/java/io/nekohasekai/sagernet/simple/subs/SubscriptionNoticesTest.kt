@@ -180,6 +180,15 @@ class SubscriptionNoticesTest {
     }
 
     @Test
+    fun linksKeepTheirOwnBrackets() {
+        assertEquals("https://en.wikipedia.org/wiki/Proxy_(computing)", trimLink("https://en.wikipedia.org/wiki/Proxy_(computing)"))
+        assertEquals("https://en.wikipedia.org/wiki/Proxy_(computing)", trimLink("https://en.wikipedia.org/wiki/Proxy_(computing)."))
+        assertEquals("https://my.example/news", trimLink("https://my.example/news)."))
+        assertEquals("https://my.example/a", trimLink("https://my.example/a],"))
+        assertEquals("t.me/support", trimLink("t.me/support!"))
+    }
+
+    @Test
     fun fetchMarks() {
         assertEquals(FetchMark.LIMIT, FetchMark.of("limit"))
         assertEquals(FetchMark.EMPTY, FetchMark.of("empty"))

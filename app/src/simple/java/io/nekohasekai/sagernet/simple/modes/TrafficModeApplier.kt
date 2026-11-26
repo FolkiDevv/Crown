@@ -132,11 +132,11 @@ object TrafficModeApplier {
     }
 
     /**
-     * Servers the running service may use were deleted in «Серверы» (a subscription, an own server): a running «Авто»
-     * or country, which draws on whole groups, is rebuilt so it no longer connects through them. A server chosen by hand
-     * is not touched (deleting it clears the choice itself). Nothing while the service is off.
+     * The servers the running service may use changed in «Серверы» (a subscription or own server deleted, one restored):
+     * a running «Авто» or country, which draws on whole groups, is rebuilt with the servers there now. A server chosen by
+     * hand is not touched (deleting it clears the choice itself). Nothing while the service is off.
      */
-    suspend fun serversRemoved(): Unit = withContext(Dispatchers.IO) {
+    suspend fun serversChanged(): Unit = withContext(Dispatchers.IO) {
         lock.withLock {
             val selected = DataStore.selectedProxy
             if (TrafficModes.isManagedSelector(selected)) switchTo(selected, rebuilt = true)

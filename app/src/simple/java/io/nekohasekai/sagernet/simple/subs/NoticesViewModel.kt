@@ -139,6 +139,8 @@ class NoticesViewModel(application: Application, private val saved: SavedStateHa
             reload()
             return
         }
+        // A request still waiting for its read is older than this one.
+        sheetWanted = 0L
         mutableState.update { it.copy(sheet = notice) }
     }
 

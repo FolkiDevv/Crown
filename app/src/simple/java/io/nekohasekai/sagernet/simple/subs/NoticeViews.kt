@@ -300,11 +300,35 @@ fun AnnouncementSheet(notice: Notice, onProvider: (Long, String) -> Unit, onDism
 
 private val LINK = Regex("""(?:https?|tg)://[^\s<>"'«»]+|\bt\.me/[^\s<>"'«»]+|\bwww\.[^\s<>"'«»]+""", RegexOption.IGNORE_CASE)
 
+/**
+ * A link found in text without the punctuation after it: a closing bracket stays when the link opened it
+ * (`…/Proxy_(computing)`), and goes when it closes the sentence's own bracket (`(see https://…)`).
+ */
+fun trimLink(found: String): String {
+    var end = found.length
+    while (end > 0) {
+        val c = found[end - 1]
+        val open = when (c) {
+            ')' -> '('
+            ']' -> '['
+            else -> null
+        }
+        val trailing = when {
+            c in ".,;:!?" -> true
+            open != null -> found.take(end).count { it == open } < found.take(end).count { it == c }
+            else -> false
+        }
+        if (!trailing) break
+        end--
+    }
+    return found.substring(0, end)
+}
+
 /** [text] with its web and Telegram links tappable; a link ends before trailing punctuation. */
 fun linkified(text: String, color: Color, open: (String) -> Unit): AnnotatedString = buildAnnotatedString {
     var at = 0
     for (match in LINK.findAll(text)) {
-        val raw = match.value.trimEnd('.', ',', ';', ':', '!', '?', ')', ']')
+        val raw = trimLink(match.value)
         if (raw.isEmpty()) continue
         append(text, at, match.range.first)
         val url = if (raw.contains("://")) raw else "https://$raw"

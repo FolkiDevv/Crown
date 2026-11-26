@@ -46,11 +46,15 @@ object SubscriptionAlerts {
         val notices = SubscriptionNotices.alertable(SubscriptionState.factsOf(group), System.currentTimeMillis() / 1000)
         val sent = SubscriptionState.alerts(gid)
         val (due, now) = SubscriptionNotices.due(notices, sent)
-        if (now != sent) SubscriptionState.setAlerts(gid, now)
-        if (due.isEmpty()) return
-        // On screen, the home card shows it already; it counts as told.
-        if (appVisible(context)) return
-        for (notice in due) post(context, notice)
+        // On screen, the home card shows it already; it counts as told. Otherwise an event counts as told once its
+        // notification is posted: one that failed is tried again at the next update.
+        val failed = if (due.isEmpty() || appVisible(context)) emptyList() else due.filterNot { post(context, it) }
+        val told = now.toMutableMap()
+        for (kind in failed.mapNotNull { SubscriptionNotices.alert(it)?.first }) {
+            val before = sent[kind]
+            if (before == null) told.remove(kind) else told[kind] = before
+        }
+        if (told != sent) SubscriptionState.setAlerts(gid, told)
     }
 
     private fun appVisible(context: Context): Boolean = try {
@@ -82,14 +86,15 @@ object SubscriptionAlerts {
         )
     }
 
-    private fun post(context: Context, notice: Notice) {
+    /** Whether the notification was posted. */
+    private fun post(context: Context, notice: Notice): Boolean {
         ensureChannels(context)
         val facts = notice.facts
         val news = notice.reason == NoticeReason.ANNOUNCE
         val texts = NoticeTexts.of(context, notice)
         val text = listOf(texts.body, texts.quote).filter { it.isNotEmpty() }.joinToString("\n")
         // One notification per subscription and kind: the end and the traffic due together both stay in the shade.
-        val kind = SubscriptionNotices.alert(notice)?.first ?: return
+        val kind = SubscriptionNotices.alert(notice)?.first ?: return false
         val id = ID_BASE + (facts.groupId.toInt() and 0x3FFF) * KINDS + kind.ordinal
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -139,10 +144,12 @@ object SubscriptionAlerts {
                 )
             }
         }
-        try {
+        return try {
             NotificationManagerCompat.from(context).notify(id, builder.build())
+            true
         } catch (e: Exception) {
             Logs.w(e)
+            false
         }
     }
 }
