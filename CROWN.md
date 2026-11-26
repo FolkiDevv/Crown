@@ -76,7 +76,7 @@ Crown открывается нажатием на ссылку `crown://` в б
 
 В тексте из нескольких строк (список ссылок из буфера обмена) каждая строка `crown://` переписывается отдельно, как список `throne://add/…`.
 
-Remnawave (Subpage Builder): кнопка `subscriptionLink` со ссылкой `crown://addsub?url={{SUBSCRIPTION_LINK}}&name=My%20VPN` или `crown://addsub/{{SUBSCRIPTION_LINK}}`. Новый интерфейс добавляет подписку сразу (как ссылку, вставленную вручную), классический сначала спрашивает.
+Remnawave (Subpage Builder): кнопка `subscriptionLink` со ссылкой `crown://addsub?url={{SUBSCRIPTION_LINK}}&name=My%20VPN` или `crown://addsub/{{SUBSCRIPTION_LINK}}`. Оба интерфейса сначала спрашивают «Добавить подписку?» с адресом сайта подписки: страница не может добавить подписку без согласия пользователя. Вставка из буфера обмена и QR-код добавляют без вопроса, как и раньше.
 
 ## Слияние upstream
 

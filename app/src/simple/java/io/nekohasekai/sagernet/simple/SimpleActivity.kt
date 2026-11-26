@@ -91,6 +91,7 @@ import io.nekohasekai.sagernet.simple.add.AddResultDialog
 import io.nekohasekai.sagernet.simple.add.AddSheet
 import io.nekohasekai.sagernet.simple.add.AddViewModel
 import io.nekohasekai.sagernet.simple.add.ClipboardOfferDialog
+import io.nekohasekai.sagernet.simple.add.LinkConfirmDialog
 import io.nekohasekai.sagernet.simple.add.LinkDialog
 import io.nekohasekai.sagernet.simple.add.Notice
 import io.nekohasekai.sagernet.simple.add.SimpleImport
@@ -369,7 +370,9 @@ class SimpleActivity : AppCompatActivity() {
             Intent.ACTION_VIEW -> {
                 val uri = intent.data ?: return
                 val scheme = uri.scheme?.lowercase()
-                if (scheme == "content" || scheme == "file") openFile(uri) else add.importText(uri.toString())
+                // A link from a browser or another app adds only after the user confirms it (a page must not add a
+                // subscription unasked); a file is opened by the user's own choice.
+                if (scheme == "content" || scheme == "file") openFile(uri) else add.importText(uri.toString(), external = true)
             }
 
             Intent.ACTION_SEND -> {
@@ -378,7 +381,7 @@ class SimpleActivity : AppCompatActivity() {
                 if (stream != null) {
                     openFile(stream)
                 } else {
-                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { add.importText(it) }
+                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { add.importText(it, external = true) }
                 }
             }
         }
@@ -875,8 +878,10 @@ fun SimpleApp(
     val busy = addState.busy
     val dialog = addState.dialog
     val offer = addState.offer
+    val confirm = addState.confirm
     when {
         busy != null -> AddBusyDialog(busy)
+        confirm != null -> LinkConfirmDialog(confirm, onAccept = add::confirmLink, onCancel = add::cancelLink)
         dialog != null -> AddResultDialog(
             dialog,
             canConnect = homeState.phase == ConnectionPhase.OFF && homeState.hasServers == true,

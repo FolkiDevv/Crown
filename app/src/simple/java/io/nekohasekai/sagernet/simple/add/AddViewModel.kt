@@ -49,10 +49,23 @@ data class ClipboardOffer(
     val servers: Int,
 )
 
+/**
+ * A link opened from a browser or another app asks to add something (simple-ui "Подтверждение ссылки из другого
+ * приложения"): a web page must not add a subscription or servers unasked.
+ */
+data class LinkConfirm(
+    /** The host of the subscription, null for servers. */
+    val subscriptionHost: String?,
+    /** The group name the subscription link suggests (may be empty). */
+    val name: String,
+    val servers: Int,
+)
+
 data class AddUiState(
     val busy: AddBusy? = null,
     val dialog: AddDialog? = null,
     val offer: ClipboardOffer? = null,
+    val confirm: LinkConfirm? = null,
 )
 
 /** One-off requests to the activity. */
@@ -91,18 +104,39 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
     /** The plan behind [AddUiState.offer] and the fingerprint of its text. */
     private var offered: Pair<SimpleImport.Plan, String>? = null
 
+    /** The plan behind [AddUiState.confirm]. */
+    private var confirming: SimpleImport.Plan? = null
+
     private val prefs get() = getApplication<Application>().getSharedPreferences(SimpleUi.PREFS, Context.MODE_PRIVATE)
 
     // ------------------------------------------------------------------------------------------------ requests
 
-    /** Text from the clipboard button, the link dialog, a share or a link opened from another app. */
-    fun importText(text: String?, fromClipboard: Boolean = false) {
+    /**
+     * Text from the clipboard button, the link dialog, a share or a link opened from another app. [external] text
+     * (a link opened from a browser or another app, a share) is added only after [confirmLink] when it would add a
+     * subscription or servers that are not in the app yet.
+     */
+    fun importText(text: String?, fromClipboard: Boolean = false, external: Boolean = false) {
         viewModelScope.launch {
             imports.withLock {
                 val plan = reading { SimpleImport.plan(text.orEmpty()) }
-                perform(plan, fromClipboard)
+                if (external && asks(plan)) ask(plan) else perform(plan, fromClipboard)
             }
         }
+    }
+
+    /** «Добавить» on [AddUiState.confirm]. */
+    fun confirmLink() {
+        val plan = confirming ?: return
+        confirming = null
+        mutableState.update { it.copy(confirm = null) }
+        viewModelScope.launch { imports.withLock { perform(plan, fromClipboard = false) } }
+    }
+
+    /** «Отмена» on [AddUiState.confirm]: nothing is added. */
+    fun cancelLink() {
+        confirming = null
+        mutableState.update { it.copy(confirm = null) }
     }
 
     /** The QR scanner's texts (one per code): share links together, subscriptions and documents one by one. */
@@ -276,6 +310,21 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             show(AddDialog.Failed)
         }
+    }
+
+    /** Whether an external [plan] needs [confirmLink]: it adds something new (what is in the app only says so). */
+    private suspend fun asks(plan: SimpleImport.Plan): Boolean =
+        (plan is SimpleImport.Plan.Subscription || plan is SimpleImport.Plan.Servers) &&
+            !withContext(Dispatchers.IO) { SimpleImport.isAdded(plan) }
+
+    private fun ask(plan: SimpleImport.Plan) {
+        confirming = plan
+        val confirm = LinkConfirm(
+            subscriptionHost = (plan as? SimpleImport.Plan.Subscription)?.let { hostOf(it.url) },
+            name = (plan as? SimpleImport.Plan.Subscription)?.name.orEmpty().trim(),
+            servers = (plan as? SimpleImport.Plan.Servers)?.count ?: 0,
+        )
+        mutableState.update { it.copy(busy = null, confirm = confirm) }
     }
 
     private suspend fun <T> reading(block: () -> T): T {
