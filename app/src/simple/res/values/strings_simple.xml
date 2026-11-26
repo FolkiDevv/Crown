@@ -180,6 +180,11 @@
     </plurals>
     <string name="simple_offer_later">Not now</string>
 
+    <!-- First start: running without battery optimization -->
+    <string name="simple_battery_prompt_title">Keep the VPN on in the background</string>
+    <string name="simple_battery_prompt_text">To save battery, Android may stop apps in the background, and then the VPN disconnects on its own after a while. Let the app run without battery optimization.</string>
+    <string name="simple_battery_prompt_allow">Allow</string>
+
     <!-- Servers section (batch 5) -->
     <string name="simple_servers_auto_summary">The best working server is picked for you</string>
     <!-- %1$s: the server in use now, e.g. "🇩🇪 Germany 3" -->

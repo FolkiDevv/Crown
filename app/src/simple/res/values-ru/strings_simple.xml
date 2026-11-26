@@ -168,6 +168,11 @@
     </plurals>
     <string name="simple_offer_later">Не сейчас</string>
 
+    <!-- Первый запуск: работа без оптимизации батареи -->
+    <string name="simple_battery_prompt_title">Чтобы VPN не отключался в фоне</string>
+    <string name="simple_battery_prompt_text">Ради экономии заряда Android может останавливать приложения в фоне — тогда VPN через какое-то время отключается сам. Разрешите приложению работать без оптимизации батареи.</string>
+    <string name="simple_battery_prompt_allow">Разрешить</string>
+
     <!-- Раздел «Серверы» (батч 5) -->
     <string name="simple_servers_auto_summary">Лучший рабочий сервер выбирается сам</string>
     <string name="simple_servers_now">Сейчас: %1$s</string>
