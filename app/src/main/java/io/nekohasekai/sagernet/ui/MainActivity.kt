@@ -251,7 +251,7 @@ class MainActivity : ThemedActivity(),
             return
         }
         when (intent.action) {
-            Intent.ACTION_VIEW -> openLink(Uri.parse(CrownLinks.toThrone((intent.data ?: return).toString())))
+            Intent.ACTION_VIEW -> openLink(Uri.parse(CrownLinks.viewLink((intent.data ?: return).toString()) ?: return))
             Intent.ACTION_SEND -> {
                 @Suppress("DEPRECATION")
                 val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)

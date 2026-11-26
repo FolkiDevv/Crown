@@ -33,6 +33,14 @@ object CrownLinks {
         return if (changed) lines.joinToString("\n") else text
     }
 
+    /**
+     * The data of a link opened from a browser or another app (ACTION_VIEW), rewritten by [toThrone]; null when it
+     * holds a line break. A link is one line: a crafted intent with several would reach the text import, which adds
+     * servers without the confirmation a link gets.
+     */
+    fun viewLink(data: String): String? =
+        if (data.any { it == '\n' || it == '\r' }) null else toThrone(data)
+
     /** One line: a leading `crown://` link rewritten, anything else returned unchanged. */
     private fun link(text: String): String {
         val content = text.trim()

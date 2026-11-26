@@ -96,6 +96,16 @@ class CrownLinksTest {
     }
 
     @Test
+    fun viewLinkIsOneLine() {
+        assertEquals(sub("https%3A%2F%2Fa.b%2Fc", "n"), CrownLinks.viewLink("crown://addsub?url=https://a.b/c&name=n"))
+        assertEquals("clash://install-config?url=x", CrownLinks.viewLink("clash://install-config?url=x"))
+        // a crafted intent with a share link on the next line would skip the confirmation: ignored
+        for (data in listOf("crown://addsub?url=https://a.b/c\nvless://id@evil:443#x", "clash://install-config?url=x\rvless://y", "throne://add/x\r\n")) {
+            assertEquals(null, CrownLinks.viewLink(data))
+        }
+    }
+
+    @Test
     fun rewrittenLinksAreRecognised() {
         assertEquals(Kind.SUBSCRIBE_LINK, ImportText.kind(CrownLinks.toThrone("crown://addsub?url=https://a.b/c&name=n")))
         assertEquals(Kind.SUBSCRIBE_LINK, ImportText.kind(CrownLinks.toThrone("crown://addsub/aHR0cHM6Ly9hLmIvYyNu")))

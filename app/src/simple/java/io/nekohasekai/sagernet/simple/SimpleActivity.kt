@@ -91,6 +91,7 @@ import io.nekohasekai.sagernet.simple.add.AddResultDialog
 import io.nekohasekai.sagernet.simple.add.AddSheet
 import io.nekohasekai.sagernet.simple.add.AddViewModel
 import io.nekohasekai.sagernet.simple.add.ClipboardOfferDialog
+import io.nekohasekai.sagernet.simple.add.CrownLinks
 import io.nekohasekai.sagernet.simple.add.LinkConfirmDialog
 import io.nekohasekai.sagernet.simple.add.LinkDialog
 import io.nekohasekai.sagernet.simple.add.Notice
@@ -372,7 +373,11 @@ class SimpleActivity : AppCompatActivity() {
                 val scheme = uri.scheme?.lowercase()
                 // A link from a browser or another app adds only after the user confirms it (a page must not add a
                 // subscription unasked); a file is opened by the user's own choice.
-                if (scheme == "content" || scheme == "file") openFile(uri) else add.importText(uri.toString(), external = true)
+                if (scheme == "content" || scheme == "file") {
+                    openFile(uri)
+                } else {
+                    CrownLinks.viewLink(uri.toString())?.let { add.importText(it, external = true) }
+                }
             }
 
             Intent.ACTION_SEND -> {
