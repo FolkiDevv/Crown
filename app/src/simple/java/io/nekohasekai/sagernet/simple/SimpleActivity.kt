@@ -277,8 +277,15 @@ class SimpleActivity : AppCompatActivity() {
     /** Every launch goes through here (startActivity too, and the activity result launchers). */
     @Deprecated("Deprecated in Java")
     override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        val before = ownLaunch
         ownLaunch = true
-        super.startActivityForResult(intent, requestCode, options)
+        try {
+            super.startActivityForResult(intent, requestCode, options)
+        } catch (e: RuntimeException) {
+            // Nothing opened (no such screen): the next leave is a real one.
+            ownLaunch = before
+            throw e
+        }
     }
 
     /** A link, file, share or QR scan for the running interface (singleTask), handed over by MainActivity. */
@@ -581,12 +588,13 @@ class SimpleActivity : AppCompatActivity() {
     /**
      * The battery-optimization exemption on the first start and on every entry until it is given («Не сейчас» only
      * closes the prompt): Android otherwise stops or delays the VPN in the background and it disconnects after a
-     * while. Skipped when exempt and on Android TV (no such screen, as in «Починка»).
+     * while. Skipped when exempt and on Android TV (no such screen, as in «Починка»); a prompt left open closes once
+     * the exemption was given meanwhile (in Android's settings).
      */
     private fun askBattery() {
-        if (isFinishing || isDestroyed || SagerNet.isTv || BatteryOptimizations.isIgnoring(this)) return
-        if (BatteryOptimizations.requestIntent(this) == null) return
-        batteryPrompt.value = true
+        if (isFinishing || isDestroyed) return
+        batteryPrompt.value = !SagerNet.isTv && !BatteryOptimizations.isIgnoring(this) &&
+            BatteryOptimizations.requestIntent(this) != null
     }
 
     /** «Разрешить»: the system's own request (else the list of apps), where only the user decides. */
