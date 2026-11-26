@@ -4,16 +4,19 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class NoticesUiState(
     /** The one message of the home screen, null for none. */
@@ -35,6 +38,7 @@ class NoticesViewModel(application: Application, private val saved: SavedStateHa
     val state: StateFlow<NoticesUiState> = mutableState.asStateFlow()
 
     private var loadJob: Job? = null
+    private var recheckJob: Job? = null
     private var updating: Set<Long> = emptySet()
 
     /** The subscription whose provider page the user went to, checked again when the app comes back. */
@@ -122,7 +126,25 @@ class NoticesViewModel(application: Application, private val saved: SavedStateHa
     }
 
     fun recheck(gid: Long) {
-        SubscriptionClient.refreshGroup(gid, false)
+        // [SubscriptionClient.states] shows the end of the update only if its callback is registered by then. In a
+        // process started just now (Android ended it while the provider's page was open) a quick update can end
+        // first, so the subscription's update time is watched too.
+        recheckJob?.cancel()
+        recheckJob = viewModelScope.launch {
+            val before = withContext(Dispatchers.IO) { updatedAt(gid) }
+            SubscriptionClient.refreshGroup(gid, false)
+            withTimeoutOrNull(RECHECK_WATCH_MS) {
+                while (withContext(Dispatchers.IO) { updatedAt(gid) } == before) delay(RECHECK_POLL_MS)
+            }
+            reload()
+        }
+    }
+
+    private fun updatedAt(gid: Long): Long? = try {
+        GroupRepo.get(gid)?.subLastUpdate
+    } catch (e: Exception) {
+        Logs.w(e)
+        null
     }
 
     /** «Позже»: the amber message stays away until its next threshold. */
@@ -168,5 +190,9 @@ class NoticesViewModel(application: Application, private val saved: SavedStateHa
     private companion object {
         const val KEY_LEFT_FOR = "left_for"
         const val KEY_LEAVING = "leaving"
+
+        // A refresh ends within the fetch timeout; a failed one leaves the time as it was, and the read follows anyway.
+        const val RECHECK_WATCH_MS = 30_000L
+        const val RECHECK_POLL_MS = 1_000L
     }
 }
