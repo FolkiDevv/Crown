@@ -12,6 +12,7 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -257,7 +258,8 @@ class SimpleActivity : AppCompatActivity() {
             }
         }
         if (savedInstanceState == null) {
-            if (!askNotificationsOnce()) askBattery()
+            // The end of a visit to a classic screen (EXTRA_SECTION) creates a new instance: not an entry.
+            if (!askNotificationsOnce() && sectionOf(intent) == null) askBattery()
             handleImportIntent(intent)
         } else {
             batteryPrompt.value = savedInstanceState.getBoolean(STATE_BATTERY_PROMPT)
@@ -269,7 +271,7 @@ class SimpleActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_BATTERY_PROMPT, batteryPrompt.value)
         // Called before onStop below Android 9: count the leaving already, so a process killed meanwhile keeps it.
-        outState.putBoolean(STATE_LEFT_APP, leftApp || !isChangingConfigurations && !ownLaunch)
+        outState.putBoolean(STATE_LEFT_APP, leftApp || leaving())
     }
 
     /** Every launch goes through here (startActivity too, and the activity result launchers). */
@@ -321,9 +323,13 @@ class SimpleActivity : AppCompatActivity() {
 
     override fun onStop() {
         home.setForeground(false)
-        if (!isChangingConfigurations && !ownLaunch) leftApp = true
+        if (leaving()) leftApp = true
         super.onStop()
     }
+
+    /** Stopping now leaves the app: not a rotation, a screen opened here or the screen turning off (app in front). */
+    private fun leaving() = !isChangingConfigurations && !ownLaunch &&
+        getSystemService(PowerManager::class.java)?.isInteractive != false
 
     override fun onResume() {
         super.onResume()
