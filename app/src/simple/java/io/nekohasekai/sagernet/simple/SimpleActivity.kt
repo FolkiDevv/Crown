@@ -167,10 +167,16 @@ class SimpleActivity : AppCompatActivity() {
 
     /** The battery prompt follows the notification permission, whatever the answer. */
     private val notificationPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { askBatteryOnce() }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { askBattery() }
 
-    /** The battery-optimization prompt of the first start is open ([askBatteryOnce]); a rotation keeps it. */
+    /** The battery-optimization prompt is open ([askBattery]); a rotation keeps it. */
     private val batteryPrompt = mutableStateOf(false)
+
+    /** A screen this activity opened itself is in front (system settings, a classic screen, the scanner...). */
+    private var ownLaunch = false
+
+    /** The user left the app (not for a screen it opened, not a rotation): the next start is an entry. */
+    private var leftApp = false
 
     /** «Открыть файл»: any file; a backup goes to the stock restore, the rest to the import. */
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -251,16 +257,26 @@ class SimpleActivity : AppCompatActivity() {
             }
         }
         if (savedInstanceState == null) {
-            if (!askNotificationsOnce()) askBatteryOnce()
+            if (!askNotificationsOnce()) askBattery()
             handleImportIntent(intent)
         } else {
             batteryPrompt.value = savedInstanceState.getBoolean(STATE_BATTERY_PROMPT)
+            leftApp = savedInstanceState.getBoolean(STATE_LEFT_APP)
         }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_BATTERY_PROMPT, batteryPrompt.value)
+        // Called before onStop below Android 9: count the leaving already, so a process killed meanwhile keeps it.
+        outState.putBoolean(STATE_LEFT_APP, leftApp || !isChangingConfigurations && !ownLaunch)
+    }
+
+    /** Every launch goes through here (startActivity too, and the activity result launchers). */
+    @Deprecated("Deprecated in Java")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        ownLaunch = true
+        super.startActivityForResult(intent, requestCode, options)
     }
 
     /** A link, file, share or QR scan for the running interface (singleTask), handed over by MainActivity. */
@@ -287,6 +303,11 @@ class SimpleActivity : AppCompatActivity() {
         // Auto connect, updates and the theme may have been changed in the classic interface meanwhile.
         settings.refresh()
         clipboardCheck = true
+        // Each time the user comes back to the app, until it runs without battery optimization.
+        if (leftApp) {
+            leftApp = false
+            askBattery()
+        }
         // A subscription whose import was interrupted (process killed during its first download) updates itself again.
         lifecycleScope.launch {
             val healed = withContext(Dispatchers.IO) {
@@ -300,11 +321,13 @@ class SimpleActivity : AppCompatActivity() {
 
     override fun onStop() {
         home.setForeground(false)
+        if (!isChangingConfigurations && !ownLaunch) leftApp = true
         super.onStop()
     }
 
     override fun onResume() {
         super.onResume()
+        ownLaunch = false
         // Same as MainActivity.onResume: MainActivity finishes before its onResume when it redirects here
         if (DataStore.hideFromRecentApps) excludeFromRecents()
     }
@@ -530,7 +553,7 @@ class SimpleActivity : AppCompatActivity() {
     /**
      * The notification permission (13+) once per install, as the classic first start asks it (FirstStartPrompts):
      * without it Android hides the notification of the running VPN. Skipped when the classic UI asked already.
-     * True when the system request is shown: its answer then leads to [askBatteryOnce].
+     * True when the system request is shown: its answer then leads to [askBattery].
      */
     private fun askNotificationsOnce(): Boolean {
         if (Build.VERSION.SDK_INT < 33 || SagerNet.isTv) return false
@@ -550,17 +573,13 @@ class SimpleActivity : AppCompatActivity() {
     }
 
     /**
-     * The battery-optimization exemption once per install (also on an install that had the simple UI before it was
-     * asked here): Android otherwise stops or delays the VPN in the background and it disconnects after a while.
-     * Skipped when exempt, on Android TV (no such screen, as in «Починка») and when the classic first start asked.
+     * The battery-optimization exemption on the first start and on every entry until it is given («Не сейчас» only
+     * closes the prompt): Android otherwise stops or delays the VPN in the background and it disconnects after a
+     * while. Skipped when exempt and on Android TV (no such screen, as in «Починка»).
      */
-    private fun askBatteryOnce() {
+    private fun askBattery() {
         if (isFinishing || isDestroyed || SagerNet.isTv || BatteryOptimizations.isIgnoring(this)) return
         if (BatteryOptimizations.requestIntent(this) == null) return
-        val prefs = getSharedPreferences(SimpleUi.PREFS, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(KEY_BATTERY_ASKED, false)) return
-        prefs.edit().putBoolean(KEY_BATTERY_ASKED, true).apply()
-        if (classicFirstStartShown()) return
         batteryPrompt.value = true
     }
 
@@ -588,8 +607,8 @@ class SimpleActivity : AppCompatActivity() {
         const val EXTRA_SECTION = "io.nekohasekai.sagernet.simple.SECTION"
 
         private const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
-        private const val KEY_BATTERY_ASKED = "battery_asked"
         private const val STATE_BATTERY_PROMPT = "battery_prompt"
+        private const val STATE_LEFT_APP = "left_app"
 
         /** FirstStartPrompts' own flag: the classic first start has asked for the permission. */
         private const val CLASSIC_FIRST_START_PREFS = "first_start"
@@ -1060,7 +1079,7 @@ private fun SettingsSection(
 }
 
 /**
- * The first start's request to run without battery optimization (simple-ui «Работа в фоне при первом запуске»):
+ * The request to run without battery optimization (simple-ui «Работа в фоне без оптимизации батареи»):
  * otherwise Android stops or delays the VPN in the background and it disconnects on its own after a while.
  */
 @Composable
