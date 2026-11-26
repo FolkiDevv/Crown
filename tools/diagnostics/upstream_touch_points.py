@@ -30,12 +30,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TOUCH_POINTS: dict[str, str] = {
     "build.gradle.kts": "1: Compose compiler plugin declaration",
     "app/build.gradle.kts": "2: Compose plugin, buildFeatures.compose, dependencies, simple source dirs",
-    "app/src/main/AndroidManifest.xml": "3: SimpleActivity and WhitelistZoneReceiver declarations",
+    "app/src/main/AndroidManifest.xml": "3: SimpleActivity and WhitelistZoneReceiver declarations; crown: the crown:// link filter",
     "app/src/main/res/menu/main_drawer_menu.xml": "4: 'New interface' drawer item",
-    "app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt": "5: SimpleUi.redirect in onCreate/onNewIntent and the drawer handler",
+    "app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt": "5: SimpleUi.redirect in onCreate/onNewIntent and the drawer handler; crown: crown:// links opened from outside",
     "app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt": "6: SimpleHooks service start/stop",
     "app/src/main/java/io/nekohasekai/sagernet/group/RemoteRouteUpdater.kt": "7: SimpleConfigRepo.refresh",
     "app/src/main/java/moe/matsuri/nb4a/NativeInterface.kt": "8: network listener keyed by the gomobile refnum (leak fix)",
+    "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionFetch.kt": "9: device limit headers of a subscription answer",
+    "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionRefresh.kt": "9: SimpleHooks.onSubscriptionFetched/onSubscriptionRefreshed",
 }
 
 # openspec/specs/repository-governance, requirement "Идентичность форка Crown". Keep both in sync.
@@ -54,13 +56,14 @@ FORK_IDENTITY_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt": "crown: daily update check on by default",
     "app/src/main/res/xml/settings_general.xml": "crown: daily update check switch on by default",
     "app/src/main/java/io/nekohasekai/sagernet/database/SettingsRegistry.kt": "crown: pre-releases looked for by default on a preview build",
+    "app/src/main/java/io/nekohasekai/sagernet/ui/SubscribeFlows.kt": "crown: crown:// links pasted, scanned or shared",
 }
 
 FORK_DIRS = (
     "app/src/simple/", "openspec/", "tools/diagnostics/",
     # fork identity files
     "fork.properties", "CROWN_CHANGELOG.md", "CROWN.md", "buildSrc/src/main/kotlin/Fork.kt", "app/src/oss/res/",
-    "buildScript/release_plan.sh", ".github/images/crown/", ".coderabbit.yaml",
+    "buildScript/release_plan.sh", ".github/images/crown/", ".coderabbit.yaml", "AGENTS.md", "CLAUDE.md",
 )
 NEW_ONLY_DIRS = ("app/src/test/",)
 

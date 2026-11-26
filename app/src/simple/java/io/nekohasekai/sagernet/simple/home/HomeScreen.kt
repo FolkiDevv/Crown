@@ -114,10 +114,19 @@ fun HomeScreen(
     hint: (@Composable (Modifier) -> Unit)? = null,
     /** The whitelist card's «Авто» or «Умный»: the traffic mode to switch to. */
     onLeaveWhitelists: (TrafficMode) -> Unit = {},
+    /**
+     * A subscription's message (simple-ui "Сообщения подписки"), given the width of the cards: in the banner's place,
+     * shown only while no connection problem is.
+     */
+    notice: (@Composable (Modifier) -> Unit)? = null,
 ) {
     val banner: @Composable (Modifier, Dp) -> Unit = { bannerModifier, gap ->
         state.problem?.let { problem ->
             ProblemBanner(problem, onRepair = actions.openRepair, onDismiss = onDismissProblem, modifier = bannerModifier)
+            Spacer(Modifier.height(gap))
+        }
+        if (state.problem == null && notice != null) {
+            notice(bannerModifier)
             Spacer(Modifier.height(gap))
         }
         state.whitelistZone?.let { use ->

@@ -79,7 +79,7 @@ object SimpleImport {
     }
 
     fun plan(text: String): Plan = try {
-        planOf(text)
+        planOf(CrownLinks.toThrone(text))
     } catch (e: Exception) {
         Logs.w("simple add: reading the text failed", e)
         Plan.NotRecognized

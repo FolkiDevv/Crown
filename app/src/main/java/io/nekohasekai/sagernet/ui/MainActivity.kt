@@ -48,6 +48,7 @@ import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.outbound.`import`.ProfileImport
 import io.nekohasekai.sagernet.simple.SimpleUi
+import io.nekohasekai.sagernet.simple.add.CrownLinks
 import io.nekohasekai.sagernet.ui.route.RouteImports
 import io.nekohasekai.sagernet.ui.settings.DnsSettingsFragment
 import io.nekohasekai.sagernet.ui.settings.XrayGeoSettingsFragment
@@ -250,7 +251,7 @@ class MainActivity : ThemedActivity(),
             return
         }
         when (intent.action) {
-            Intent.ACTION_VIEW -> openLink(intent.data ?: return)
+            Intent.ACTION_VIEW -> openLink(Uri.parse(CrownLinks.viewLink((intent.data ?: return).toString()) ?: return))
             Intent.ACTION_SEND -> {
                 @Suppress("DEPRECATION")
                 val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)

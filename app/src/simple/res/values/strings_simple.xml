@@ -180,6 +180,21 @@
     </plurals>
     <string name="simple_offer_later">Not now</string>
 
+    <!-- A link opened from a browser or another app: added only after the user confirms it -->
+    <string name="simple_link_confirm_subscription_title">Add this subscription?</string>
+    <!-- %1$s: the host of the subscription link -->
+    <string name="simple_link_confirm_subscription">A link from another app asks to add a subscription from %1$s. Add it only if you trust its source.</string>
+    <string name="simple_link_confirm_servers_title">Add servers?</string>
+    <plurals name="simple_link_confirm_servers">
+        <item quantity="one">A link from another app asks to add %d server. Add it only if you trust its source.</item>
+        <item quantity="other">A link from another app asks to add %d servers. Add them only if you trust their source.</item>
+    </plurals>
+
+    <!-- First start: running without battery optimization -->
+    <string name="simple_battery_prompt_title">Keep the VPN on in the background</string>
+    <string name="simple_battery_prompt_text">To save battery, Android may stop apps in the background, and then the VPN disconnects on its own after a while. Let the app run without battery optimization.</string>
+    <string name="simple_battery_prompt_allow">Allow</string>
+
     <!-- Servers section (batch 5) -->
     <string name="simple_servers_auto_summary">The best working server is picked for you</string>
     <!-- %1$s: the server in use now, e.g. "🇩🇪 Germany 3" -->
@@ -449,4 +464,83 @@
     <string name="simple_repair_cause_current_down_steps">Other servers work: choose one of them, or Auto, in Servers.</string>
     <string name="simple_repair_cause_battery">Android may stop the VPN in the background</string>
     <string name="simple_repair_cause_battery_steps">Let the app run in the background without battery restrictions.</string>
+
+    <!-- Subscription messages (simple-ui "Сообщения подписки") -->
+    <string name="simple_notice_expired_title">The %1$s subscription has ended</string>
+    <string name="simple_notice_expired_text">It ended on %1$s. Renew it: when you come back to the app, the subscription is checked by itself.</string>
+    <string name="simple_notice_exhausted_title">No traffic left in %1$s</string>
+    <string name="simple_notice_exhausted_text">Top it up: when you come back to the app, the subscription is checked by itself.</string>
+    <string name="simple_notice_limit_title">Device limit in %1$s</string>
+    <string name="simple_notice_limit_text">Every device the subscription allows is in use, so it did not update. The servers of the last update still work.</string>
+    <string name="simple_notice_limit_text_blocked">Every device the subscription allows is in use, so it gave no servers. Free a device in your account.</string>
+    <string name="simple_notice_refused_title">%1$s did not update</string>
+    <string name="simple_notice_refused_text">The provider sent a message instead of servers. The servers of the last update still work.</string>
+    <string name="simple_notice_blocked_title">%1$s does not work</string>
+    <string name="simple_notice_blocked_text">Instead of servers the provider sent a message:</string>
+    <string name="simple_notice_expiring_title">The %1$s subscription is ending</string>
+    <plurals name="simple_notice_expiring_text">
+        <item quantity="one">%1$d day left, until %2$s. Renew it in advance so the VPN keeps working.</item>
+        <item quantity="other">%1$d days left, until %2$s. Renew it in advance so the VPN keeps working.</item>
+    </plurals>
+    <string name="simple_notice_expiring_today">It ends today. Renew it so the VPN keeps working.</string>
+    <string name="simple_notice_low_title">Little traffic left in %1$s</string>
+    <string name="simple_notice_low_text">%1$s of %2$s left. Top it up in advance so the VPN keeps working.</string>
+    <string name="simple_notice_announce_title">Message from %1$s</string>
+    <string name="simple_notice_later">Later</string>
+    <string name="simple_notice_renew">Renew</string>
+    <string name="simple_notice_top_up">Top up</string>
+    <string name="simple_notice_account">Account</string>
+    <string name="simple_notice_support">Support</string>
+    <string name="simple_notice_recheck">Check again</string>
+    <string name="simple_notice_more">More</string>
+    <string name="simple_notice_hide">Hide the message</string>
+    <string name="simple_notice_no_app">No app opens this link</string>
+    <string name="simple_announce_ok">Got it</string>
+    <string name="simple_sub_channel">Subscription</string>
+    <string name="simple_sub_channel_description">The end of a subscription, its traffic and its device limit</string>
+    <string name="simple_news_channel">Provider messages</string>
+    <string name="simple_news_channel_description">Announcements your subscriptions send</string>
+
+    <!-- Managing subscriptions and own servers -->
+    <string name="simple_sub_more">Manage the subscription</string>
+    <string name="simple_sub_announce_label">Provider\'s message</string>
+    <string name="simple_sub_action_update">Update now</string>
+    <string name="simple_action_rename">Rename</string>
+    <string name="simple_sub_action_share">Share the link</string>
+    <string name="simple_sub_action_share_summary">QR code or copy · the link is personal</string>
+    <string name="simple_sub_action_delete">Delete the subscription</string>
+    <string name="simple_sub_action_all">All settings</string>
+    <string name="simple_sub_action_all_summary">Link, interval, HWID, User-Agent</string>
+    <string name="simple_advanced_badge">advanced</string>
+    <string name="simple_sub_delete_title">Delete the %1$s subscription?</string>
+    <plurals name="simple_sub_delete_text">
+        <item quantity="one">%1$d server leaves the list. The same link brings the subscription back.</item>
+        <item quantity="other">%1$d servers leave the list. The same link brings the subscription back.</item>
+    </plurals>
+    <string name="simple_action_delete">Delete</string>
+    <string name="simple_dialog_cancel">Cancel</string>
+    <string name="simple_action_save">Save</string>
+    <string name="simple_action_close">Close</string>
+    <string name="simple_rename_hint">Name</string>
+    <string name="simple_sub_deleted">The %1$s subscription is deleted</string>
+    <string name="simple_delete_failed">Could not delete it</string>
+    <string name="simple_share_sub_title">Subscription link</string>
+    <string name="simple_share_sub_warning">The link is personal: whoever has it uses your subscription.</string>
+    <string name="simple_share_server_title">Server link</string>
+    <string name="simple_share_server_warning">Anyone with this link can connect to the server.</string>
+    <string name="simple_share_copy">Copy</string>
+    <string name="simple_share_send">Send</string>
+    <string name="simple_share_copied">Link copied</string>
+    <string name="simple_share_too_long">The link is too long for a QR code</string>
+    <string name="simple_server_more">Server actions</string>
+    <string name="simple_server_action_connect">Connect to it</string>
+    <string name="simple_server_action_test">Check the delay</string>
+    <string name="simple_server_action_share">Share</string>
+    <string name="simple_server_action_share_summary">QR code or link</string>
+    <string name="simple_server_action_edit">Edit settings</string>
+    <string name="simple_server_deleted">Server «%1$s» deleted</string>
+    <string name="simple_server_undo">Undo</string>
+    <string name="simple_server_test_busy">A check is running already</string>
+    <string name="simple_share_no_link">This server has no link to share</string>
+    <string name="simple_change_failed">Could not save the change</string>
 </resources>

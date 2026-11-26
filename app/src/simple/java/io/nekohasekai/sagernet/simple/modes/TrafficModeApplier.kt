@@ -123,12 +123,57 @@ object TrafficModeApplier {
      * once. Returns the id now selected.
      */
     suspend fun selectServer(id: Long): Long = withContext(Dispatchers.IO) {
+        lock.withLock { selectLocked(id) }.also { WhitelistZoneState.afterChoice(app) }
+    }
+
+    private fun selectLocked(id: Long): Long {
+        val managed = TrafficModes.managedIds()
+        val target = TrafficModePlan.server(id, managed.auto, managed.autoWhitelist, routingOf(TrafficModes.mode()))
+        TrafficModes.setCountryChoice(null)
+        return switchTo(target, rebuilt = false)
+    }
+
+    /**
+     * The servers the running service may use changed in «Серверы» (a subscription or own server deleted, one restored):
+     * a running «Авто» or country, which draws on whole groups, is rebuilt with the servers there now. A server chosen by
+     * hand is not touched (deleting it clears the choice itself). Nothing while the service is off.
+     */
+    suspend fun serversChanged(): Unit = withContext(Dispatchers.IO) {
+        lock.withLock { rebuildLocked() }
+    }
+
+    /**
+     * A server or subscription was edited in a classic editor that asks for a restart: the running service, whatever it
+     * runs, is rebuilt with the stored settings (the classic interface offers the same reload). Nothing while it is off.
+     */
+    suspend fun settingsChanged(): Unit = withContext(Dispatchers.IO) {
         lock.withLock {
-            val managed = TrafficModes.managedIds()
-            val target = TrafficModePlan.server(id, managed.auto, managed.autoWhitelist, routingOf(TrafficModes.mode()))
-            TrafficModes.setCountryChoice(null)
-            switchTo(target, rebuilt = false)
-        }.also { WhitelistZoneState.afterChoice(app) }
+            val selected = DataStore.selectedProxy
+            if (selected > 0L) switchTo(selected, rebuilt = true)
+        }
+    }
+
+    private fun rebuildLocked() {
+        val selected = DataStore.selectedProxy
+        if (TrafficModes.isManagedSelector(selected)) switchTo(selected, rebuilt = true)
+    }
+
+    /**
+     * An own server came back (Undo of its deletion): chosen again when it was the choice and nothing has been chosen
+     * since (the deletion cleared the choice), otherwise taken in by a running «Авто» or country. Decided under the lock
+     * every choice is applied under, so a choice made meanwhile is never overwritten.
+     */
+    suspend fun serverRestored(id: Long, wasSelected: Boolean): Unit = withContext(Dispatchers.IO) {
+        val chosen = lock.withLock {
+            if (wasSelected && DataStore.selectedProxy <= 0L) {
+                selectLocked(id)
+                true
+            } else {
+                rebuildLocked()
+                false
+            }
+        }
+        if (chosen) WhitelistZoneState.afterChoice(app)
     }
 
     /**

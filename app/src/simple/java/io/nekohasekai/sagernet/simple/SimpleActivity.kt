@@ -12,6 +12,7 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -35,13 +36,17 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -59,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -80,6 +86,8 @@ import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.GroupRepo
+import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.add.AddActions
 import io.nekohasekai.sagernet.simple.add.AddBusyDialog
@@ -88,6 +96,8 @@ import io.nekohasekai.sagernet.simple.add.AddResultDialog
 import io.nekohasekai.sagernet.simple.add.AddSheet
 import io.nekohasekai.sagernet.simple.add.AddViewModel
 import io.nekohasekai.sagernet.simple.add.ClipboardOfferDialog
+import io.nekohasekai.sagernet.simple.add.CrownLinks
+import io.nekohasekai.sagernet.simple.add.LinkConfirmDialog
 import io.nekohasekai.sagernet.simple.add.LinkDialog
 import io.nekohasekai.sagernet.simple.add.Notice
 import io.nekohasekai.sagernet.simple.add.SimpleImport
@@ -104,6 +114,7 @@ import io.nekohasekai.sagernet.simple.repair.RepairEnvironment
 import io.nekohasekai.sagernet.simple.repair.RepairReportExport
 import io.nekohasekai.sagernet.simple.repair.RepairScreen
 import io.nekohasekai.sagernet.simple.repair.RepairViewModel
+import io.nekohasekai.sagernet.simple.servers.ManageActions
 import io.nekohasekai.sagernet.simple.servers.ServersActions
 import io.nekohasekai.sagernet.simple.servers.ServersEvent
 import io.nekohasekai.sagernet.simple.servers.ServersScreen
@@ -114,10 +125,20 @@ import io.nekohasekai.sagernet.simple.settings.ClassicScreen
 import io.nekohasekai.sagernet.simple.settings.ClassicVisit
 import io.nekohasekai.sagernet.simple.settings.SettingsScreen
 import io.nekohasekai.sagernet.simple.settings.SettingsViewModel
+import io.nekohasekai.sagernet.simple.subs.AnnouncementSheet
+import io.nekohasekai.sagernet.simple.subs.NoticeActions
+import io.nekohasekai.sagernet.simple.subs.NoticeCard
+import io.nekohasekai.sagernet.simple.subs.NoticesViewModel
+import io.nekohasekai.sagernet.simple.subs.SubscriptionAlerts
+import io.nekohasekai.sagernet.simple.subs.SubscriptionState
+import io.nekohasekai.sagernet.simple.subs.openLink
 import io.nekohasekai.sagernet.ui.AppManagerActivity
+import io.nekohasekai.sagernet.ui.GroupSettingsActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.ScannerActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
+import io.nekohasekai.sagernet.ui.profile.ProfileSettingsActivity
+import io.nekohasekai.sagernet.ui.profile.profileSettingsIntent
 import io.nekohasekai.sagernet.update.UpdateActivity
 import io.nekohasekai.sagernet.utils.BatteryOptimizations
 import kotlinx.coroutines.Dispatchers
@@ -147,10 +168,19 @@ class SimpleActivity : AppCompatActivity() {
     private val servers: ServersViewModel by viewModels()
     private val settings: SettingsViewModel by viewModels()
     private val repair: RepairViewModel by viewModels()
+    private val notices: NoticesViewModel by viewModels()
 
     /** The classic app list (AppManagerActivity) editing one of the simple UI's two app lists. */
     private val appList = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         modes.appListClosed()
+    }
+
+    /**
+     * A classic editor of a server or a subscription; it reports a change the running connection must take (it reloads
+     * the connection itself only in classic). Here, not in a section: the result must outlive a switch of the layout.
+     */
+    private val editor = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.data?.getBooleanExtra(ProfileSettingsActivity.EXTRA_RESTART_NEEDED, false) == true) servers.settingsChanged()
     }
 
     /** The VPN consent, then the start of the service; true in the result when the consent was refused. */
@@ -163,7 +193,18 @@ class SimpleActivity : AppCompatActivity() {
         repair.consentAnswered(result.resultCode == RESULT_OK)
     }
 
-    private val notificationPermission =registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    /** The battery prompt follows the notification permission, whatever the answer. */
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { askBattery() }
+
+    /** The battery-optimization prompt is open ([askBattery]); a rotation keeps it. */
+    private val batteryPrompt = mutableStateOf(false)
+
+    /** A screen this activity opened itself is in front (system settings, a classic screen, the scanner...). */
+    private var ownLaunch = false
+
+    /** The user left the app (not for a screen it opened, not a rotation): the next start is an entry. */
+    private var leftApp = false
 
     /** «Открыть файл»: any file; a backup goes to the stock restore, the rest to the import. */
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -178,7 +219,13 @@ class SimpleActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         // Subscription defaults of the simple UI (HWID, the provider's interval), once per install.
         lifecycleScope.launch(Dispatchers.IO) { SimpleDefaults.apply(applicationContext) }
+        // The notification channels of the subscription messages exist from the start, so Android lists them to set up.
+        SubscriptionAlerts.ensureChannels(applicationContext)
         if (savedInstanceState == null) requestedSection.value = sectionOf(intent)
+        if (savedInstanceState == null) {
+            openAnnouncement(intent)
+            openProvider(intent)
+        }
         setContent {
             SimpleTheme {
                 SimpleApp(
@@ -188,15 +235,20 @@ class SimpleActivity : AppCompatActivity() {
                     servers = servers,
                     settings = settings,
                     repair = repair,
+                    notices = notices,
                     openRepairTarget = ::openRepairTarget,
                     launchers = AddLaunchers(::pasteClipboard, ::openScanner, ::chooseFile),
                     openAppList = ::openAppList,
                     requestStart = ::requestStart,
                     onOpenClassic = { SimpleUi.switchTo(this, simple = false) },
                     openClassicScreen = ::openClassicScreen,
+                    openEditor = { editor.launch(it) },
                     requestedSection = requestedSection.value,
                     onSectionShown = { requestedSection.value = null },
                 )
+                if (batteryPrompt.value) {
+                    BatteryPromptDialog(onAllow = ::allowBackground, onLater = { batteryPrompt.value = false })
+                }
             }
         }
         // «Починка» asks for the VPN consent before starting the VPN for its checks through it.
@@ -218,6 +270,8 @@ class SimpleActivity : AppCompatActivity() {
                             servers.reload(thenTest = true)
                             // The import may have switched automatic subscription updates on (never set before).
                             settings.refresh()
+                            // Its provider may have sent an announcement or a warning with the first download.
+                            notices.reload()
                         }
 
                         is AddEvent.OpenClassic -> openClassicImport(event.text)
@@ -235,14 +289,40 @@ class SimpleActivity : AppCompatActivity() {
                         ServersEvent.Updated -> {
                             modes.syncGroups()
                             home.refreshServer()
+                            notices.reload()
                         }
                     }
                 }
             }
         }
         if (savedInstanceState == null) {
-            askNotificationsOnce()
+            // The end of a visit to a classic screen (EXTRA_SECTION) creates a new instance: not an entry.
+            if (!askNotificationsOnce() && sectionOf(intent) == null) askBattery()
             handleImportIntent(intent)
+        } else {
+            batteryPrompt.value = savedInstanceState.getBoolean(STATE_BATTERY_PROMPT)
+            leftApp = savedInstanceState.getBoolean(STATE_LEFT_APP)
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_BATTERY_PROMPT, batteryPrompt.value)
+        // Called before onStop below Android 9: count the leaving already, so a process killed meanwhile keeps it.
+        outState.putBoolean(STATE_LEFT_APP, leftApp || leaving())
+    }
+
+    /** Every launch goes through here (startActivity too, and the activity result launchers). */
+    @Deprecated("Deprecated in Java")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        val before = ownLaunch
+        ownLaunch = true
+        try {
+            super.startActivityForResult(intent, requestCode, options)
+        } catch (e: RuntimeException) {
+            // Nothing opened (no such screen): the next leave is a real one.
+            ownLaunch = before
+            throw e
         }
     }
 
@@ -251,6 +331,8 @@ class SimpleActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         sectionOf(intent)?.let { requestedSection.value = it }
+        openAnnouncement(intent)
+        openProvider(intent)
         handleImportIntent(intent)
     }
 
@@ -260,6 +342,40 @@ class SimpleActivity : AppCompatActivity() {
     private fun sectionOf(intent: Intent?): SimpleSection? =
         intent?.getStringExtra(EXTRA_SECTION)?.let { name -> SimpleSection.entries.firstOrNull { it.name == name } }
 
+    /** A provider message notification's «Подробнее»: the announcement opens over the home screen, once. */
+    private fun openAnnouncement(intent: Intent?) {
+        val gid = intent?.getLongExtra(SubscriptionAlerts.EXTRA_ANNOUNCE, 0L) ?: 0L
+        if (gid <= 0L) return
+        intent?.removeExtra(SubscriptionAlerts.EXTRA_ANNOUNCE)
+        requestedSection.value = SimpleSection.HOME
+        notices.openAnnouncement(gid)
+    }
+
+    /**
+     * A subscription notification's «Продлить» / «Личный кабинет»: the provider's page opens, and the subscription is
+     * checked again when the user comes back, as from the home card.
+     */
+    private fun openProvider(intent: Intent?) {
+        val gid = intent?.getLongExtra(SubscriptionAlerts.EXTRA_PROVIDER_GROUP, 0L) ?: 0L
+        val url = intent?.getStringExtra(SubscriptionAlerts.EXTRA_PROVIDER_URL).orEmpty()
+        intent?.removeExtra(SubscriptionAlerts.EXTRA_PROVIDER_GROUP)
+        intent?.removeExtra(SubscriptionAlerts.EXTRA_PROVIDER_URL)
+        if (gid <= 0L || url.isEmpty()) return
+        requestedSection.value = SimpleSection.HOME
+        // The extras can come from any app (MainActivity passes them on): only a page this subscription itself names,
+        // as its buttons may open it, is opened.
+        lifecycleScope.launch {
+            val allowed = withContext(Dispatchers.IO) {
+                runCatching {
+                    GroupRepo.get(gid)?.takeIf { it.isSubscription }?.let { group ->
+                        SubscriptionState.factsOf(group, 0, emptyList()).let { url == it.webUrl || url == it.supportUrl }
+                    } == true
+                }.getOrDefault(false)
+            }
+            if (allowed && openLink(this@SimpleActivity, url)) notices.leavingFor(gid)
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         home.setForeground(true)
@@ -267,9 +383,16 @@ class SimpleActivity : AppCompatActivity() {
         // Groups added meanwhile in :bg (a subscription added in the classic interface) join the «Авто» selectors.
         modes.syncGroups()
         servers.reload()
+        // A subscription the user left to renew is checked again; the messages may have changed meanwhile.
+        notices.resumed()
         // Auto connect, updates and the theme may have been changed in the classic interface meanwhile.
         settings.refresh()
         clipboardCheck = true
+        // Each time the user comes back to the app, until it runs without battery optimization.
+        if (leftApp) {
+            leftApp = false
+            askBattery()
+        }
         // A subscription whose import was interrupted (process killed during its first download) updates itself again.
         lifecycleScope.launch {
             val healed = withContext(Dispatchers.IO) {
@@ -281,13 +404,28 @@ class SimpleActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        // The provider's page now covers the app. Armed here, before the state is saved: on Android 8.1 and older that
+        // happens before onStop, and a process ended while the page is open must still check the subscription.
+        notices.stopped()
+        super.onPause()
+    }
+
     override fun onStop() {
         home.setForeground(false)
+        if (leaving()) leftApp = true
+        // A page opened as the activity starts can hide it before its first onResume, with no onPause to arm it.
+        notices.stopped()
         super.onStop()
     }
 
+    /** Stopping now leaves the app: not a rotation, a screen opened here or the screen turning off (app in front). */
+    private fun leaving() = !isChangingConfigurations && !ownLaunch &&
+        getSystemService(PowerManager::class.java)?.isInteractive != false
+
     override fun onResume() {
         super.onResume()
+        ownLaunch = false
         // Same as MainActivity.onResume: MainActivity finishes before its onResume when it redirects here
         if (DataStore.hideFromRecentApps) excludeFromRecents()
     }
@@ -316,7 +454,13 @@ class SimpleActivity : AppCompatActivity() {
             Intent.ACTION_VIEW -> {
                 val uri = intent.data ?: return
                 val scheme = uri.scheme?.lowercase()
-                if (scheme == "content" || scheme == "file") openFile(uri) else add.importText(uri.toString())
+                // A link from a browser or another app adds only after the user confirms it (a page must not add a
+                // subscription unasked); a file is opened by the user's own choice.
+                if (scheme == "content" || scheme == "file") {
+                    openFile(uri)
+                } else {
+                    CrownLinks.viewLink(uri.toString())?.let { add.importText(it, external = true) }
+                }
             }
 
             Intent.ACTION_SEND -> {
@@ -325,7 +469,7 @@ class SimpleActivity : AppCompatActivity() {
                 if (stream != null) {
                     openFile(stream)
                 } else {
-                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { add.importText(it) }
+                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { add.importText(it, external = true) }
                 }
             }
         }
@@ -513,23 +657,47 @@ class SimpleActivity : AppCompatActivity() {
     /**
      * The notification permission (13+) once per install, as the classic first start asks it (FirstStartPrompts):
      * without it Android hides the notification of the running VPN. Skipped when the classic UI asked already.
+     * True when the system request is shown: its answer then leads to [askBattery].
      */
-    private fun askNotificationsOnce() {
-        if (Build.VERSION.SDK_INT < 33 || SagerNet.isTv) return
+    private fun askNotificationsOnce(): Boolean {
+        if (Build.VERSION.SDK_INT < 33 || SagerNet.isTv) return false
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
-        ) return
+        ) return false
         val prefs = getSharedPreferences(SimpleUi.PREFS, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(KEY_NOTIFICATIONS_ASKED, false)) return
+        if (prefs.getBoolean(KEY_NOTIFICATIONS_ASKED, false)) return false
         prefs.edit().putBoolean(KEY_NOTIFICATIONS_ASKED, true).apply()
-        val classicAsked = getSharedPreferences(CLASSIC_FIRST_START_PREFS, Context.MODE_PRIVATE)
-            .getBoolean(CLASSIC_FIRST_START_SHOWN, false)
-        if (classicAsked) return
-        try {
+        if (classicFirstStartShown()) return false
+        return try {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            true
         } catch (_: ActivityNotFoundException) {
+            false
         }
     }
+
+    /**
+     * The battery-optimization exemption on the first start and on every entry until it is given («Не сейчас» only
+     * closes the prompt): Android otherwise stops or delays the VPN in the background and it disconnects after a
+     * while. Skipped when exempt and on Android TV (no such screen, as in «Починка»); a prompt left open closes once
+     * the exemption was given meanwhile (in Android's settings).
+     */
+    private fun askBattery() {
+        if (isFinishing || isDestroyed) return
+        batteryPrompt.value = !SagerNet.isTv && !BatteryOptimizations.isIgnoring(this) &&
+            BatteryOptimizations.requestIntent(this) != null
+    }
+
+    /** «Разрешить»: the system's own request (else the list of apps), where only the user decides. */
+    private fun allowBackground() {
+        batteryPrompt.value = false
+        if (!BatteryOptimizations.launch(this, BatteryOptimizations.requestIntent(this))) {
+            Logs.w("No screen for the battery-optimization exemption")
+        }
+    }
+
+    private fun classicFirstStartShown() = getSharedPreferences(CLASSIC_FIRST_START_PREFS, Context.MODE_PRIVATE)
+        .getBoolean(CLASSIC_FIRST_START_SHOWN, false)
 
     private fun excludeFromRecents() {
         try {
@@ -544,6 +712,8 @@ class SimpleActivity : AppCompatActivity() {
         const val EXTRA_SECTION = "io.nekohasekai.sagernet.simple.SECTION"
 
         private const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
+        private const val STATE_BATTERY_PROMPT = "battery_prompt"
+        private const val STATE_LEFT_APP = "left_app"
 
         /** FirstStartPrompts' own flag: the classic first start has asked for the permission. */
         private const val CLASSIC_FIRST_START_PREFS = "first_start"
@@ -573,6 +743,7 @@ fun SimpleApp(
     servers: ServersViewModel,
     settings: SettingsViewModel,
     repair: RepairViewModel,
+    notices: NoticesViewModel,
     /** A system settings screen «Починка» leads to (only the user changes Android's settings). */
     openRepairTarget: (RepairAction) -> Unit,
     launchers: AddLaunchers,
@@ -580,6 +751,8 @@ fun SimpleApp(
     requestStart: () -> Unit,
     onOpenClassic: () -> Unit,
     openClassicScreen: (ClassicScreen) -> Unit,
+    /** A classic editor of a server or a subscription ([SimpleActivity.editor]). */
+    openEditor: (Intent) -> Unit,
     /** A section asked for from outside (the end of a classic visit); [onSectionShown] once it is shown. */
     requestedSection: SimpleSection? = null,
     onSectionShown: () -> Unit = {},
@@ -616,6 +789,16 @@ fun SimpleApp(
     // One snackbar for every section: the add flow reports from wherever it was started.
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
+    // The subscription messages (simple-ui "Сообщения подписки"): a page of the provider is checked again on return.
+    val noticeActions = remember(notices, context) {
+        NoticeActions(
+            recheck = notices::recheck,
+            later = notices::later,
+            hide = notices::hide,
+            more = { notices.openAnnouncement(it.groupId) },
+            openProvider = { gid, url -> if (openLink(context, url)) notices.leavingFor(gid) },
+        )
+    }
     LaunchedEffect(add) {
         add.notices.collect { notice -> snackbar.showSnackbar(notice.resolve(context)) }
     }
@@ -754,10 +937,15 @@ fun SimpleApp(
                     snackbar,
                     focus = focus,
                     showSnackbar = showSnackbar,
+                    notices = notices,
+                    noticeActions = noticeActions,
                 )
             }
             val serversSection = @Composable { focus: Boolean, showSnackbar: Boolean ->
-                ServersSection(servers, onAdd = { addSheet = true }, snackbar, focus = focus, showSnackbar = showSnackbar)
+                ServersSection(
+                    servers, onAdd = { addSheet = true }, snackbar, focus = focus, showSnackbar = showSnackbar,
+                    openProvider = noticeActions.openProvider, announce = notices::openAnnouncement, openEditor = openEditor,
+                )
             }
             when {
                 // The section chosen gets the focus of a remote; the other pane keeps its place.
@@ -796,8 +984,10 @@ fun SimpleApp(
     val busy = addState.busy
     val dialog = addState.dialog
     val offer = addState.offer
+    val confirm = addState.confirm
     when {
         busy != null -> AddBusyDialog(busy)
+        confirm != null -> LinkConfirmDialog(confirm, onAccept = add::confirmLink, onCancel = add::cancelLink)
         dialog != null -> AddResultDialog(
             dialog,
             canConnect = homeState.phase == ConnectionPhase.OFF && homeState.hasServers == true,
@@ -810,6 +1000,16 @@ fun SimpleApp(
         )
 
         offer != null -> ClipboardOfferDialog(offer, onAccept = add::acceptOffer, onDecline = add::declineOffer)
+    }
+
+    // The whole announcement, from the home card, the subscription card or the notification.
+    val noticesState by notices.state.collectAsStateWithLifecycle()
+    noticesState.sheet?.let { announcement ->
+        AnnouncementSheet(
+            announcement,
+            onProvider = noticeActions.openProvider,
+            onDismiss = notices::closeAnnouncement,
+        )
     }
 }
 
@@ -828,8 +1028,11 @@ private fun HomeSection(
     focus: Boolean,
     /** The section shows the snackbar itself (not when it shares the window with the server list). */
     showSnackbar: Boolean,
+    notices: NoticesViewModel,
+    noticeActions: NoticeActions,
 ) {
     val state by home.state.collectAsStateWithLifecycle()
+    val noticesState by notices.state.collectAsStateWithLifecycle()
     val modesState by modes.state.collectAsStateWithLifecycle()
     val settingsState by settings.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -878,6 +1081,9 @@ private fun HomeSection(
                 },
                 modifier = Modifier.weight(1f),
                 focus = focus,
+                notice = noticesState.home?.let { notice ->
+                    { noticeModifier -> NoticeCard(notice, noticeActions, noticeModifier) }
+                },
             )
         }
     }
@@ -908,14 +1114,28 @@ private fun ServersSection(
     snackbar: SnackbarHostState,
     focus: Boolean,
     showSnackbar: Boolean,
+    openProvider: (Long, String) -> Unit,
+    announce: (Long) -> Unit,
+    openEditor: (Intent) -> Unit,
 ) {
     val state by servers.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     LaunchedEffect(servers) {
         servers.messages.collect { message ->
-            snackbar.showSnackbar(
-                message.arg?.let { context.getString(message.text, it) } ?: context.getString(message.text)
-            )
+            val text = message.arg?.let { context.getString(message.text, it) } ?: context.getString(message.text)
+            val action = message.action
+            if (action == null) {
+                snackbar.showSnackbar(text)
+            } else {
+                // Its own coroutine: the next message waits for this one, but the list keeps collecting.
+                launch {
+                    val result = snackbar.showSnackbar(
+                        text, actionLabel = context.getString(message.actionLabel), duration = SnackbarDuration.Long,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) action()
+                }
+            }
         }
     }
     // Opening the section reads the list again and starts the background delay check (simple-ui 5.3).
@@ -938,6 +1158,28 @@ private fun ServersSection(
                 update = servers::update,
                 updateAll = servers::updateAll,
                 add = onAdd,
+                manage = remember(servers, context) {
+                    ManageActions(
+                        update = servers::update,
+                        openProvider = openProvider,
+                        renameSubscription = servers::renameSubscription,
+                        shareSubscription = servers::shareSubscription,
+                        deleteSubscription = servers::deleteSubscription,
+                        subscriptionSettings = { gid ->
+                            openEditor(
+                                Intent(context, GroupSettingsActivity::class.java).putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, gid)
+                            )
+                        },
+                        connect = servers::chooseServer,
+                        testServer = servers::testServer,
+                        renameServer = servers::renameServer,
+                        shareServer = servers::shareServer,
+                        deleteServer = servers::deleteServer,
+                        editServer = { id -> scope.launch { openServerEditor(context, id, openEditor) } },
+                        closeShare = servers::closeShare,
+                    )
+                },
+                announce = announce,
             ),
             modifier = modifier,
             focus = focus,
@@ -1010,5 +1252,37 @@ private fun SettingsSection(
             ),
             modifier = modifier,
         )
+    }
+}
+
+/**
+ * The request to run without battery optimization (simple-ui «Работа в фоне без оптимизации батареи»):
+ * otherwise Android stops or delays the VPN in the background and it disconnects on its own after a while.
+ */
+@Composable
+private fun BatteryPromptDialog(onAllow: () -> Unit, onLater: () -> Unit) {
+    val button = Modifier.focusRing(FocusShapes.Pill)
+    AlertDialog(
+        onDismissRequest = onLater,
+        title = { Text(stringResource(R.string.simple_battery_prompt_title)) },
+        text = { Text(stringResource(R.string.simple_battery_prompt_text)) },
+        confirmButton = {
+            TextButton(onClick = onAllow, modifier = button.focusWhenShown()) {
+                Text(stringResource(R.string.simple_battery_prompt_allow))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onLater, modifier = button) { Text(stringResource(R.string.simple_offer_later)) }
+        },
+    )
+}
+
+/** The classic editor of an own server («Изменить параметры», advanced mode); back returns to the list. */
+private suspend fun openServerEditor(context: Context, id: Long, launch: (Intent) -> Unit) {
+    val profile = withContext(Dispatchers.IO) { ProfileManager.getProfile(id) } ?: return
+    try {
+        launch(profile.profileSettingsIntent(context, false))
+    } catch (e: ActivityNotFoundException) {
+        Logs.w(e)
     }
 }

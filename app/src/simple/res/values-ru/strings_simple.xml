@@ -168,6 +168,22 @@
     </plurals>
     <string name="simple_offer_later">Не сейчас</string>
 
+    <!-- Ссылка из браузера или другого приложения: добавляется только после подтверждения -->
+    <string name="simple_link_confirm_subscription_title">Добавить подписку?</string>
+    <string name="simple_link_confirm_subscription">Ссылка из другого приложения добавляет подписку с сайта %1$s. Добавляйте, только если доверяете её источнику.</string>
+    <string name="simple_link_confirm_servers_title">Добавить серверы?</string>
+    <plurals name="simple_link_confirm_servers">
+        <item quantity="one">Ссылка из другого приложения добавляет %d сервер. Добавляйте, только если доверяете её источнику.</item>
+        <item quantity="few">Ссылка из другого приложения добавляет %d сервера. Добавляйте, только если доверяете её источнику.</item>
+        <item quantity="many">Ссылка из другого приложения добавляет %d серверов. Добавляйте, только если доверяете её источнику.</item>
+        <item quantity="other">Ссылка из другого приложения добавляет %d сервера. Добавляйте, только если доверяете её источнику.</item>
+    </plurals>
+
+    <!-- Первый запуск: работа без оптимизации батареи -->
+    <string name="simple_battery_prompt_title">Чтобы VPN не отключался в фоне</string>
+    <string name="simple_battery_prompt_text">Ради экономии заряда Android может останавливать приложения в фоне — тогда VPN через какое-то время отключается сам. Разрешите приложению работать без оптимизации батареи.</string>
+    <string name="simple_battery_prompt_allow">Разрешить</string>
+
     <!-- Раздел «Серверы» (батч 5) -->
     <string name="simple_servers_auto_summary">Лучший рабочий сервер выбирается сам</string>
     <string name="simple_servers_now">Сейчас: %1$s</string>
@@ -433,4 +449,87 @@
     <string name="simple_repair_cause_current_down_steps">Другие серверы работают: выберите один из них или «Авто» в разделе «Серверы».</string>
     <string name="simple_repair_cause_battery">Android может остановить VPN в фоне</string>
     <string name="simple_repair_cause_battery_steps">Разрешите приложению работать в фоне без ограничений батареи.</string>
+
+    <!-- Сообщения подписки (simple-ui «Сообщения подписки») -->
+    <string name="simple_notice_expired_title">Подписка %1$s закончилась</string>
+    <string name="simple_notice_expired_text">Срок закончился %1$s. Продлите её — когда вернётесь в приложение, подписка проверится сама.</string>
+    <string name="simple_notice_exhausted_title">Трафик подписки %1$s закончился</string>
+    <string name="simple_notice_exhausted_text">Пополните его — когда вернётесь в приложение, подписка проверится сама.</string>
+    <string name="simple_notice_limit_title">Лимит устройств в %1$s</string>
+    <string name="simple_notice_limit_text">Все устройства, которые разрешает подписка, заняты, поэтому она не обновилась. Серверы из прошлого обновления пока работают.</string>
+    <string name="simple_notice_limit_text_blocked">Все устройства, которые разрешает подписка, заняты, поэтому серверов нет. Освободите устройство в личном кабинете.</string>
+    <string name="simple_notice_refused_title">Подписка %1$s не обновилась</string>
+    <string name="simple_notice_refused_text">Провайдер прислал сообщение вместо серверов. Серверы из прошлого обновления пока работают.</string>
+    <string name="simple_notice_blocked_title">Подписка %1$s не работает</string>
+    <string name="simple_notice_blocked_text">Вместо серверов провайдер прислал сообщение:</string>
+    <string name="simple_notice_expiring_title">Подписка %1$s заканчивается</string>
+    <plurals name="simple_notice_expiring_text">
+        <item quantity="one">Остался %1$d день, до %2$s. Продлите заранее, чтобы VPN не отключился.</item>
+        <item quantity="few">Осталось %1$d дня, до %2$s. Продлите заранее, чтобы VPN не отключился.</item>
+        <item quantity="many">Осталось %1$d дней, до %2$s. Продлите заранее, чтобы VPN не отключился.</item>
+        <item quantity="other">Осталось %1$d дня, до %2$s. Продлите заранее, чтобы VPN не отключился.</item>
+    </plurals>
+    <string name="simple_notice_expiring_today">Заканчивается сегодня. Продлите её, чтобы VPN не отключился.</string>
+    <string name="simple_notice_low_title">В подписке %1$s мало трафика</string>
+    <string name="simple_notice_low_text">Осталось %1$s из %2$s. Пополните заранее, чтобы VPN не отключился.</string>
+    <string name="simple_notice_announce_title">Сообщение от %1$s</string>
+    <string name="simple_notice_later">Позже</string>
+    <string name="simple_notice_renew">Продлить</string>
+    <string name="simple_notice_top_up">Пополнить</string>
+    <string name="simple_notice_account">Личный кабинет</string>
+    <string name="simple_notice_support">Поддержка</string>
+    <string name="simple_notice_recheck">Проверить снова</string>
+    <string name="simple_notice_more">Подробнее</string>
+    <string name="simple_notice_hide">Скрыть сообщение</string>
+    <string name="simple_notice_no_app">Нет приложения, которое откроет эту ссылку</string>
+    <string name="simple_announce_ok">Понятно</string>
+    <string name="simple_sub_channel">Подписка</string>
+    <string name="simple_sub_channel_description">Окончание подписки, трафик и лимит устройств</string>
+    <string name="simple_news_channel">Сообщения провайдера</string>
+    <string name="simple_news_channel_description">Объявления, которые присылают ваши подписки</string>
+
+    <!-- Управление подписками и своими серверами -->
+    <string name="simple_sub_more">Управление подпиской</string>
+    <string name="simple_sub_announce_label">Сообщение провайдера</string>
+    <string name="simple_sub_action_update">Обновить сейчас</string>
+    <string name="simple_action_rename">Переименовать</string>
+    <string name="simple_sub_action_share">Поделиться ссылкой</string>
+    <string name="simple_sub_action_share_summary">QR-код или копирование · ссылка личная</string>
+    <string name="simple_sub_action_delete">Удалить подписку</string>
+    <string name="simple_sub_action_all">Все параметры</string>
+    <string name="simple_sub_action_all_summary">Ссылка, интервал, HWID, User-Agent</string>
+    <string name="simple_advanced_badge">расширенный</string>
+    <string name="simple_sub_delete_title">Удалить подписку %1$s?</string>
+    <plurals name="simple_sub_delete_text">
+        <item quantity="one">%1$d сервер пропадёт из списка. Вернуть подписку можно по той же ссылке.</item>
+        <item quantity="few">%1$d сервера пропадут из списка. Вернуть подписку можно по той же ссылке.</item>
+        <item quantity="many">%1$d серверов пропадут из списка. Вернуть подписку можно по той же ссылке.</item>
+        <item quantity="other">%1$d сервера пропадут из списка. Вернуть подписку можно по той же ссылке.</item>
+    </plurals>
+    <string name="simple_action_delete">Удалить</string>
+    <string name="simple_dialog_cancel">Отмена</string>
+    <string name="simple_action_save">Сохранить</string>
+    <string name="simple_action_close">Закрыть</string>
+    <string name="simple_rename_hint">Имя</string>
+    <string name="simple_sub_deleted">Подписка %1$s удалена</string>
+    <string name="simple_delete_failed">Не удалось удалить</string>
+    <string name="simple_share_sub_title">Ссылка на подписку</string>
+    <string name="simple_share_sub_warning">Ссылка личная: тот, у кого она есть, пользуется вашей подпиской.</string>
+    <string name="simple_share_server_title">Ссылка на сервер</string>
+    <string name="simple_share_server_warning">По этой ссылке к серверу сможет подключиться любой.</string>
+    <string name="simple_share_copy">Копировать</string>
+    <string name="simple_share_send">Отправить</string>
+    <string name="simple_share_copied">Ссылка скопирована</string>
+    <string name="simple_share_too_long">Ссылка слишком длинная для QR-кода</string>
+    <string name="simple_server_more">Действия с сервером</string>
+    <string name="simple_server_action_connect">Подключиться к нему</string>
+    <string name="simple_server_action_test">Проверить задержку</string>
+    <string name="simple_server_action_share">Поделиться</string>
+    <string name="simple_server_action_share_summary">QR-код или ссылка</string>
+    <string name="simple_server_action_edit">Изменить параметры</string>
+    <string name="simple_server_deleted">Сервер «%1$s» удалён</string>
+    <string name="simple_server_undo">Вернуть</string>
+    <string name="simple_server_test_busy">Проверка уже идёт</string>
+    <string name="simple_share_no_link">У этого сервера нет ссылки, которой можно поделиться</string>
+    <string name="simple_change_failed">Не удалось сохранить изменение</string>
 </resources>

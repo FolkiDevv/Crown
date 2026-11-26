@@ -188,6 +188,16 @@
                 <data android:scheme="throne" />
                 <data android:scheme="json" />
             </intent-filter>
+
+            <!-- Crown: crown:// links (simple.add.CrownLinks, repository-governance "Ссылки crown://") -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="crown" />
+            </intent-filter>
         </activity>
         <!-- simple UI (openspec simple-ui-redesign, design.md D2/D3): opened by MainActivity, no own filters -->
         <activity
