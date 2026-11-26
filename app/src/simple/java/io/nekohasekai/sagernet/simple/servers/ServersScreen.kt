@@ -223,7 +223,8 @@ private fun ServerListView(state: ServersUiState, sections: ServerSections, acti
                     stringResource(R.string.simple_servers_whitelist_hint),
                 )
             }
-            servers(sections.whitelist, "wl", state, locale, actions)
+            // An own server named for whitelists keeps its menu here; servers of a subscription have none.
+            servers(sections.whitelist, "wl", state, locale, actions, menu = { sheet = "server:${it.id}" }) { it.own(sections) }
         }
     }
 }
@@ -237,6 +238,8 @@ private fun LazyListScope.servers(
     indent: Boolean = false,
     /** «Мои серверы»: the ⋮ of a row, in the place where a country has its arrow (a remote reaches it with right). */
     menu: ((ServerEntry) -> Unit)? = null,
+    /** Which rows of [list] have the ⋮ (all of them by default). */
+    hasMenu: (ServerEntry) -> Boolean = { true },
 ) {
     items(list, key = { "$prefix-${it.id}" }) { server ->
         ChoiceRow(
@@ -249,7 +252,7 @@ private fun LazyListScope.servers(
             enabled = !state.busy,
             indent = indent,
             onClick = { actions.chooseServer(server) },
-            extra = menu?.let { open ->
+            extra = menu?.takeIf { hasMenu(server) }?.let { open ->
                 { extraModifier ->
                     IconButton(
                         onClick = { open(server) },
@@ -278,7 +281,7 @@ private fun ManageOverlays(
     setDeleting: (Long) -> Unit,
 ) {
     fun idOf(key: String, prefix: String): Long? = key.takeIf { it.startsWith(prefix) }?.removePrefix(prefix)?.toLongOrNull()
-    fun serverOf(id: Long?) = id?.let { sections.mine.firstOrNull { s -> s.id == it } }
+    fun serverOf(id: Long?) = id?.let { (sections.mine + sections.whitelist.filter { s -> s.own(sections) }).firstOrNull { s -> s.id == it } }
     // A subscription or server gone meanwhile (deleted in the classic interface) closes its menu.
     idOf(sheet, "sub:")?.let { gid ->
         state.cards[gid]?.let { card ->
@@ -697,3 +700,6 @@ private fun nowSeconds(): Long {
 @Composable
 private fun warningColor(): Color =
     if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) Color(0xFFFFC966) else Color(0xFF8A5A00)
+
+/** A server of the user's own (a group that is no subscription), wherever the list puts it. */
+private fun ServerEntry.own(sections: ServerSections): Boolean = sections.subscriptions.none { it.group.id == groupId }
