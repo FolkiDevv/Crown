@@ -200,6 +200,9 @@
 - [x] 17.5 Ревью CodeRabbit: строки разделяются и одиночным CR (`\r\n`, `\r`, `\n`); «из других приложений» в требовании — ссылка, открытая в приложении (`ACTION_VIEW`), а не «Поделиться» текстом: фильтра `ACTION_SEND text/plain` нет и в upstream, это отдельная функция.
   - Результат (2026-11-26): Docker — 363 теста, 0 падений (`CrownLinksTest` 6/6, случай с одиночным CR); `openspec validate --strict` — valid; `upstream_touch_points.py` — вне списка 0.
 
+- [x] 17.6 После слияния `develop` с #25 (раздел 16, диалог оптимизации батареи): ссылка `crown://` при первом запуске.
+  - Результат (2026-11-26, сборка 1360f9ee): Docker — 363 теста, 0 падений (`CrownLinksTest` 6/6); `openspec validate --strict` — valid; `upstream_touch_points.py` — вне списка 0. Эмулятор 5554 после `pm clear`: `crown://addsub?url=http://10.0.2.2:8765/sub7?k=a%26b&c=3&name=After%20Merge` — «Subscription added», сервер получил `GET /sub7?k=a%26b&c=3`; затем запрос уведомлений и диалог «Keep the VPN on in the background»; ANR в logcat нет (в первом прогоне был ANR WorkManager `onStopJob` от задачи прежней установки, повторно не воспроизвёлся).
+
 ## Workflow follow-up
 
 - После приёмки — архивировать изменение (`openspec archive simple-ui-redesign`) и убедиться, что дельты перенесены в основные спецификации `openspec/specs/`.
