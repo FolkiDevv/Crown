@@ -86,6 +86,7 @@ import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.add.AddActions
@@ -129,6 +130,7 @@ import io.nekohasekai.sagernet.simple.subs.NoticeActions
 import io.nekohasekai.sagernet.simple.subs.NoticeCard
 import io.nekohasekai.sagernet.simple.subs.NoticesViewModel
 import io.nekohasekai.sagernet.simple.subs.SubscriptionAlerts
+import io.nekohasekai.sagernet.simple.subs.SubscriptionState
 import io.nekohasekai.sagernet.simple.subs.openLink
 import io.nekohasekai.sagernet.ui.AppManagerActivity
 import io.nekohasekai.sagernet.ui.GroupSettingsActivity
@@ -350,7 +352,18 @@ class SimpleActivity : AppCompatActivity() {
         intent?.removeExtra(SubscriptionAlerts.EXTRA_PROVIDER_URL)
         if (gid <= 0L || url.isEmpty()) return
         requestedSection.value = SimpleSection.HOME
-        if (openLink(this, url)) notices.leavingFor(gid)
+        // The extras can come from any app (MainActivity passes them on): only a page this subscription itself names,
+        // as its buttons may open it, is opened.
+        lifecycleScope.launch {
+            val allowed = withContext(Dispatchers.IO) {
+                runCatching {
+                    GroupRepo.get(gid)?.takeIf { it.isSubscription }?.let { group ->
+                        SubscriptionState.factsOf(group, 0, emptyList()).let { url == it.webUrl || url == it.supportUrl }
+                    } == true
+                }.getOrDefault(false)
+            }
+            if (allowed && openLink(this@SimpleActivity, url)) notices.leavingFor(gid)
+        }
     }
 
     override fun onStart() {
