@@ -11,33 +11,43 @@ Crown — форк ThroneForAndroid со своим идентификаторо
 
 `versionCode` вычисляется из версии: `((MAJOR·100 + MINOR)·100 + PATCH)·1000 + N`, где N = 999 у релиза и 1..998 у preview.
 
-## Выпуск (GitOps)
+## Ветки и выпуск
 
-Обычные merge в `main` ничего не собирают и не публикуют: CI только проверяет pull request. Что выпускать, объявляется в `fork.properties` двумя строками:
+| Ветка | Что в ней | Как туда попадают |
+|---|---|---|
+| `develop` | текущая разработка, ветка по умолчанию | pull request из веток фич (`feature/…`, `t3/…` и т. п.) |
+| `main` | то, что выпущено | pull request из `develop` (выпуск) или из `hotfix/…` |
+
+- **Фича**: ветка от `develop` → pull request в `develop`. Прогоняется CI (тесты и debug-сборка), ничего не публикуется.
+- **Выпуск**: pull request `develop` → `main`. После merge workflow **Release** собирает и публикует сборку. Проверка **Release plan** в этом pull request заранее пишет, что именно выйдет.
+- **Hotfix**: ветка `hotfix/…` от `main` → pull request в `main` (тоже публикует сборку), затем `main` сливается обратно в `develop`.
+
+В `main` нельзя слить pull request из другой ветки: Release plan падает и просит перенацелить его на `develop`.
+
+### Что публикует merge в main
+
+Канал задаёт `fork.properties`:
 
 ```properties
 VERSION_NAME=1.0.0
-RELEASE=pre.11
+RELEASE=preview
 ```
 
-- `RELEASE=pre.<N>` — preview `v<VERSION_NAME>-pre.<N>`. Его получают приложения с включённым «Разрешить обновления до beta-версий». Хранятся 10 последних preview.
-- `RELEASE=stable` — стабильный релиз `v<VERSION_NAME>`, его получают все.
+- `RELEASE=preview` — следующий preview `v<VERSION_NAME>-pre.<N>`: N на единицу больше последнего опубликованного preview этой версии. Его получают приложения с включённым «Разрешить обновления до beta-версий». Хранятся 10 последних preview.
+- `RELEASE=stable` — стабильный релиз `v<VERSION_NAME>`, его получают все. Перед ним добавьте раздел `#### <VERSION_NAME>` в `CROWN_CHANGELOG.md`, иначе в заметки попадёт список коммитов.
 
-Чтобы выпустить сборку, откройте pull request, который меняет объявление (обычно отдельный, после того как нужные изменения уже в `main`). Когда он попадает в `main`, workflow **Release** собирает и публикует объявленный релиз. Если такой тег уже есть, workflow ничего не делает.
+Обычный цикл:
 
-Каждое новое объявление должно поднимать `versionCode`:
+1. В `develop` копятся фичи, каждый выпуск `develop` → `main` даёт `1.0.0-pre.12`, `1.0.0-pre.13`, …
+2. Перед стабильной версией pull request в `develop` ставит `RELEASE=stable` и раздел changelog, затем выпуск `develop` → `main` публикует `v1.0.0`.
+3. Сразу после этого pull request в `develop` поднимает `VERSION_NAME=1.0.1` и возвращает `RELEASE=preview`. Пока этого нет, Release plan в pull request'ах в `develop` предупреждает, а в `main` — падает: preview уже выпущенной версии или повтор релиза опубликовать нельзя.
 
-| Было | Стало | Что выйдет |
-|---|---|---|
-| `1.0.0` / `pre.11` | `1.0.0` / `pre.12` | следующий preview |
-| `1.0.0` / `pre.12` | `1.0.0` / `stable` | релиз `v1.0.0` |
-| `1.0.0` / `stable` | `1.0.1` / `pre.1` | первый preview следующей версии |
+Release plan также падает, если `versionCode` новой сборки не выше уже опубликованных (например, `VERSION_NAME` понизили). Workflow сам ничего не коммитит. Если публикация упала, перезапустите его или запустите **Release** вручную на `main`. Ручной запуск на другой ветке собирает APK только как artifact запуска.
 
-Проверка **Release plan** в pull request пишет, что опубликует merge, и падает на невозможном объявлении: тег уже есть, preview уже выпущенной версии, `versionCode` не выше, чем в `main`. Workflow сам в `main` ничего не коммитит.
+### Настройки репозитория
 
-Перед стабильным релизом добавьте раздел `#### <VERSION_NAME>` в `CROWN_CHANGELOG.md` (в том же pull request). Без него в заметки попадёт список коммитов.
-
-Если публикация упала, перезапустите workflow или запустите **Release** вручную на `main`. Ручной запуск на другой ветке собирает её объявление и выкладывает APK только как artifact запуска.
+- Ветка по умолчанию — `develop` (Settings → General), чтобы новые pull request'ы и `git clone` смотрели на неё.
+- Защита веток (Settings → Branches/Rules): обе ветки только через pull request с зелёным CI («Unit tests and debug build», «Release plan») и одобрением CodeRabbit. CodeRabbit проверяет pull request'ы в обе ветки (`.coderabbit.yaml`).
 
 ## Ключ подписи
 
@@ -54,8 +64,11 @@ RELEASE=pre.11
 
 ## Слияние upstream
 
+Как обычная фича: ветка от `develop`, merge upstream в неё, pull request в `develop`.
+
 ```
 git fetch upstream main
+git switch -c upstream-sync origin/develop
 git merge upstream/main
 uv run tools/diagnostics/upstream_touch_points.py
 ```

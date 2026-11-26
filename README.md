@@ -57,7 +57,7 @@ APK для arm64-v8a, armeabi-v7a и x86_64 лежат в [Releases](https://git
 
 ## Разработка
 
-Форк держится близко к upstream: новый интерфейс живёт в отдельном source set `app/src/simple/`, а правки файлов Throne ограничены проверяемым списком (`tools/diagnostics/upstream_touch_points.py`). Сборка, версии, выпуск релизов (через объявление в `fork.properties`, GitOps) и слияние upstream описаны в [CROWN.md](CROWN.md), требования — в [`openspec/specs/`](openspec/specs).
+Форк держится близко к upstream: новый интерфейс живёт в отдельном source set `app/src/simple/`, а правки файлов Throne ограничены проверяемым списком (`tools/diagnostics/upstream_touch_points.py`). Фичи идут pull request'ами в ветку `develop`, а выпуск — это merge `develop` в `main`: он публикует preview или стабильный релиз. Ветки, версии, выпуск и слияние upstream описаны в [CROWN.md](CROWN.md), требования — в [`openspec/specs/`](openspec/specs).
 
 ## Авторы и благодарности
 

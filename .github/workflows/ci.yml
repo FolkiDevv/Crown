@@ -1,9 +1,11 @@
 name: CI
-# Crown: pull requests and main only (a push to a PR branch is already checked through its pull_request event).
+# Crown (CROWN.md, "Ветки и выпуск"): features reach develop through pull requests, develop reaches main through release
+# pull requests. CI runs on those pull requests and on pushes to the two branches, not on every pushed branch.
 on:
   push:
     branches:
       - main
+      - develop
   pull_request:
   workflow_dispatch:
 concurrency:
@@ -22,16 +24,30 @@ jobs:
         uses: ./.github/actions/android-build
         with:
           tasks: app:testOssDebugUnitTest app:assembleOssDebug
-  # Crown (GitOps): what merging the pull request publishes (release.yml); fails on a declaration that cannot be published.
+  # What merging into main publishes (release.yml). Into main only develop and hotfix/* are merged, and the plan must
+  # be publishable; into develop the plan only warns.
   release-plan:
     name: Release plan
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      # the pull request's merge commit and its first parent, the base branch as it is now
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
       - name: Release plan
-        run: bash buildScript/release_plan.sh --check HEAD^1
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$BASE" = main ]; then
+            case "$HEAD" in
+              develop | hotfix/*) ;;
+              *)
+                echo "::error::main takes pull requests from develop (releases) and hotfix/* only: retarget this one to develop"
+                exit 1
+                ;;
+            esac
+            bash buildScript/release_plan.sh --check
+          else
+            bash buildScript/release_plan.sh --check --warn
+          fi
