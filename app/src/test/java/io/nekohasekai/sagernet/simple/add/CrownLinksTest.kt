@@ -84,6 +84,11 @@ class CrownLinksTest {
             sub("https%3A%2F%2Fa.b%2Fc%3Fx%3D1", "n") + "\nvless://id@h:1#m",
             CrownLinks.toThrone("crown://addsub?url=https://a.b/c?x=1&name=n\nvless://id@h:1#m"),
         )
+        // lines separated by a lone CR too
+        assertEquals(
+            sub("https%3A%2F%2Fa.b%2Fs", "") + "\n" + sub("https%3A%2F%2Fc.d%2Fs", ""),
+            CrownLinks.toThrone("crown://addsub?url=https://a.b/s\rcrown://addsub?url=https://c.d/s"),
+        )
         assertEquals(Kind.CONTENT, ImportText.kind(CrownLinks.toThrone("crown://add/eyJhIjoxfQ\ncrown://add/eyJiIjoyfQ")))
         // a document without a crown:// line stays the same object, even with crown:// inside a line
         val doc = "{\n  \"remarks\": \"crown://add/x\"\n}"

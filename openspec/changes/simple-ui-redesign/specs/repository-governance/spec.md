@@ -36,7 +36,7 @@
 - **THEN** после перезапуска и обновления приложения значение остаётся выключенным
 
 ### Requirement: Ссылки crown://
-Crown MUST принимать ссылки `crown://` из браузера, других приложений, буфера обмена и QR-кода в обоих интерфейсах. Подписку MUST добавлять `crown://addsub?url=<URL>&name=<имя>` (некодированный URL берётся как есть), `crown://addsub/<URL>[#имя]` и `crown://install-config?url=…`; остальные `crown://<команда>/…` MUST работать как `throne://<команда>/…`. Правки upstream MUST ограничиваться точками D2 и `FORK_IDENTITY_POINTS`.
+Crown MUST принимать ссылки `crown://`, открытые в браузере или другом приложении, из буфера обмена и QR-кода в обоих интерфейсах. Подписку MUST добавлять `crown://addsub?url=<URL>&name=<имя>` (некодированный URL берётся как есть), `crown://addsub/<URL>[#имя]` и `crown://install-config?url=…`; остальные `crown://<команда>/…` MUST работать как `throne://<команда>/…`. Правки upstream MUST ограничиваться точками D2 и `FORK_IDENTITY_POINTS`.
 
 #### Scenario: Подписка со страницы панели
 - **WHEN** на странице подписки нажата ссылка `crown://addsub?url=https://sub.example.com/abc&name=My%20VPN`

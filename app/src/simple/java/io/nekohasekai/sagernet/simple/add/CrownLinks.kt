@@ -29,7 +29,7 @@ object CrownLinks {
         if (!text.contains(SCHEME, ignoreCase = true)) return text
         if (text.none { it == '\n' || it == '\r' }) return link(text)
         var changed = false
-        val lines = text.split('\n').map { line -> link(line).also { if (it !== line) changed = true } }
+        val lines = text.split(LINE_BREAK).map { line -> link(line).also { if (it !== line) changed = true } }
         return if (changed) lines.joinToString("\n") else text
     }
 
@@ -66,7 +66,8 @@ object CrownLinks {
         return subscribe(params["url"].orEmpty(), params["name"].orEmpty())
     }
 
-    private val RAW_URL = Regex("(?:^|&)url=(https?://)", RegexOption.IGNORE_CASE)
+    private val LINE_BREAK = Regex("\r\n|\r|\n")
+    private val RAW_URL =Regex("(?:^|&)url=(https?://)", RegexOption.IGNORE_CASE)
     private val NAME_AFTER = Regex("&name=", RegexOption.IGNORE_CASE)
 
     /** Query parameters by lower-case name, values percent-decoded. */

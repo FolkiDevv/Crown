@@ -184,6 +184,8 @@
   - Результат (2026-11-26): Docker — 362 теста, 0 падений (`CrownLinksTest` 5/5); `openspec validate --strict` — valid; `upstream_touch_points.py` — вне списка 0. Эмулятор 5554, новый интерфейс: `crown://addsub?url=http://10.0.2.2:8765/sub5?token=a%26c&b=1&name=Raw%20After` — «Subscription added», «Raw After», 2 сервера, сервер получил `GET /sub5?token=a%26c&b=1`; `crown://addsub?name=Raw%20Before&url=…/sub6?token=d%26e&f=2` — «Raw Before», `GET /sub6?token=d%26e&f=2`; то же после `pm clear` (первый запуск) и после `force-stop`.
 - [x] 16.4 Ревью Greptile: в тексте из нескольких строк каждая строка `crown://` переписывается отдельно (список `crown://add/…` — как список `throne://add/…`, некодированный URL не захватывает следующую строку); текст без таких строк не меняется. Тест `pastedListLineByLine`; устройство — вставка списка из двух `crown://add/…`.
   - Результат (2026-11-26, после rebase на `develop`): Docker — 363 теста, 0 падений (`CrownLinksTest` 6/6); `openspec validate --strict` — valid. Эмулятор 5554, новый интерфейс: две строки `crown://add/…` скопированы в Chrome и вставлены через «Add server» → «Paste from clipboard» — в «My servers» оба сервера, «List one» и «List two».
+- [x] 16.5 Ревью CodeRabbit: строки разделяются и одиночным CR (`\r\n`, `\r`, `\n`); «из других приложений» в требовании — ссылка, открытая в приложении (`ACTION_VIEW`), а не «Поделиться» текстом: фильтра `ACTION_SEND text/plain` нет и в upstream, это отдельная функция.
+  - Результат (2026-11-26): Docker — 363 теста, 0 падений (`CrownLinksTest` 6/6, случай с одиночным CR); `openspec validate --strict` — valid; `upstream_touch_points.py` — вне списка 0.
 
 ## Workflow follow-up
 
