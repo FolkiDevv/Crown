@@ -166,6 +166,20 @@ class SubscriptionNoticesTest {
     }
 
     @Test
+    fun providerLinks() {
+        assertEquals("https://my.example/cabinet", ProviderLinks.safe(" https://my.example/cabinet ", allowTg = false))
+        assertEquals("http://my.example", ProviderLinks.safe("http://my.example", allowTg = false))
+        assertEquals("", ProviderLinks.safe("market://details?id=com.attacker.app", allowTg = true))
+        assertEquals("", ProviderLinks.safe("intent://x#Intent;scheme=a;end", allowTg = true))
+        assertEquals("", ProviderLinks.safe("javascript:alert(1)", allowTg = true))
+        assertEquals("", ProviderLinks.safe("https:///path", allowTg = false))
+        assertEquals("", ProviderLinks.safe("my.example/cabinet", allowTg = false))
+        assertEquals("", ProviderLinks.safe("tg://resolve?domain=support", allowTg = false))
+        assertEquals("tg://resolve?domain=support", ProviderLinks.safe("tg://resolve?domain=support", allowTg = true))
+        assertEquals("https://t.me/support", ProviderLinks.safe("https://t.me/support", allowTg = false))
+    }
+
+    @Test
     fun fetchMarks() {
         assertEquals(FetchMark.LIMIT, FetchMark.of("limit"))
         assertEquals(FetchMark.EMPTY, FetchMark.of("empty"))

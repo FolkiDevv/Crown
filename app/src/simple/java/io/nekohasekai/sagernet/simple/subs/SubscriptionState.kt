@@ -72,8 +72,9 @@ object SubscriptionState {
             total = info.total,
             used = info.used,
             announce = if (info.valid) info.announce.trim() else "",
-            webUrl = if (info.valid) info.webUrl.trim() else "",
-            supportUrl = if (info.valid) info.supportUrl.trim() else "",
+            // Only pages the provider's buttons may open (ProviderLinks).
+            webUrl = if (info.valid) ProviderLinks.safe(info.webUrl, allowTg = false) else "",
+            supportUrl = if (info.valid) ProviderLinks.safe(info.supportUrl, allowTg = true) else "",
             usable = usable,
             placeholders = placeholders,
             mark = mark(group.id),
