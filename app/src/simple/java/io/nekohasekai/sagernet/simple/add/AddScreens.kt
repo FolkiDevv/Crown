@@ -400,6 +400,32 @@ private fun SummaryDialog(summary: ImportSummary, canConnect: Boolean, onConnect
     )
 }
 
+/**
+ * A link opened from a browser or another app (simple-ui "Подтверждение ссылки из другого приложения"): added only
+ * on «Добавить», so a web page cannot add a subscription unasked.
+ */
+@Composable
+fun LinkConfirmDialog(confirm: LinkConfirm, onAccept: () -> Unit, onCancel: () -> Unit) {
+    val host = confirm.subscriptionHost
+    AlertDialog(
+        onDismissRequest = onCancel,
+        icon = { Icon(painterResource(R.drawable.simple_ic_link), contentDescription = null) },
+        title = { Text(stringResource(if (host != null) R.string.simple_link_confirm_subscription_title else R.string.simple_link_confirm_servers_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (host != null) {
+                    if (confirm.name.isNotEmpty()) Text(confirm.name, style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.simple_link_confirm_subscription, host))
+                } else {
+                    Text(pluralStringResource(R.plurals.simple_link_confirm_servers, confirm.servers, confirm.servers))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onAccept, modifier = DialogButton.focusWhenShown()) { Text(stringResource(R.string.simple_add_action)) } },
+        dismissButton = { TextButton(onClick = onCancel, modifier = DialogButton) { Text(stringResource(R.string.simple_cancel)) } },
+    )
+}
+
 /** Something new in the clipboard (simple-ui "Предложение импорта из буфера обмена"): added only on «Добавить». */
 @Composable
 fun ClipboardOfferDialog(offer: ClipboardOffer, onAccept: () -> Unit, onDecline: () -> Unit) {

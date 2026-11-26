@@ -180,6 +180,16 @@
     </plurals>
     <string name="simple_offer_later">Not now</string>
 
+    <!-- A link opened from a browser or another app: added only after the user confirms it -->
+    <string name="simple_link_confirm_subscription_title">Add this subscription?</string>
+    <!-- %1$s: the host of the subscription link -->
+    <string name="simple_link_confirm_subscription">A link from another app asks to add a subscription from %1$s. Add it only if you trust its source.</string>
+    <string name="simple_link_confirm_servers_title">Add servers?</string>
+    <plurals name="simple_link_confirm_servers">
+        <item quantity="one">A link from another app asks to add %d server. Add it only if you trust its source.</item>
+        <item quantity="other">A link from another app asks to add %d servers. Add them only if you trust their source.</item>
+    </plurals>
+
     <!-- First start: running without battery optimization -->
     <string name="simple_battery_prompt_title">Keep the VPN on in the background</string>
     <string name="simple_battery_prompt_text">To save battery, Android may stop apps in the background, and then the VPN disconnects on its own after a while. Let the app run without battery optimization.</string>

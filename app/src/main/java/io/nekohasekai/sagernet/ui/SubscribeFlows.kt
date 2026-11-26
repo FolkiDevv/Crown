@@ -17,6 +17,7 @@ import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.outbound.link.Base64Strict
+import io.nekohasekai.sagernet.simple.add.CrownLinks
 import io.nekohasekai.sagernet.ui.route.RouteImports
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
@@ -35,7 +36,7 @@ object SubscribeFlows {
 
     /** Text from the clipboard, a scan or a share: http(s) URL → the desktop's 3-way choice, links/documents → import into [gid] (current group when negative). */
     fun importText(activity: FragmentActivity, text: String, gid: Long = -1L) {
-        val content = text.trim()
+        val content = CrownLinks.toThrone(text).trim()
         if (content.isEmpty()) return
         if (content.startsWith("throne://")) {
             openDeepLink(activity, content, gid)
@@ -55,7 +56,7 @@ object SubscribeFlows {
     /** Several payloads at once (importFromFiles): each URL or deep link on its own, the rest as one import. */
     fun importTexts(activity: FragmentActivity, payloads: List<String>, gid: Long = -1L) {
         val batch = ArrayList<String>()
-        for (payload in payloads.map { it.trim() }.filter { it.isNotEmpty() }) {
+        for (payload in payloads.map { CrownLinks.toThrone(it).trim() }.filter { it.isNotEmpty() }) {
             val single = payload.startsWith("http://") || payload.startsWith("https://") ||
                 payload.startsWith("throne://") || subscribeLink(payload) != null
             if (single) importText(activity, payload, gid) else batch.add(payload)
