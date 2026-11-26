@@ -405,6 +405,8 @@ class SimpleActivity : AppCompatActivity() {
     override fun onStop() {
         home.setForeground(false)
         if (leaving()) leftApp = true
+        // A page opened as the activity starts can hide it before its first onResume, with no onPause to arm it.
+        notices.stopped()
         super.onStop()
     }
 
