@@ -142,6 +142,17 @@ object TrafficModeApplier {
         lock.withLock { rebuildLocked() }
     }
 
+    /**
+     * A server or subscription was edited in a classic editor that asks for a restart: the running service, whatever it
+     * runs, is rebuilt with the stored settings (the classic interface offers the same reload). Nothing while it is off.
+     */
+    suspend fun settingsChanged(): Unit = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val selected = DataStore.selectedProxy
+            if (selected > 0L) switchTo(selected, rebuilt = true)
+        }
+    }
+
     private fun rebuildLocked() {
         val selected = DataStore.selectedProxy
         if (TrafficModes.isManagedSelector(selected)) switchTo(selected, rebuilt = true)

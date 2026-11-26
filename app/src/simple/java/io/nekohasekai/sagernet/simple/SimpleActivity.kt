@@ -137,6 +137,7 @@ import io.nekohasekai.sagernet.ui.GroupSettingsActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.ScannerActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
+import io.nekohasekai.sagernet.ui.profile.ProfileSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.profileSettingsIntent
 import io.nekohasekai.sagernet.update.UpdateActivity
 import io.nekohasekai.sagernet.utils.BatteryOptimizations
@@ -172,6 +173,14 @@ class SimpleActivity : AppCompatActivity() {
     /** The classic app list (AppManagerActivity) editing one of the simple UI's two app lists. */
     private val appList = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         modes.appListClosed()
+    }
+
+    /**
+     * A classic editor of a server or a subscription; it reports a change the running connection must take (it reloads
+     * the connection itself only in classic). Here, not in a section: the result must outlive a switch of the layout.
+     */
+    private val editor = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.data?.getBooleanExtra(ProfileSettingsActivity.EXTRA_RESTART_NEEDED, false) == true) servers.settingsChanged()
     }
 
     /** The VPN consent, then the start of the service; true in the result when the consent was refused. */
@@ -233,6 +242,7 @@ class SimpleActivity : AppCompatActivity() {
                     requestStart = ::requestStart,
                     onOpenClassic = { SimpleUi.switchTo(this, simple = false) },
                     openClassicScreen = ::openClassicScreen,
+                    openEditor = { editor.launch(it) },
                     requestedSection = requestedSection.value,
                     onSectionShown = { requestedSection.value = null },
                 )
@@ -394,9 +404,17 @@ class SimpleActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        // The provider's page now covers the app. Armed here, before the state is saved: on Android 8.1 and older that
+        // happens before onStop, and a process ended while the page is open must still check the subscription.
+        notices.stopped()
+        super.onPause()
+    }
+
     override fun onStop() {
         home.setForeground(false)
         if (leaving()) leftApp = true
+        // A page opened as the activity starts can hide it before its first onResume, with no onPause to arm it.
         notices.stopped()
         super.onStop()
     }
@@ -733,6 +751,8 @@ fun SimpleApp(
     requestStart: () -> Unit,
     onOpenClassic: () -> Unit,
     openClassicScreen: (ClassicScreen) -> Unit,
+    /** A classic editor of a server or a subscription ([SimpleActivity.editor]). */
+    openEditor: (Intent) -> Unit,
     /** A section asked for from outside (the end of a classic visit); [onSectionShown] once it is shown. */
     requestedSection: SimpleSection? = null,
     onSectionShown: () -> Unit = {},
@@ -924,7 +944,7 @@ fun SimpleApp(
             val serversSection = @Composable { focus: Boolean, showSnackbar: Boolean ->
                 ServersSection(
                     servers, onAdd = { addSheet = true }, snackbar, focus = focus, showSnackbar = showSnackbar,
-                    openProvider = noticeActions.openProvider, announce = notices::openAnnouncement,
+                    openProvider = noticeActions.openProvider, announce = notices::openAnnouncement, openEditor = openEditor,
                 )
             }
             when {
@@ -1096,6 +1116,7 @@ private fun ServersSection(
     showSnackbar: Boolean,
     openProvider: (Long, String) -> Unit,
     announce: (Long) -> Unit,
+    openEditor: (Intent) -> Unit,
 ) {
     val state by servers.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -1145,7 +1166,7 @@ private fun ServersSection(
                         shareSubscription = servers::shareSubscription,
                         deleteSubscription = servers::deleteSubscription,
                         subscriptionSettings = { gid ->
-                            context.startActivity(
+                            openEditor(
                                 Intent(context, GroupSettingsActivity::class.java).putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, gid)
                             )
                         },
@@ -1154,7 +1175,7 @@ private fun ServersSection(
                         renameServer = servers::renameServer,
                         shareServer = servers::shareServer,
                         deleteServer = servers::deleteServer,
-                        editServer = { id -> scope.launch { openServerEditor(context, id) } },
+                        editServer = { id -> scope.launch { openServerEditor(context, id, openEditor) } },
                         closeShare = servers::closeShare,
                     )
                 },
@@ -1257,10 +1278,10 @@ private fun BatteryPromptDialog(onAllow: () -> Unit, onLater: () -> Unit) {
 }
 
 /** The classic editor of an own server («Изменить параметры», advanced mode); back returns to the list. */
-private suspend fun openServerEditor(context: Context, id: Long) {
+private suspend fun openServerEditor(context: Context, id: Long, launch: (Intent) -> Unit) {
     val profile = withContext(Dispatchers.IO) { ProfileManager.getProfile(id) } ?: return
     try {
-        context.startActivity(profile.profileSettingsIntent(context, false))
+        launch(profile.profileSettingsIntent(context, false))
     } catch (e: ActivityNotFoundException) {
         Logs.w(e)
     }

@@ -416,6 +416,9 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** A classic editor saved a change the running connection must take. */
+    fun settingsChanged() = manage { TrafficModeApplier.settingsChanged() }
+
     fun closeShare() = mutableState.update { it.copy(share = null) }
 
     /** A change of the user's in the database, then the list read again. */
