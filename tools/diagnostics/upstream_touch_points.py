@@ -60,7 +60,7 @@ FORK_DIRS = (
     "app/src/simple/", "openspec/", "tools/diagnostics/",
     # fork identity files
     "fork.properties", "CROWN_CHANGELOG.md", "CROWN.md", "buildSrc/src/main/kotlin/Fork.kt", "app/src/oss/res/",
-    "buildScript/release_plan.sh", ".github/images/crown/", ".coderabbit.yaml",
+    "buildScript/release_plan.sh", ".github/workflows/ci-retarget.yml", ".github/images/crown/", ".coderabbit.yaml",
 )
 NEW_ONLY_DIRS = ("app/src/test/",)
 

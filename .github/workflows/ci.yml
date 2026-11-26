@@ -25,20 +25,29 @@ jobs:
         with:
           tasks: app:testOssDebugUnitTest app:assembleOssDebug
   # What merging into main publishes (release.yml). Into main only develop and hotfix/* are merged, and the plan must
-  # be publishable; into develop the plan only warns.
+  # be publishable; into develop the plan only warns. The base and the merge are read when the job runs, not taken from
+  # the event: a re-run (ci-retarget.yml re-runs this job when a pull request is retargeted) checks the current target.
   release-plan:
     name: Release plan
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
       - name: Release plan
         env:
-          BASE: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
           HEAD: ${{ github.head_ref }}
         run: |
           set -euo pipefail
+          BASE=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .base.ref)
+          echo "pull request #$PR: $HEAD -> $BASE"
           if [ "$BASE" = main ]; then
             case "$HEAD" in
               develop | hotfix/*) ;;

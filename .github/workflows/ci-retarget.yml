@@ -1,0 +1,38 @@
+name: CI retarget
+# Retargeting a pull request (develop <-> main) does not start CI, and a re-run keeps the event of the original run.
+# This re-runs the "Release plan" job of the latest CI run of the pull request head: the job reads the current base and
+# merge itself (ci.yml), so its check follows the new target. Other edits (title, description) do nothing.
+on:
+  pull_request:
+    types: [edited]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  rerun:
+    name: Re-run Release plan
+    if: github.event.changes.base
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          FROM: ${{ github.event.changes.base.ref.from }}
+          TO: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          echo "retargeted $FROM -> $TO"
+          # GitHub recomputes refs/pull/<n>/merge for the new base in the background.
+          sleep 20
+          RUN=$(gh run list --workflow ci.yml --event pull_request --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$RUN" ]; then
+            echo "::notice::no CI run for $SHA yet: the next push checks the new target"
+            exit 0
+          fi
+          # A job of a run that is still going cannot be re-run; the build takes a few minutes.
+          gh run watch "$RUN" --interval 15 > /dev/null || true
+          JOB=$(gh run view "$RUN" --json jobs --jq '.jobs[] | select(.name == "Release plan") | .databaseId')
+          gh run rerun "$RUN" --job "$JOB"
+          echo "re-ran Release plan of CI run $RUN"

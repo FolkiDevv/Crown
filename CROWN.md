@@ -22,7 +22,7 @@ Crown — форк ThroneForAndroid со своим идентификаторо
 - **Выпуск**: pull request `develop` → `main`. После merge workflow **Release** собирает и публикует сборку. Проверка **Release plan** в этом pull request заранее пишет, что именно выйдет.
 - **Hotfix**: ветка `hotfix/…` от `main` → pull request в `main` (тоже публикует сборку), затем `main` сливается обратно в `develop`.
 
-В `main` нельзя слить pull request из другой ветки: Release plan падает и просит перенацелить его на `develop`.
+В `main` нельзя слить pull request из другой ветки: Release plan падает и просит перенацелить его на `develop`. Если pull request перенацелили, **CI retarget** сам перезапускает Release plan, и проверка берёт новый target.
 
 ### Что публикует merge в main
 
