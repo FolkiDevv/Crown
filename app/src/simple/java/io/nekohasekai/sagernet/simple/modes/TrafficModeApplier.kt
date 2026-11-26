@@ -123,12 +123,14 @@ object TrafficModeApplier {
      * once. Returns the id now selected.
      */
     suspend fun selectServer(id: Long): Long = withContext(Dispatchers.IO) {
-        lock.withLock {
-            val managed = TrafficModes.managedIds()
-            val target = TrafficModePlan.server(id, managed.auto, managed.autoWhitelist, routingOf(TrafficModes.mode()))
-            TrafficModes.setCountryChoice(null)
-            switchTo(target, rebuilt = false)
-        }.also { WhitelistZoneState.afterChoice(app) }
+        lock.withLock { selectLocked(id) }.also { WhitelistZoneState.afterChoice(app) }
+    }
+
+    private fun selectLocked(id: Long): Long {
+        val managed = TrafficModes.managedIds()
+        val target = TrafficModePlan.server(id, managed.auto, managed.autoWhitelist, routingOf(TrafficModes.mode()))
+        TrafficModes.setCountryChoice(null)
+        return switchTo(target, rebuilt = false)
     }
 
     /**
@@ -137,10 +139,30 @@ object TrafficModeApplier {
      * hand is not touched (deleting it clears the choice itself). Nothing while the service is off.
      */
     suspend fun serversChanged(): Unit = withContext(Dispatchers.IO) {
-        lock.withLock {
-            val selected = DataStore.selectedProxy
-            if (TrafficModes.isManagedSelector(selected)) switchTo(selected, rebuilt = true)
+        lock.withLock { rebuildLocked() }
+    }
+
+    private fun rebuildLocked() {
+        val selected = DataStore.selectedProxy
+        if (TrafficModes.isManagedSelector(selected)) switchTo(selected, rebuilt = true)
+    }
+
+    /**
+     * An own server came back (Undo of its deletion): chosen again when it was the choice and nothing has been chosen
+     * since (the deletion cleared the choice), otherwise taken in by a running «Авто» or country. Decided under the lock
+     * every choice is applied under, so a choice made meanwhile is never overwritten.
+     */
+    suspend fun serverRestored(id: Long, wasSelected: Boolean): Unit = withContext(Dispatchers.IO) {
+        val chosen = lock.withLock {
+            if (wasSelected && DataStore.selectedProxy <= 0L) {
+                selectLocked(id)
+                true
+            } else {
+                rebuildLocked()
+                false
+            }
         }
+        if (chosen) WhitelistZoneState.afterChoice(app)
     }
 
     /**

@@ -369,9 +369,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             ServersMessage(R.string.simple_server_deleted, name, R.string.simple_server_undo) {
                 manage {
                     val copy = ProfileManager.createProfile(profile.groupId, profile.outbound)
-                    // Chosen again only if nothing else was chosen meanwhile (the deletion cleared the choice).
-                    if (wasSelected && DataStore.selectedProxy <= 0L) TrafficModeApplier.selectServer(copy.id)
-                    else TrafficModeApplier.serversChanged()
+                    TrafficModeApplier.serverRestored(copy.id, wasSelected)
                     mutableEvents.tryEmit(ServersEvent.Chosen)
                 }
             }
