@@ -73,6 +73,24 @@ class CrownLinksTest {
     }
 
     @Test
+    fun pastedListLineByLine() {
+        // every crown:// line is rewritten, as upstream reads a list of throne://add lines
+        assertEquals(
+            "throne://add/eyJhIjoxfQ\nvless://id@h:1#n\nthrone://add/eyJiIjoyfQ",
+            CrownLinks.toThrone("crown://add/eyJhIjoxfQ\r\nvless://id@h:1#n\ncrown://add/eyJiIjoyfQ"),
+        )
+        // a raw subscription URL ends with its line
+        assertEquals(
+            sub("https%3A%2F%2Fa.b%2Fc%3Fx%3D1", "n") + "\nvless://id@h:1#m",
+            CrownLinks.toThrone("crown://addsub?url=https://a.b/c?x=1&name=n\nvless://id@h:1#m"),
+        )
+        assertEquals(Kind.CONTENT, ImportText.kind(CrownLinks.toThrone("crown://add/eyJhIjoxfQ\ncrown://add/eyJiIjoyfQ")))
+        // a document without a crown:// line stays the same object, even with crown:// inside a line
+        val doc = "{\n  \"remarks\": \"crown://add/x\"\n}"
+        assertSame(doc, CrownLinks.toThrone(doc))
+    }
+
+    @Test
     fun rewrittenLinksAreRecognised() {
         assertEquals(Kind.SUBSCRIBE_LINK, ImportText.kind(CrownLinks.toThrone("crown://addsub?url=https://a.b/c&name=n")))
         assertEquals(Kind.SUBSCRIBE_LINK, ImportText.kind(CrownLinks.toThrone("crown://addsub/aHR0cHM6Ly9hLmIvYyNu")))

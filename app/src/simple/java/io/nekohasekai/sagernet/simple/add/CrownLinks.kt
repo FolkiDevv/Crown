@@ -20,8 +20,21 @@ object CrownLinks {
     private const val SCHEME = "crown://"
     private val SUBSCRIBE_COMMANDS = setOf("addsub", "install-config")
 
-    /** [text] with a leading `crown://` link rewritten as described above; any other text is returned unchanged. */
+    /**
+     * [text] with its `crown://` links rewritten as described above, each line on its own: in a pasted list every
+     * `crown://` line is rewritten (as upstream reads a list of `throne://add/…` lines) and a raw subscription URL
+     * never runs into the next line. Text without such a line is returned unchanged (the same object).
+     */
     fun toThrone(text: String): String {
+        if (!text.contains(SCHEME, ignoreCase = true)) return text
+        if (text.none { it == '\n' || it == '\r' }) return link(text)
+        var changed = false
+        val lines = text.split('\n').map { line -> link(line).also { if (it !== line) changed = true } }
+        return if (changed) lines.joinToString("\n") else text
+    }
+
+    /** One line: a leading `crown://` link rewritten, anything else returned unchanged. */
+    private fun link(text: String): String {
         val content = text.trim()
         if (!content.startsWith(SCHEME, ignoreCase = true)) return text
         val rest = content.substring(SCHEME.length)

@@ -74,6 +74,8 @@ Crown открывается ссылками `crown://` из браузера �
 | `crown://addsub/<base64 строки "URL#имя">` | как `throne://addsub/…` |
 | `crown://add/…`, `crown://route/…`, `crown://remoteroute/…` | как одноимённые `throne://` |
 
+В тексте из нескольких строк (список ссылок из буфера обмена) каждая строка `crown://` переписывается отдельно, как список `throne://add/…`.
+
 Remnawave (Subpage Builder): кнопка `subscriptionLink` со ссылкой `crown://addsub?url={{SUBSCRIPTION_LINK}}&name=My%20VPN` или `crown://addsub/{{SUBSCRIPTION_LINK}}`. Новый интерфейс добавляет подписку сразу (как ссылку, вставленную вручную), классический сначала спрашивает.
 
 ## Слияние upstream

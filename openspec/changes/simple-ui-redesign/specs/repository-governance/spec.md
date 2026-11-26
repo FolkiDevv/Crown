@@ -42,6 +42,10 @@ Crown MUST принимать ссылки `crown://` из браузера, д�
 - **WHEN** на странице подписки нажата ссылка `crown://addsub?url=https://sub.example.com/abc&name=My%20VPN`
 - **THEN** открывается Crown и добавляет подписку `https://sub.example.com/abc` с именем «My VPN» (классический интерфейс сначала спрашивает)
 
+#### Scenario: Список ссылок crown://
+- **WHEN** из буфера обмена вставлены две строки `crown://add/<base64>`
+- **THEN** Crown добавляет оба сервера, как из двух строк `throne://add/<base64>`
+
 #### Scenario: Некодированный URL со своими параметрами
 - **WHEN** открыта ссылка `crown://addsub?url=https://a.b/s?token=a%26c&b=1&name=n`
 - **THEN** Crown добавляет подписку `https://a.b/s?token=a%26c&b=1` с именем «n»: `&b=1` не теряется, `%26` не декодируется
