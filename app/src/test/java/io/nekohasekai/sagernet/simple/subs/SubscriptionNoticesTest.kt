@@ -196,6 +196,14 @@ class SubscriptionNoticesTest {
     }
 
     @Test
+    fun linkSchemeIsTheLinksOwn() {
+        assertEquals("https://my.example/a", linkUrl("https://my.example/a"))
+        assertEquals("tg://resolve?domain=x", linkUrl("tg://resolve?domain=x"))
+        assertEquals("https://www.example.com/help?next=https://example.com", linkUrl("www.example.com/help?next=https://example.com"))
+        assertEquals("https://t.me/support", linkUrl("t.me/support"))
+    }
+
+    @Test
     fun fetchMarks() {
         assertEquals(FetchMark.LIMIT, FetchMark.of("limit"))
         assertEquals(FetchMark.EMPTY, FetchMark.of("empty"))

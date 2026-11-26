@@ -323,6 +323,11 @@ fun trimLink(found: String): String {
     return found.substring(0, end)
 }
 
+private val SCHEME_START = Regex("""^[A-Za-z][A-Za-z0-9+.-]*://""")
+
+/** The address a found link opens: as written when it starts with its scheme, else as an https page (`www.`, `t.me/`). */
+fun linkUrl(link: String): String = if (SCHEME_START.containsMatchIn(link)) link else "https://$link"
+
 /** [text] with its web and Telegram links tappable; a link ends before trailing punctuation. */
 fun linkified(text: String, color: Color, open: (String) -> Unit): AnnotatedString = buildAnnotatedString {
     var at = 0
@@ -330,7 +335,7 @@ fun linkified(text: String, color: Color, open: (String) -> Unit): AnnotatedStri
         val raw = trimLink(match.value)
         if (raw.isEmpty()) continue
         append(text, at, match.range.first)
-        val url = if (raw.contains("://")) raw else "https://$raw"
+        val url = linkUrl(raw)
         pushLink(
             LinkAnnotation.Url(
                 url,
