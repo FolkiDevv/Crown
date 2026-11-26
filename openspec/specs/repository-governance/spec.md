@@ -68,7 +68,12 @@ throne 核心 MUST 以 `nb4a.properties` 的 `THRONE_CORE_REF` 为唯一真实�
 
 ### Requirement: Идентичность форка Crown
 
-Форк MUST собираться как отдельное приложение Crown: идентификатор `PACKAGE_NAME`, версия `VERSION_NAME`, репозиторий обновлений `UPDATE_REPOSITORY`, файл истории изменений `CHANGELOG` и префикс имён APK `ARTIFACT_NAME` MUST браться из `fork.properties`. `nb4a.properties` MUST оставаться совпадающим с upstream (`THRONE_CORE_REF` по-прежнему задаёт ядро, его `VERSION_NAME` — версия Throne, на которой основана сборка); MUST NOT вносить в него правки форка. Название приложения («Crown», в русской локали «Корона») MUST задаваться ресурсами `app/src/oss/res/`, не правкой `strings.xml` upstream. Значки Crown (значок приложения, значок плитки быстрых настроек и строки состояния, баннер Android TV) MUST задаваться там же ресурсами с теми же именами, не заменой файлов upstream в `app/src/main/res/`. Отображаемая версия MUST содержать версию Throne (`1.0.0 (Throne 2.0.7)`), а User-Agent запросов MUST сообщать версию Throne, а не форка. Правки файлов upstream ради идентичности форка MUST ограничиваться перечнем `FORK_IDENTITY_POINTS` в `tools/diagnostics/upstream_touch_points.py`; новые файлы форка — `fork.properties`, `CROWN_CHANGELOG.md`, `CROWN.md`, `buildSrc/src/main/kotlin/Fork.kt`, `app/src/oss/res/`.
+Форк MUST собираться как отдельное приложение Crown: идентификатор `PACKAGE_NAME`, версия `VERSION_NAME`, репозиторий обновлений `UPDATE_REPOSITORY`, файл истории изменений `CHANGELOG` и префикс имён APK `ARTIFACT_NAME` MUST браться из `fork.properties`. `nb4a.properties` MUST оставаться совпадающим с upstream (`THRONE_CORE_REF` по-прежнему задаёт ядро, его `VERSION_NAME` — версия Throne, на которой основана сборка); MUST NOT вносить в него правки форка. Название приложения («Crown», в русской локали «Корона») MUST задаваться ресурсами `app/src/oss/res/`, не правкой `strings.xml` upstream. Значки Crown (значок приложения, значок плитки быстрых настроек и строки состояния, баннер Android TV) MUST задаваться там же ресурсами с теми же именами, не заменой файлов upstream в `app/src/main/res/`. Отображаемая версия MUST содержать версию Throne (`1.0.0 (Throne 2.0.7)`), а User-Agent запросов по умолчанию MUST иметь вид `Crown/Android/<версия Throne>` (`Crown/Android/2.0.7`): название форка, но версия Throne, а не форка. Правки файлов upstream ради идентичности форка MUST ограничиваться перечнем `FORK_IDENTITY_POINTS` в `tools/diagnostics/upstream_touch_points.py`; новые файлы форка — `fork.properties`, `CROWN_CHANGELOG.md`, `CROWN.md`, `buildSrc/src/main/kotlin/Fork.kt`, `app/src/oss/res/`, `buildScript/release_plan.sh`, `.github/images/crown/`, `.coderabbit.yaml`. `README.md` форка MUST описывать Crown (название, значок, интерфейс, возможности, установку), MUST указывать, что форк делается для определённой аудитории и не будет влит в оригинальный Throne, и MUST сохранять ссылки на оригинальный репозиторий, его авторов и способы их поддержать.
+
+#### Scenario: User-Agent запросов
+
+- **WHEN** Crown на основе Throne 2.0.7 запрашивает подписку, а пользователь не задал свой User-Agent
+- **THEN** запрос уходит с заголовком `User-Agent: Crown/Android/2.0.7`
 
 #### Scenario: Установка рядом с оригиналом
 
@@ -90,26 +95,31 @@ throne 核心 MUST 以 `nb4a.properties` 的 `THRONE_CORE_REF` 为唯一真实�
 - **WHEN** выпущен `v1.0.0` (versionCode 10000999) и `VERSION_NAME` поднят до `1.0.1`
 - **THEN** `1.0.1-pre.1` получает versionCode 10001001 и устанавливается поверх `1.0.0`
 
-### Requirement: Стабильные релизы и preview публикуются для встроенного обновления
+### Requirement: Разработка в develop, выпуск merge в main
 
-GitHub Actions MUST разделять релизы (`release.yml`) и preview (`preview.yml`). Обе сборки MUST подписываться ключом из секретов `SIGNING_*`, без них MUST падать; SHA-256 сертификата MUST закрепляться в `BuildConfig.UPDATE_SIGNER_SHA256`. Каждый релиз и preview MUST содержать APK по ABI, `SHA256SUMS` и манифест `throne-update.json`, по которому встроенный механизм обновления скачивает и проверяет APK того же пакета.
+Репозиторий MUST иметь две долгоживущие ветки: `develop` (ветка по умолчанию, текущая разработка) и `main` (выпущенное). Изменения MUST попадать в `develop` pull request'ами из веток фич, а в `main` — только pull request'ами из `develop` (выпуск) или из `hotfix/*`; hotfix после выпуска MUST сливаться обратно в `develop`. `ci.yml` MUST запускаться для pull request'ов и push в `main` и `develop` (не для каждой ветки) и в каждом pull request MUST запускать проверку «Release plan» (`buildScript/release_plan.sh --check`): в `main` она MUST падать для pull request'а не из `develop`/`hotfix/*` и для сборки, которую нельзя опубликовать; в `develop` — только предупреждать. Pull request'ы в обе ветки MUST проверяться CodeRabbit (`.coderabbit.yaml`).
 
-Релиз MUST запускаться только вручную и публиковать `v${VERSION_NAME}` как latest; если tag уже есть, MUST падать без перезаписи. Режим без публикации MUST выкладывать только workflow artifact. Заметки MUST браться из раздела `#### ${VERSION_NAME}` файла `CHANGELOG`, при его отсутствии — из списка коммитов с предыдущего релиза. После публикации с ветки по умолчанию workflow MUST поднять PATCH в `fork.properties` этой ветки, если там всё ещё выпущенная версия.
+Каждый push в `main` MUST публиковать сборку (`release.yml`); push в `develop` и другие ветки MUST NOT ничего публиковать. Канал MUST задаваться `RELEASE` в `fork.properties`: `preview` — pre-release `v${VERSION_NAME}-pre.<N>`, где N на единицу больше последнего опубликованного preview этой версии (не больше 998); `stable` — релиз `v${VERSION_NAME}` как latest с заметками из раздела `#### ${VERSION_NAME}` файла `CHANGELOG` (при его отсутствии — список коммитов с предыдущего стабильного релиза). Тег, канал, номер сборки и `versionCode` MUST вычисляться одним скриптом `buildScript/release_plan.sh` из `fork.properties` и тегов на origin. Preview уже выпущенной версии, повтор стабильного релиза и сборка с `versionCode` не выше уже опубликованного MUST отклоняться проверкой до merge; повторный запуск для уже опубликованного стабильного релиза MUST ничего не делать. Workflow MUST NOT сам коммитить в репозиторий: следующую версию поднимает pull request в `develop`. Ручной запуск `release.yml` с ветки, отличной от `main`, MUST выкладывать только workflow artifact. На GitHub MUST оставаться не более 10 последних pre-release (механизм обновления читает 20 последних релизов).
 
-Preview MUST собираться при каждом push в ветку по умолчанию и публиковаться как pre-release `v${VERSION_NAME}-pre.${N}` того же пакета, что и релизы; N = 1 + число first-parent коммитов с последнего изменения `VERSION_NAME` в `fork.properties`, не больше 998. Если `v${VERSION_NAME}` уже выпущен, preview MUST пропускаться с предупреждением о необходимости поднять версию. Ручной запуск с другой ветки MUST выкладывать только workflow artifact. На GitHub MUST оставаться не более 10 последних pre-release (механизм обновления читает 20 последних релизов).
+Обе сборки MUST подписываться ключом из секретов `SIGNING_*`, без них MUST падать; SHA-256 сертификата MUST закрепляться в `BuildConfig.UPDATE_SIGNER_SHA256`. Каждый релиз и preview MUST содержать APK по ABI, `SHA256SUMS` и манифест `throne-update.json`, по которому встроенный механизм обновления скачивает и проверяет APK того же пакета.
 
-#### Scenario: Push в main
+#### Scenario: Фича
 
-- **WHEN** коммит попадает в `main` и `v${VERSION_NAME}` ещё не выпущен
-- **THEN** публикуется pre-release с манифестом, и приложения с включёнными бета-обновлениями предлагают его установить
+- **WHEN** pull request из ветки фичи сливается в `develop`
+- **THEN** прогоняется CI, но ни релиз, ни preview не публикуются
+
+#### Scenario: Выпуск preview
+
+- **WHEN** pull request из `develop` сливается в `main` при `VERSION_NAME=1.0.0`, `RELEASE=preview`, а последний опубликованный preview — `v1.0.0-pre.11`
+- **THEN** публикуется pre-release `v1.0.0-pre.12` (versionCode 10000012) с манифестом, и приложения с включёнными бета-обновлениями предлагают его установить
 
 #### Scenario: Стабильный релиз
 
-- **WHEN** владелец запускает Release с публикацией
-- **THEN** публикуется `v${VERSION_NAME}`, его получают и стабильный, и бета-канал
-- **AND** `VERSION_NAME` в `main` поднимается до следующей patch-версии
+- **WHEN** pull request из `develop` с `RELEASE=stable` сливается в `main`
+- **THEN** публикуется `v${VERSION_NAME}` как latest, его получают и стабильный, и бета-канал
+- **AND** в репозитории не появляется автоматических коммитов; следующий выпуск требует поднять `VERSION_NAME` и вернуть `RELEASE=preview` в `develop`
 
-#### Scenario: Версия не поднята после релиза
+#### Scenario: Недопустимый выпуск
 
-- **WHEN** `v${VERSION_NAME}` уже существует, а в `main` приходит push
-- **THEN** preview не публикуется, в запуске появляется предупреждение поднять `VERSION_NAME`
+- **WHEN** в `main` открыт pull request из ветки фичи, или с `RELEASE=stable` уже выпущенной версии, или с `RELEASE=preview` уже выпущенной версии, или с `VERSION_NAME` ниже опубликованной
+- **THEN** проверка «Release plan» падает с объяснением до merge

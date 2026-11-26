@@ -44,11 +44,13 @@ FORK_IDENTITY_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/update/UpdateChecker.kt": "crown: update repository and changelog file",
     "app/src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt": "crown: GitHub link to the update repository",
     "app/src/main/java/io/nekohasekai/sagernet/SagerNet.kt": "crown: displayed version with the Throne base",
-    "app/src/main/java/io/nekohasekai/sagernet/ktx/Nets.kt": "crown: User-Agent keeps the Throne version",
+    "app/src/main/java/io/nekohasekai/sagernet/ktx/Nets.kt": "crown: User-Agent Crown/Android/ with the Throne version",
     "buildScript/release_assets.py": "crown: update manifest for previews too",
     "buildScript/release_notes.sh": "crown: fork changelog",
-    ".github/workflows/preview.yml": "crown: previews published as pre-releases",
-    ".github/workflows/release.yml": "crown: fork version, release notes fallback, patch bump",
+    ".github/workflows/preview.yml": "crown: removed, release.yml publishes the previews",
+    ".github/workflows/release.yml": "crown: every push to main publishes a preview or stable release (fork.properties RELEASE)",
+    ".github/workflows/ci.yml": "crown: pull requests, main and develop only, release plan check",
+    "README.md": "crown: the fork's README",
     "app/src/main/java/io/nekohasekai/sagernet/database/DataStore.kt": "crown: daily update check on by default",
     "app/src/main/res/xml/settings_general.xml": "crown: daily update check switch on by default",
     "app/src/main/java/io/nekohasekai/sagernet/database/SettingsRegistry.kt": "crown: pre-releases looked for by default on a preview build",
@@ -58,6 +60,7 @@ FORK_DIRS = (
     "app/src/simple/", "openspec/", "tools/diagnostics/",
     # fork identity files
     "fork.properties", "CROWN_CHANGELOG.md", "CROWN.md", "buildSrc/src/main/kotlin/Fork.kt", "app/src/oss/res/",
+    "buildScript/release_plan.sh", ".github/images/crown/", ".coderabbit.yaml",
 )
 NEW_ONLY_DIRS = ("app/src/test/",)
 
