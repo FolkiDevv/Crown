@@ -305,17 +305,16 @@ private val LINK = Regex("""(?:https?|tg)://[^\s<>"'«»]+|\bt\.me/[^\s<>"'«»]
  * (`…/Proxy_(computing)`), and goes when it closes the sentence's own bracket (`(see https://…)`).
  */
 fun trimLink(found: String): String {
+    // One count up front, kept as the end moves back: the provider's text can be long (linear, not per character).
+    var parens = found.count { it == '(' } - found.count { it == ')' }
+    var brackets = found.count { it == '[' } - found.count { it == ']' }
     var end = found.length
     while (end > 0) {
-        val c = found[end - 1]
-        val open = when (c) {
-            ')' -> '('
-            ']' -> '['
-            else -> null
-        }
-        val trailing = when {
-            c in ".,;:!?" -> true
-            open != null -> found.take(end).count { it == open } < found.take(end).count { it == c }
+        val trailing = when (found[end - 1]) {
+            '.', ',', ';', ':', '!', '?' -> true
+            // More closing than opening brackets up to here: this one closes the sentence's, not the link's.
+            ')' -> (parens < 0).also { if (it) parens++ }
+            ']' -> (brackets < 0).also { if (it) brackets++ }
             else -> false
         }
         if (!trailing) break

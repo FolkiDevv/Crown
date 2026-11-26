@@ -189,6 +189,10 @@ class SubscriptionNoticesTest {
         // A bracket the link opened itself, as an IPv6 host.
         assertEquals("https://[::1]", trimLink("https://[::1]"))
         assertEquals("https://[::1]/a", trimLink("https://[::1]/a."))
+        // A provider's long run of brackets is trimmed in one pass (it took seconds when each step counted again).
+        val started = System.nanoTime()
+        assertEquals("https://a.example/", trimLink("https://a.example/" + ")".repeat(200_000)))
+        assertTrue(System.nanoTime() - started < 1_000_000_000L)
     }
 
     @Test
