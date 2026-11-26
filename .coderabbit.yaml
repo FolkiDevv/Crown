@@ -6,3 +6,5 @@ reviews:
     base_branches:
       - main
       - develop
+  auto_approvals:
+    enabled: true
