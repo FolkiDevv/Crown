@@ -175,6 +175,14 @@ class SimpleActivity : AppCompatActivity() {
         modes.appListClosed()
     }
 
+    /**
+     * A classic editor of a server or a subscription; it reports a change the running connection must take (it reloads
+     * the connection itself only in classic). Here, not in a section: the result must outlive a switch of the layout.
+     */
+    private val editor = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.data?.getBooleanExtra(ProfileSettingsActivity.EXTRA_RESTART_NEEDED, false) == true) servers.settingsChanged()
+    }
+
     /** The VPN consent, then the start of the service; true in the result when the consent was refused. */
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) { refused ->
         if (refused) home.message(R.string.simple_vpn_permission_denied)
@@ -234,6 +242,7 @@ class SimpleActivity : AppCompatActivity() {
                     requestStart = ::requestStart,
                     onOpenClassic = { SimpleUi.switchTo(this, simple = false) },
                     openClassicScreen = ::openClassicScreen,
+                    openEditor = { editor.launch(it) },
                     requestedSection = requestedSection.value,
                     onSectionShown = { requestedSection.value = null },
                 )
@@ -742,6 +751,8 @@ fun SimpleApp(
     requestStart: () -> Unit,
     onOpenClassic: () -> Unit,
     openClassicScreen: (ClassicScreen) -> Unit,
+    /** A classic editor of a server or a subscription ([SimpleActivity.editor]). */
+    openEditor: (Intent) -> Unit,
     /** A section asked for from outside (the end of a classic visit); [onSectionShown] once it is shown. */
     requestedSection: SimpleSection? = null,
     onSectionShown: () -> Unit = {},
@@ -933,7 +944,7 @@ fun SimpleApp(
             val serversSection = @Composable { focus: Boolean, showSnackbar: Boolean ->
                 ServersSection(
                     servers, onAdd = { addSheet = true }, snackbar, focus = focus, showSnackbar = showSnackbar,
-                    openProvider = noticeActions.openProvider, announce = notices::openAnnouncement,
+                    openProvider = noticeActions.openProvider, announce = notices::openAnnouncement, openEditor = openEditor,
                 )
             }
             when {
@@ -1105,14 +1116,11 @@ private fun ServersSection(
     showSnackbar: Boolean,
     openProvider: (Long, String) -> Unit,
     announce: (Long) -> Unit,
+    openEditor: (Intent) -> Unit,
 ) {
     val state by servers.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // The classic editors report a change the running connection must take (they reload it themselves only in classic).
-    val editor = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.data?.getBooleanExtra(ProfileSettingsActivity.EXTRA_RESTART_NEEDED, false) == true) servers.settingsChanged()
-    }
     LaunchedEffect(servers) {
         servers.messages.collect { message ->
             val text = message.arg?.let { context.getString(message.text, it) } ?: context.getString(message.text)
@@ -1158,7 +1166,7 @@ private fun ServersSection(
                         shareSubscription = servers::shareSubscription,
                         deleteSubscription = servers::deleteSubscription,
                         subscriptionSettings = { gid ->
-                            editor.launch(
+                            openEditor(
                                 Intent(context, GroupSettingsActivity::class.java).putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, gid)
                             )
                         },
@@ -1167,7 +1175,7 @@ private fun ServersSection(
                         renameServer = servers::renameServer,
                         shareServer = servers::shareServer,
                         deleteServer = servers::deleteServer,
-                        editServer = { id -> scope.launch { openServerEditor(context, id) { editor.launch(it) } } },
+                        editServer = { id -> scope.launch { openServerEditor(context, id, openEditor) } },
                         closeShare = servers::closeShare,
                     )
                 },
