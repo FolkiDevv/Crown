@@ -186,6 +186,9 @@ class SubscriptionNoticesTest {
         assertEquals("https://my.example/news", trimLink("https://my.example/news)."))
         assertEquals("https://my.example/a", trimLink("https://my.example/a],"))
         assertEquals("t.me/support", trimLink("t.me/support!"))
+        // A bracket the link opened itself, as an IPv6 host.
+        assertEquals("https://[::1]", trimLink("https://[::1]"))
+        assertEquals("https://[::1]/a", trimLink("https://[::1]/a."))
     }
 
     @Test
