@@ -358,7 +358,11 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val name = ServerCatalog.nameOf(profile, getApplication<Application>().getString(R.string.simple_server_unnamed))
         // The running server itself stops with it (as a subscription update deleting it does); any other deletion leaves
         // the connection, and a running «Авто» is rebuilt without it.
-        ProfileManager.batchDeleteProfiles(listOf(id), stopRunning = true)
+        val outcome = ProfileManager.batchDeleteProfiles(listOf(id), stopRunning = true)
+        if (!outcome.ok || id !in outcome.deleted) {
+            mutableMessages.tryEmit(ServersMessage(R.string.simple_delete_failed))
+            return@manage
+        }
         TrafficModeApplier.serversChanged()
         mutableEvents.tryEmit(ServersEvent.Chosen)
         mutableMessages.tryEmit(
