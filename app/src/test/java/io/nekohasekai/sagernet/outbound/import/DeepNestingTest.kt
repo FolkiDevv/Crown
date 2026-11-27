@@ -84,12 +84,14 @@ class DeepNestingTest {
     }
 
     /**
-     * The import reports the reason through JsonTree, the JSON editor's parser, which reads one level more: at 97 the
-     * import names the depth itself, at the bracket that opens the 97th collection.
+     * The import reports the reason through JsonTree, the JSON editor's parser, which still reads an empty 97th
+     * collection: then the import names the depth itself, at the bracket that opens the 97th collection.
      */
     @Test
     fun depthReasonWhereJsonTreeAcceptsTheText() {
-        assertTrue(JsonTree.parse(brackets(97, "1")).ok)
+        assertTrue(JsonTree.parse(brackets(97)).ok)
+        assertTrue(JsonTree.parse("{\"a\":".repeat(96) + "{}" + "}".repeat(96)).ok)
+        assertEquals(96, JsonInput.tooDeepOffset(brackets(97)))
         assertEquals(96, JsonInput.tooDeepOffset(brackets(97, "1")))
         assertEquals(5 * 96, JsonInput.tooDeepOffset("{\"a\":".repeat(97) + "1" + "}".repeat(97)))
         assertEquals(-1, JsonInput.tooDeepOffset(brackets(96, "1")))
