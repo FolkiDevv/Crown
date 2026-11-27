@@ -258,6 +258,10 @@ class MainActivity : ThemedActivity(),
             if (SimpleUi.isOwn(intent)) SubscribeFlows.importTexts(this, it)
             return
         }
+        intent.getStringExtra(SimpleUi.EXTRA_ROUTE_LINK)?.let {
+            if (SimpleUi.isOwn(intent)) importRouteLink(it)
+            return
+        }
         when (intent.action) {
             Intent.ACTION_VIEW -> openLink(Uri.parse(CrownLinks.viewLink((intent.data ?: return).toString()) ?: return))
             Intent.ACTION_SEND -> {

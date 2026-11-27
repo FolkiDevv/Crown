@@ -40,6 +40,7 @@ class SimpleUiExternalImportTest {
         assertTrue(SimpleUi.shouldRedirect(store, null, setOf("importTexts", wifi)))
         assertTrue(SimpleUi.shouldRedirect(store, send, setOf(text, wifi)))
         assertTrue(SimpleUi.shouldRedirect(store, tilePreferences, setOf(text)))
+        assertTrue(SimpleUi.shouldRedirect(store, null, setOf(SimpleUi.EXTRA_ROUTE_LINK, SimpleUi.EXTRA_OPEN_CLASSIC)))
     }
 
     @Test
@@ -55,7 +56,7 @@ class SimpleUiExternalImportTest {
         val store = MapStore()
         // A backup and a routing link the simple interface hands to the classic one.
         assertFalse(SimpleUi.shouldRedirect(store, view, setOf(SimpleUi.EXTRA_OPEN_CLASSIC), hasData = true, own = true))
-        assertFalse(SimpleUi.shouldRedirect(store, null, setOf(SimpleUi.EXTRA_OPEN_CLASSIC, "importTexts"), own = true))
+        assertFalse(SimpleUi.shouldRedirect(store, null, setOf(SimpleUi.EXTRA_OPEN_CLASSIC, SimpleUi.EXTRA_ROUTE_LINK), own = true))
     }
 
     @Test

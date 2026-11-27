@@ -449,10 +449,11 @@ class SimpleActivity : AppCompatActivity() {
      * VIEW links and files, SEND texts and streams, as MainActivity took them before batch 4 — now without the classic
      * choice dialogs. They come from a browser or another app: a subscription or servers are added only after the user
      * confirms them. The QR scanner's texts come here only from the app itself ([SimpleUi.isOwn]): the scanner of the
-     * launcher shortcut.
+     * launcher shortcut. Reopened from Recents (this activity may have become the task's root), nothing is imported again.
      */
     private fun handleImportIntent(intent: Intent?) {
         intent ?: return
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         intent.getStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS)?.let {
             if (SimpleUi.isOwn(intent)) add.importTexts(it)
             return
@@ -529,7 +530,7 @@ class SimpleActivity : AppCompatActivity() {
             SimpleUi.markOwn(
                 Intent(this, MainActivity::class.java)
                     .putExtra(SimpleUi.EXTRA_OPEN_CLASSIC, true)
-                    .putStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS, arrayListOf(text))
+                    .putExtra(SimpleUi.EXTRA_ROUTE_LINK, text)
             )
         )
     }

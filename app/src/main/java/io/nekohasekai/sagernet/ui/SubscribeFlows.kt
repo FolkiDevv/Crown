@@ -209,8 +209,8 @@ object SubscribeFlows {
     /** ImportText into the group, then "Imported N profile(s)" unless MainActivity's report popup already said so. */
     private fun importInto(activity: FragmentActivity, content: String, gid: Long, external: Boolean = false) {
         // crown: profiles from another app are confirmed first ("Import profile?"), as a profile link opened from outside.
-        if (external && activity is MainActivity) {
-            runOnDefaultDispatcher { activity.importProfile(content) }
+        if (external) {
+            (activity as? MainActivity)?.let { runOnDefaultDispatcher { it.importProfile(content) } }
             return
         }
         runOnDefaultDispatcher {

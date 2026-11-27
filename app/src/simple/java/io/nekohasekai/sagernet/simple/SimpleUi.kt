@@ -50,11 +50,18 @@ object SimpleUi {
         PlatformNotifications.EXTRA_WIFI_PERMISSION,
     )
 
+    /**
+     * A routing profile link the simple UI hands to the classic one ([markOwn]): only the route import takes it, with
+     * its own question, never the import of servers (the link may have come from another app).
+     */
+    const val EXTRA_ROUTE_LINK = "io.nekohasekai.sagernet.simple.ROUTE_LINK"
+
     /** Extras that carry something to import; with the intent's data they make it an import. */
     private val IMPORT_EXTRAS = setOf(
         Intent.EXTRA_TEXT,
         Intent.EXTRA_STREAM,
         MainActivity.EXTRA_IMPORT_TEXTS,
+        EXTRA_ROUTE_LINK,
     )
 
     /**
