@@ -75,7 +75,10 @@ class MainActivity : ThemedActivity(),
     NavigationView.OnNavigationItemSelectedListener {
 
     companion object {
-        /** Texts to import (the QR scanner): URLs and deep links one by one, the rest as one import. */
+        /**
+         * Texts to import (the QR scanner): URLs and deep links one by one, the rest as one import. crown: taken only
+         * from an intent the app sent itself (SimpleUi.isOwn): the launcher shortcut's scanner, the simple UI.
+         */
         const val EXTRA_IMPORT_TEXTS = "importTexts"
     }
 
@@ -85,7 +88,7 @@ class MainActivity : ThemedActivity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (SimpleUi.redirect(this)) return
+        if (SimpleUi.redirect(this, restored = savedInstanceState != null)) return
         MessageStore.setCurrentActivity(this)
         val animateInitialControls = savedInstanceState == null
 
@@ -244,10 +247,15 @@ class MainActivity : ThemedActivity(),
         handleImportIntent(intent)
     }
 
-    /** VIEW links and files, SEND streams and texts, and the texts of the QR scanner ([EXTRA_IMPORT_TEXTS]). */
+    /**
+     * VIEW links and files, SEND streams and texts, and the texts of the QR scanner ([EXTRA_IMPORT_TEXTS]). crown: all
+     * but the scanner's come from another app, and the profiles they would add are confirmed first; an intent reopened
+     * from Recents imports nothing again.
+     */
     private fun handleImportIntent(intent: Intent) {
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         intent.getStringArrayListExtra(EXTRA_IMPORT_TEXTS)?.let {
-            SubscribeFlows.importTexts(this, it)
+            if (SimpleUi.isOwn(intent)) SubscribeFlows.importTexts(this, it)
             return
         }
         when (intent.action) {
@@ -258,7 +266,7 @@ class MainActivity : ThemedActivity(),
                 if (stream != null) {
                     openFile(stream)
                 } else {
-                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { SubscribeFlows.importText(this, it) }
+                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { SubscribeFlows.importText(this, it, external = true) }
                 }
             }
         }
@@ -274,16 +282,17 @@ class MainActivity : ThemedActivity(),
         val link = uri.toString()
         if (SubscribeFlows.subscribeLink(link) != null) displayFragmentWithId(R.id.nav_group)
         if (scheme == "clash" || scheme == "throne" && !uri.host.equals("add", ignoreCase = true)) {
-            SubscribeFlows.importText(this, link)
+            SubscribeFlows.importText(this, link, external = true)
         } else {
-            runOnDefaultDispatcher { importProfile(uri) }
+            runOnDefaultDispatcher { importProfile(link) }
         }
     }
 
+    /** A file opened or shared from another app: a backup goes to the restore, the rest is imported once confirmed. */
     private fun openFile(uri: Uri) {
         // Sniffing the backup magic may read a cloud file over the network.
         runOnDefaultDispatcher {
-            if (!BackupEntry.open(this@MainActivity, uri)) SubscribeFlows.importUri(this@MainActivity, uri)
+            if (!BackupEntry.open(this@MainActivity, uri)) SubscribeFlows.importUri(this@MainActivity, uri, external = true)
         }
     }
 
@@ -305,9 +314,11 @@ class MainActivity : ThemedActivity(),
         return connection.service!!.urlTest()
     }
 
-    /** A profile link opened from outside: confirmed, then imported into the current group. */
-    suspend fun importProfile(uri: Uri) {
-        val link = uri.toString()
+    /**
+     * A profile link opened from outside, crown: or profiles shared or sent in a file by another app: confirmed (the
+     * first one's name and their number), then imported into the current group.
+     */
+    suspend fun importProfile(link: String) {
         val result = try {
             ProfileImport.parse(link, SettingsMapper.xrayVlessPreference(), SettingsMapper.buildContext())
         } catch (e: Exception) {
@@ -335,9 +346,16 @@ class MainActivity : ThemedActivity(),
             return
         }
 
+        // crown: several profiles: the first one's name with their number, "Name (3 profiles)".
+        val count = result.outbounds.size
+        val name = if (count > 1) {
+            "${profile.displayName()} (${resources.getQuantityString(R.plurals.grp_profile_count, count, count)})"
+        } else {
+            profile.displayName()
+        }
         onMainDispatcher {
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.profile_import)
-                .setMessage(getString(R.string.profile_import_message, profile.displayName()))
+                .setMessage(getString(R.string.profile_import_message, name))
                 .setPositiveButton(R.string.yes) { _, _ ->
                     displayFragmentWithId(R.id.nav_configuration)
                     SubscribeFlows.importText(this@MainActivity, link)

@@ -140,7 +140,10 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(confirm = null) }
     }
 
-    /** The QR scanner's texts (one per code): share links together, subscriptions and documents one by one. */
+    /**
+     * The QR scanner's texts (one per code): share links together, subscriptions and documents one by one. Scanned by
+     * the user here, never taken from another app's intent.
+     */
     fun importTexts(texts: List<String>) {
         val payloads = texts.map { CrownLinks.toThrone(it).trim() }.filter { it.isNotEmpty() }
         if (payloads.size <= 1) return importText(payloads.firstOrNull())
@@ -155,10 +158,11 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * A file chosen here or opened from another app (design.md D4): a Throne backup goes to the stock restore
-     * ([AddEvent.OpenBackup]); anything else is read as text and imported. The check runs here, not in the activity,
-     * so a slow cloud file survives the activity being recreated meanwhile.
+     * ([AddEvent.OpenBackup]); anything else is read as text and imported, from an [external] file (opened or shared
+     * from another app) after [confirmLink] as for a link. The check runs here, not in the activity, so a slow cloud
+     * file survives the activity being recreated meanwhile.
      */
-    fun openFile(uri: Uri) {
+    fun openFile(uri: Uri, external: Boolean = false) {
         viewModelScope.launch {
             imports.withLock {
                 val app = getApplication<Application>()
@@ -177,7 +181,8 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
                     show(AddDialog.FileUnreadable(withContext(Dispatchers.IO) { SimpleImport.displayName(app, uri) }, false))
                     return@withLock
                 }
-                perform(reading { SimpleImport.plan(text) }, fromClipboard = false)
+                val plan = reading { SimpleImport.plan(text) }
+                if (external && asks(plan)) ask(plan) else perform(plan, fromClipboard = false)
             }
         }
     }

@@ -9,6 +9,7 @@ import android.service.quicksettings.TileService
 import io.nekohasekai.sagernet.simple.settings.ClassicVisit
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.utils.PlatformNotifications
+import java.util.UUID
 
 /**
  * Which interface opens: the simple one (default, new and upgraded installs alike) or the classic [MainActivity].
@@ -39,7 +40,7 @@ object SimpleUi {
     /**
      * Intents only the classic interface handles: the tile's long press and the Wi-Fi permission flow. Links, files,
      * shares and the QR scanner's texts ([MainActivity.EXTRA_IMPORT_TEXTS]) go to the simple UI's add flow since
-     * batch 4; a backup it recognises comes back here as a VIEW carrying [EXTRA_OPEN_CLASSIC].
+     * batch 4; a backup or a routing link it recognises comes back here carrying [EXTRA_OPEN_CLASSIC] and [markOwn].
      */
     private val CLASSIC_ACTIONS = setOf(
         TileService.ACTION_QS_TILE_PREFERENCES,
@@ -48,6 +49,31 @@ object SimpleUi {
         EXTRA_OPEN_CLASSIC,
         PlatformNotifications.EXTRA_WIFI_PERMISSION,
     )
+
+    /** Extras that carry something to import; with the intent's data they make it an import. */
+    private val IMPORT_EXTRAS = setOf(
+        Intent.EXTRA_TEXT,
+        Intent.EXTRA_STREAM,
+        MainActivity.EXTRA_IMPORT_TEXTS,
+    )
+
+    /**
+     * MainActivity is exported: another app can send it any action and extras. Intents the app sends to itself
+     * carry this process's secret ([markOwn]); another app cannot read it, and a new process makes a new one.
+     */
+    private const val EXTRA_OWN = "io.nekohasekai.sagernet.simple.OWN"
+    private val ownSecret = UUID.randomUUID().toString()
+
+    /** Marks [intent] as sent by the app itself (the QR scanner of a shortcut, the simple UI's hand-overs). */
+    fun markOwn(intent: Intent): Intent = intent.putExtra(EXTRA_OWN, ownSecret)
+
+    /** Whether [intent] was sent by the app itself in this process ([markOwn]). */
+    fun isOwn(intent: Intent?): Boolean = try {
+        intent?.getStringExtra(EXTRA_OWN) == ownSecret
+    } catch (_: RuntimeException) {
+        // A crafted extras bundle that does not unparcel.
+        false
+    }
 
     /** The key-value storage of the choice; [SharedPreferences] on the device, a map in tests. */
     interface Store {
@@ -97,23 +123,30 @@ object SimpleUi {
 
     fun setAdvanced(store: Store, on: Boolean) = store.putBoolean(KEY_ADVANCED, on)
 
-    /** Whether an intent must stay in the classic interface (see [CLASSIC_ACTIONS], [CLASSIC_EXTRAS]). */
-    fun opensClassic(action: String?, extraKeys: Set<String>): Boolean =
-        action in CLASSIC_ACTIONS || extraKeys.any { it in CLASSIC_EXTRAS }
+    /**
+     * Whether an intent must stay in the classic interface (see [CLASSIC_ACTIONS], [CLASSIC_EXTRAS]). One that carries
+     * something to import ([hasData], [IMPORT_EXTRAS]) stays only when the app sent it itself ([own]): another app
+     * must not pick the interface that imports its data, the classic one asks less.
+     */
+    fun opensClassic(action: String?, extraKeys: Set<String>, hasData: Boolean = false, own: Boolean = false): Boolean =
+        (action in CLASSIC_ACTIONS || extraKeys.any { it in CLASSIC_EXTRAS }) &&
+            (own || !hasData && extraKeys.none { it in IMPORT_EXTRAS })
 
-    fun shouldRedirect(store: Store, action: String?, extraKeys: Set<String>): Boolean =
-        isSimpleSelected(store) && !opensClassic(action, extraKeys)
+    fun shouldRedirect(
+        store: Store, action: String?, extraKeys: Set<String>, hasData: Boolean = false, own: Boolean = false,
+    ): Boolean = isSimpleSelected(store) && !opensClassic(action, extraKeys, hasData, own)
 
     /**
      * Called by [MainActivity.onCreate] before its content is set, and by [MainActivity.onNewIntent] for a reused
      * singleTask instance (one kept open by a classic-only intent): opens [SimpleActivity] instead when the simple
      * interface is chosen and finishes [activity]. Returns true when it did, and the caller returns right away.
+     * A [restored] activity passed this check when it was created (its intent is not imported again).
      */
-    fun redirect(activity: Activity, intent: Intent? = activity.intent): Boolean {
+    fun redirect(activity: Activity, intent: Intent? = activity.intent, restored: Boolean = false): Boolean {
         val store = store(activity)
         recordInstallKind(activity, store)
         val extras = intent?.extras?.keySet().orEmpty()
-        if (!shouldRedirect(store, intent?.action, extras)) {
+        if (!shouldRedirect(store, intent?.action, extras, intent?.data != null, restored || isOwn(intent))) {
             // A classic screen opened from the simple settings: show it, and back returns to the simple interface.
             ClassicVisit.attach(activity, intent)
             return false
@@ -150,7 +183,8 @@ object SimpleUi {
 
     private fun simpleIntent(context: Context, source: Intent?): Intent {
         val intent = Intent(context, SimpleActivity::class.java)
-        if (source != null) {
+        // Reopened from Recents, the task's first intent comes again: it only opens the interface (nothing imported twice).
+        if (source != null && source.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
             intent.action = source.action
             intent.setDataAndType(source.data, source.type)
             source.extras?.let { intent.putExtras(it) }

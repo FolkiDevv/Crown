@@ -208,7 +208,12 @@ class SimpleActivity : AppCompatActivity() {
 
     /** «Открыть файл»: any file; a backup goes to the stock restore, the rest to the import. */
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let(::openFile)
+        uri?.let { add.openFile(it) }
+    }
+
+    /** The QR scanner returns the texts of its codes here; scanned by the user, they are added without a question. */
+    private val scan = registerForActivityResult(ScannerActivity.Scan()) { texts ->
+        texts?.let(add::importTexts)
     }
 
     /** The clipboard is looked at once each time the interface comes to the front, when its window has the focus. */
@@ -441,23 +446,24 @@ class SimpleActivity : AppCompatActivity() {
     // ------------------------------------------------------------------------------------------------ adding
 
     /**
-     * VIEW links and files, SEND texts and streams, and the QR scanner's texts, as MainActivity took them before
-     * batch 4 — now without the classic choice dialogs.
+     * VIEW links and files, SEND texts and streams, as MainActivity took them before batch 4 — now without the classic
+     * choice dialogs. They come from a browser or another app: a subscription or servers are added only after the user
+     * confirms them. The QR scanner's texts come here only from the app itself ([SimpleUi.isOwn]): the scanner of the
+     * launcher shortcut.
      */
     private fun handleImportIntent(intent: Intent?) {
         intent ?: return
         intent.getStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS)?.let {
-            add.importTexts(it)
+            if (SimpleUi.isOwn(intent)) add.importTexts(it)
             return
         }
         when (intent.action) {
             Intent.ACTION_VIEW -> {
                 val uri = intent.data ?: return
                 val scheme = uri.scheme?.lowercase()
-                // A link from a browser or another app adds only after the user confirms it (a page must not add a
-                // subscription unasked); a file is opened by the user's own choice.
+                // A file opened from a file manager is sent by another app too: what it would add is confirmed alike.
                 if (scheme == "content" || scheme == "file") {
-                    openFile(uri)
+                    add.openFile(uri, external = true)
                 } else {
                     CrownLinks.viewLink(uri.toString())?.let { add.importText(it, external = true) }
                 }
@@ -467,7 +473,7 @@ class SimpleActivity : AppCompatActivity() {
                 @Suppress("DEPRECATION")
                 val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
                 if (stream != null) {
-                    openFile(stream)
+                    add.openFile(stream, external = true)
                 } else {
                     intent.getStringExtra(Intent.EXTRA_TEXT)?.let { add.importText(it, external = true) }
                 }
@@ -475,22 +481,21 @@ class SimpleActivity : AppCompatActivity() {
         }
     }
 
-    /** A file opened here or from another app: AddViewModel tells a backup from a configuration (design.md D4). */
-    private fun openFile(uri: Uri) = add.openFile(uri)
-
     /**
      * A backup: MainActivity takes it as a VIEW of the file, like one opened from a file manager, and BackupEntry.open
-     * there brings up the stock restore (Tools › Backup). The classic flag on this very intent keeps the redirect from
-     * sending it back here.
+     * there brings up the stock restore (Tools › Backup). The classic flag on this very intent, sent by the app itself,
+     * keeps the redirect from sending it back here.
      */
     private fun openBackup(uri: Uri) {
         try {
             startActivity(
-                Intent(this, MainActivity::class.java)
-                    .setAction(Intent.ACTION_VIEW)
-                    .setData(uri)
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    .putExtra(SimpleUi.EXTRA_OPEN_CLASSIC, true)
+                SimpleUi.markOwn(
+                    Intent(this, MainActivity::class.java)
+                        .setAction(Intent.ACTION_VIEW)
+                        .setData(uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        .putExtra(SimpleUi.EXTRA_OPEN_CLASSIC, true)
+                )
             )
         } catch (e: ActivityNotFoundException) {
             Logs.w(e)
@@ -503,8 +508,7 @@ class SimpleActivity : AppCompatActivity() {
 
     private fun openScanner() {
         try {
-            // It hands the codes to MainActivity (EXTRA_IMPORT_TEXTS), which hands them on here.
-            startActivity(Intent(this, ScannerActivity::class.java))
+            scan.launch(Unit)
         } catch (e: ActivityNotFoundException) {
             Logs.w(e)
         }
@@ -522,9 +526,11 @@ class SimpleActivity : AppCompatActivity() {
     /** A routing profile link: the classic interface imports it, for this visit (the choice of interface stays). */
     private fun openClassicImport(text: String) {
         startActivity(
-            Intent(this, MainActivity::class.java)
-                .putExtra(SimpleUi.EXTRA_OPEN_CLASSIC, true)
-                .putStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS, arrayListOf(text))
+            SimpleUi.markOwn(
+                Intent(this, MainActivity::class.java)
+                    .putExtra(SimpleUi.EXTRA_OPEN_CLASSIC, true)
+                    .putStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS, arrayListOf(text))
+            )
         )
     }
 

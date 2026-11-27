@@ -180,14 +180,14 @@
     </plurals>
     <string name="simple_offer_later">Not now</string>
 
-    <!-- A link opened from a browser or another app: added only after the user confirms it -->
+    <!-- A link, share or file from a browser or another app: added only after the user confirms it -->
     <string name="simple_link_confirm_subscription_title">Add this subscription?</string>
     <!-- %1$s: the host of the subscription link -->
-    <string name="simple_link_confirm_subscription">A link from another app asks to add a subscription from %1$s. Add it only if you trust its source.</string>
+    <string name="simple_link_confirm_subscription">Another app asks to add a subscription from %1$s. Add it only if you trust its source.</string>
     <string name="simple_link_confirm_servers_title">Add servers?</string>
     <plurals name="simple_link_confirm_servers">
-        <item quantity="one">A link from another app asks to add %d server. Add it only if you trust its source.</item>
-        <item quantity="other">A link from another app asks to add %d servers. Add them only if you trust their source.</item>
+        <item quantity="one">Another app asks to add %d server. Add it only if you trust its source.</item>
+        <item quantity="other">Another app asks to add %d servers. Add them only if you trust their source.</item>
     </plurals>
 
     <!-- First start: running without battery optimization -->

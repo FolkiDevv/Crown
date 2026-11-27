@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ShortcutManager
 import android.content.pm.PackageManager
@@ -11,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.getSystemService
 import androidx.core.view.isVisible
@@ -26,6 +28,7 @@ import com.king.zxing.util.PermissionUtils
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.databinding.LayoutScannerBinding
 import io.nekohasekai.sagernet.ktx.*
+import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.widget.applyInsetMargin
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -157,11 +160,26 @@ class ScannerActivity : ThemedActivity(),
         return true
     }
 
-    /** The main window imports them (SubscribeFlows): the URL choice, deep links, or profiles into the current group. */
+    /**
+     * crown: the screen of the app that opened the scanner ([Scan]) imports the codes; opened from the launcher
+     * shortcut (or by another app), the main window does, through an intent only the app itself can send.
+     */
     private fun importTexts(texts: List<String>) {
-        startActivity(Intent(this, MainActivity::class.java).apply {
+        if (callingActivity?.packageName == packageName) {
+            setResult(RESULT_OK, Intent().putStringArrayListExtra(EXTRA_TEXTS, ArrayList(texts)))
+            return
+        }
+        startActivity(SimpleUi.markOwn(Intent(this, MainActivity::class.java).apply {
             putStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS, ArrayList(texts))
-        })
+        }))
+    }
+
+    /** crown: opens the scanner for the texts of the codes it reads (one per code); null when nothing was read. */
+    class Scan : ActivityResultContract<Unit, List<String>?>() {
+        override fun createIntent(context: Context, input: Unit) = Intent(context, ScannerActivity::class.java)
+
+        override fun parseResult(resultCode: Int, intent: Intent?): List<String>? =
+            intent?.takeIf { resultCode == RESULT_OK }?.getStringArrayListExtra(EXTRA_TEXTS)
     }
 
     fun initCameraScan() {
@@ -222,8 +240,10 @@ class ScannerActivity : ThemedActivity(),
         super.onDestroy()
     }
 
-    private companion object {
+    companion object {
+        private const val EXTRA_TEXTS = "texts"
+
         /** Long sides in px: a QR code reads at the first, a hi-res photo stays far from the heap limit at both. */
-        val DECODE_SIDES = intArrayOf(2048, 4096)
+        private val DECODE_SIDES = intArrayOf(2048, 4096)
     }
 }
