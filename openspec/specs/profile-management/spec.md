@@ -46,6 +46,11 @@ The app SHALL import profiles from share links and raw configs (URL schemes, cli
 - **WHEN** imported text, a file, a share, a link or a subscription document is JSON or Clash YAML with collections nested more than 96 deep (in the text, or through YAML aliases)
 - **THEN** the parse MUST stop before it recurses that deep and the document MUST be reported as unreadable ("The document is nested too deeply"), with nothing added and existing profiles kept unchanged; neither the UI process nor the VPN process crashes, in either interface
 
+#### Scenario: Import sent by another app
+- **WHEN** another app shares text (SEND `EXTRA_TEXT`) or sends or opens a file (SEND `EXTRA_STREAM`, VIEW `content://`/`file://`) whose import would add profiles, in the classic interface
+- **THEN** the app MUST ask "Import profile?" with the first profile's name and the number of profiles before anything is added, as for a profile link opened from outside, and MUST add nothing on "Cancel"; a subscription link or URL MUST go through its own question ("Add this subscription?" or the URL choice)
+- **AND** QR texts MUST be taken only from the app's own scanner (its result, or an intent the app sent itself), never from the `importTexts` extra of another app's intent; an intent reopened from Recents MUST NOT import again; the clipboard, the scanner and "Import from file" in the menu MUST NOT ask
+
 ### Requirement: Ordering and pinning
 The app SHALL let the user reorder profiles within a group (manual order and sorted orders such as by test result or traffic) and pin profiles to the top.
 

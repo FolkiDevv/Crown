@@ -84,6 +84,11 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         if (id != 0L && id == RouteManager.activeRouteId()) needReload()
     }
 
+    /** crown: the scanner returns its codes here; route links prompt in MainActivity and come back here. */
+    private val scan = registerForActivityResult(ScannerActivity.Scan()) { texts ->
+        texts?.let { SubscribeFlows.importTexts(requireActivity(), it) }
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         toolbar?.setTitle(R.string.menu_route)
@@ -130,8 +135,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             R.id.action_route_new_structured -> newProfile(remote = false)
             R.id.action_route_new_remote -> newProfile(remote = true)
             R.id.action_route_import -> importFromClipboard()
-            // The scanner hands route links to MainActivity, which prompts and comes back here.
-            R.id.action_route_scan -> startActivity(Intent(requireContext(), ScannerActivity::class.java))
+            R.id.action_route_scan -> scan.launch(Unit)
             R.id.action_route_download -> downloadProfiles()
             R.id.action_route_update_all -> updateAll()
             R.id.action_route_update_rule_sets -> updateRuleSets()

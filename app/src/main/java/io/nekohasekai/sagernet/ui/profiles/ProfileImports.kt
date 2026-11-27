@@ -59,6 +59,11 @@ class ProfileImports(private val host: ConfigurationFragment) {
         if (uri != null) importFile(uri)
     }
 
+    /** crown: the scanner returns its codes here, imported like the clipboard into the current tab's group. */
+    private val scan = host.registerForActivityResult(ScannerActivity.Scan()) { texts ->
+        texts?.let { SubscribeFlows.importTexts(host.requireActivity(), it, host.currentGroupId) }
+    }
+
     /** Devices without a camera (TVs) have nothing to scan with. */
     fun prepare(menu: Menu) {
         menu.findItem(R.id.action_scan_qr_code)?.isVisible = hasCamera(host.requireContext())
@@ -69,7 +74,7 @@ class ProfileImports(private val host: ConfigurationFragment) {
 
     fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
-            R.id.action_scan_qr_code -> host.startActivity(Intent(host.requireContext(), ScannerActivity::class.java))
+            R.id.action_scan_qr_code -> scan.launch(Unit)
             R.id.action_import_clipboard -> importClipboard()
             R.id.action_import_file -> host.startFilesForResult(importFile, "*/*")
             else -> {

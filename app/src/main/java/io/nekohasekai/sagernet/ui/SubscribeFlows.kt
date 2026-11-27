@@ -34,12 +34,15 @@ object SubscribeFlows {
 
     private const val MAX_IMPORT_FILE_SIZE = 50L * 1024 * 1024
 
-    /** Text from the clipboard, a scan or a share: http(s) URL → the desktop's 3-way choice, links/documents → import into [gid] (current group when negative). */
-    fun importText(activity: FragmentActivity, text: String, gid: Long = -1L) {
+    /**
+     * Text from the clipboard, a scan or a share: http(s) URL → the desktop's 3-way choice, links/documents → import into [gid] (current group when negative).
+     * crown: [external] text (shared or opened by another app) imports links/documents only once the user confirms them.
+     */
+    fun importText(activity: FragmentActivity, text: String, gid: Long = -1L, external: Boolean = false) {
         val content = CrownLinks.toThrone(text).trim()
         if (content.isEmpty()) return
         if (content.startsWith("throne://")) {
-            openDeepLink(activity, content, gid)
+            openDeepLink(activity, content, gid, external)
             return
         }
         subscribeLink(content)?.let {
@@ -50,7 +53,7 @@ object SubscribeFlows {
             chooseUrlImport(activity, content, gid)
             return
         }
-        importInto(activity, content, gid)
+        importInto(activity, content, gid, external)
     }
 
     /** Several payloads at once (importFromFiles): each URL or deep link on its own, the rest as one import. */
@@ -113,8 +116,8 @@ object SubscribeFlows {
         return SubscribeLink(data.substring(0, hash).trim(), Uri.decode(data.substring(hash + 1)))
     }
 
-    /** A file opened or shared from outside that is not a backup: its text is imported like pasted text (importFromFiles). */
-    fun importUri(activity: FragmentActivity, uri: Uri, gid: Long = -1L) {
+    /** A file opened or shared from outside that is not a backup: its text is imported like pasted text (importFromFiles), crown: or like shared text when [external]. */
+    fun importUri(activity: FragmentActivity, uri: Uri, gid: Long = -1L, external: Boolean = false) {
         runOnDefaultDispatcher {
             val name = displayName(uri)
             val text: String? = try {
@@ -129,7 +132,7 @@ object SubscribeFlows {
                 if (text.isNullOrBlank()) {
                     notify(activity, activity.getString(R.string.grp_file_not_readable, name))
                 } else if (!activity.isFinishing && !activity.isDestroyed) {
-                    importText(activity, text, gid)
+                    importText(activity, text, gid, external)
                 }
             }
         }
@@ -138,10 +141,10 @@ object SubscribeFlows {
     // ------------------------------------------------------------------------------------------------ flows
 
     /** handle_deeplink_impl: add → import, route/remoteroute → the route import, addsub → subscribe. */
-    private fun openDeepLink(activity: FragmentActivity, link: String, gid: Long) {
+    private fun openDeepLink(activity: FragmentActivity, link: String, gid: Long, external: Boolean) {
         val command = Uri.parse(link).host.orEmpty()
         when {
-            command.equals("add", ignoreCase = true) -> importInto(activity, link, gid)
+            command.equals("add", ignoreCase = true) -> importInto(activity, link, gid, external)
             RouteImports.isRouteLink(link) -> importRoute(activity, link)
             command.equals("addsub", ignoreCase = true) -> {
                 val sub = subscribeLink(link) ?: return
@@ -204,7 +207,12 @@ object SubscribeFlows {
     }
 
     /** ImportText into the group, then "Imported N profile(s)" unless MainActivity's report popup already said so. */
-    private fun importInto(activity: FragmentActivity, content: String, gid: Long) {
+    private fun importInto(activity: FragmentActivity, content: String, gid: Long, external: Boolean = false) {
+        // crown: profiles from another app are confirmed first ("Import profile?"), as a profile link opened from outside.
+        if (external) {
+            (activity as? MainActivity)?.let { runOnDefaultDispatcher { it.importProfile(content) } }
+            return
+        }
         runOnDefaultDispatcher {
             val message = try {
                 val result = SubscriptionClient.importText(content, gid)
