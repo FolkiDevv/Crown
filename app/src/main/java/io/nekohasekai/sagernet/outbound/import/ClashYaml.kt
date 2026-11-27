@@ -24,6 +24,8 @@ import org.yaml.snakeyaml.reader.StreamReader
 import org.yaml.snakeyaml.resolver.Resolver
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.util.Collections
+import java.util.IdentityHashMap
 
 /** The Clash YAML document reduced to its `proxies` sequence, each entry as a [JsonObject] tree. */
 object ClashYaml {
@@ -43,8 +45,9 @@ object ClashYaml {
      * [proxies] with what Parser::clash reports about a document without proxies. YAML errors propagate as exceptions.
      * A plain mapping is read one top-level value, and one sequence item, at a time; a document with anchors, explicit
      * tags, a top-level merge key or another root is composed whole, and its root's values constructed one at a time.
-     * Both give what Yaml(SafeConstructor()).load gives, except that an alias expansion past [Expansion]'s limit, and
-     * more than [MAX_COLLECTION_ALIASES] aliases of collections, fail as YAML errors.
+     * Both give what Yaml(SafeConstructor()).load gives, except that an alias expansion past [Expansion]'s limit, an
+     * alias inside its own anchor, more than [MAX_COLLECTION_ALIASES] aliases of collections and, in a document composed
+     * whole, a collection as a mapping key fail as YAML errors.
      */
     @JvmStatic
     fun document(text: String): Document {
@@ -70,6 +73,7 @@ object ClashYaml {
     private fun loadWhole(text: String): Document {
         val options = LoaderOptions().apply { maxAliasesForCollections = MAX_COLLECTION_ALIASES }
         val root = Composer(ParserImpl(StreamReader(text), false), Resolver(), options).getSingleNode()
+        root?.let(::rejectCollectionKeys)
         val constructor = NodeConstructor()
         val expansion = Expansion(text.length)
         if (root is MappingNode && root.tag == Tag.MAP && !root.isTwoStepsConstruction) return constructor.readRoot(root, expansion)
@@ -82,13 +86,33 @@ object ClashYaml {
     }
 
     /**
+     * A collection as a mapping key (a set's items are keys too) is hashed, and converted to its text, with its aliases
+     * expanded, before any limit can apply. Clash documents key their mappings by scalars. Each node is visited once.
+     */
+    private fun rejectCollectionKeys(root: Node) {
+        val seen = Collections.newSetFromMap(IdentityHashMap<Node, Boolean>())
+        val pending = ArrayList<Node>().apply { add(root) }
+        while (pending.isNotEmpty()) {
+            val node = pending.removeAt(pending.size - 1)
+            if (!seen.add(node)) continue
+            if (node is SequenceNode) pending.addAll(node.value)
+            if (node is MappingNode) for (tuple in node.value) {
+                if (tuple.keyNode !is ScalarNode) throw YAMLException("A collection as a mapping key is not supported")
+                pending.add(tuple.valueNode)
+            }
+        }
+    }
+
+    /**
      * The conversion of constructed values into entries, limited in the values it creates. SafeConstructor gives a node
      * shared through aliases as one object, which the conversion copies at each use: a few hundred bytes of nested
-     * aliases would expand to billions of values. The limit grows with the text, so large honest documents with shared
-     * options pass, and stops at a fixed ceiling, so padding a small bomb with comments does not raise it.
+     * aliases would expand to billions of values, and an alias inside its own anchor never ends. The limit grows with
+     * the text, so large honest documents with shared options pass, and stops at a fixed ceiling, so padding a small bomb
+     * with comments does not raise it. A collection costs more than a scalar: it takes several objects.
      */
     private class Expansion(textLength: Int) {
         private var left = (textLength.toLong() * VALUES_PER_CHAR).coerceIn(MIN_VALUES, MAX_VALUES)
+        private val open = Collections.newSetFromMap(IdentityHashMap<Any?, Boolean>())
 
         /** Each entry is released once converted, so the maps and their JsonObjects are never all alive together. */
         fun entries(entries: List<*>): List<JsonObject> {
@@ -105,17 +129,23 @@ object ClashYaml {
         fun entry(value: Any?): JsonObject = (convert(value) as? JsonObject) ?: JsonObject()
 
         private fun convert(value: Any?): Any {
-            if (--left < 0) throw YAMLException("The document expands too much through YAML aliases")
-            return when (value) {
+            val collection = value is Map<*, *> || value is List<*>
+            left -= if (collection) COLLECTION_COST else 1L
+            if (left < 0) throw YAMLException("The document expands too much through YAML aliases")
+            if (collection && !open.add(value)) throw YAMLException("The document contains itself through YAML aliases")
+            val converted = when (value) {
                 null -> JsonNull
                 is Map<*, *> -> JsonObject().also { obj -> for ((k, v) in value) obj[k.toString()] = convert(v) }
                 is List<*> -> JsonArray().also { arr -> for (v in value) arr.add(convert(v)) }
                 is String, is Boolean, is Long, is Int, is Short, is Byte, is Double, is Float, is BigInteger, is BigDecimal -> value
                 else -> value.toString()
             }
+            if (collection) open.remove(value)
+            return converted
         }
 
         private companion object {
+            const val COLLECTION_COST = 10L
             const val VALUES_PER_CHAR = 100L
             const val MIN_VALUES = 1_000_000L
             const val MAX_VALUES = 5_000_000L

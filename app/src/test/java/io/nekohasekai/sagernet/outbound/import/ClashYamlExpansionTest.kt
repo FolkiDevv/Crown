@@ -73,6 +73,25 @@ class ClashYamlExpansionTest {
         assertTrue(error.message, error.message!!.contains("expands too much"))
     }
 
+    /** A collection key is hashed and printed with its aliases expanded: rejected before anything is constructed. */
+    @Test
+    fun aliasedCollectionAsKeyIsRejected() {
+        val anchors = smallBomb(9).substringBefore("proxies:")
+        for (entry in listOf("{name: n, ? *a9 : 1}", "{name: n, s: !!set {? *a9 }}")) {
+            val error = timed("collection key $entry", anchors + "proxies: [$entry]\n")
+            assertTrue(error.message, error.message!!.contains("mapping key"))
+        }
+    }
+
+    /** An alias inside its own anchor makes an endless value: rejected instead of overflowing the stack. */
+    @Test
+    fun aliasInsideItsOwnAnchorIsRejected() {
+        for (text in listOf("a: &a [*a]\nproxies: [*a]\n", "proxies: [&p {name: x, self: *p}]\n", "proxies: &p [*p]\n")) {
+            val error = rejected(text)
+            assertTrue(error.message, error.message!!.contains("contains itself"))
+        }
+    }
+
     @Test
     fun collectionAliasesAreLimited() {
         fun doc(aliases: Int) = buildString {
