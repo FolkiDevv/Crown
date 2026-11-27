@@ -6,6 +6,7 @@ import io.nekohasekai.sagernet.outbound.json.JsonObject
 import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.composer.Composer
 import org.yaml.snakeyaml.constructor.SafeConstructor
+import org.yaml.snakeyaml.error.YAMLException
 import org.yaml.snakeyaml.events.Event
 import org.yaml.snakeyaml.events.MappingStartEvent
 import org.yaml.snakeyaml.events.NodeEvent
@@ -23,6 +24,8 @@ import org.yaml.snakeyaml.reader.StreamReader
 import org.yaml.snakeyaml.resolver.Resolver
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.util.Collections
+import java.util.IdentityHashMap
 
 /** The Clash YAML document reduced to its `proxies` sequence, each entry as a [JsonObject] tree. */
 object ClashYaml {
@@ -42,13 +45,14 @@ object ClashYaml {
      * [proxies] with what Parser::clash reports about a document without proxies. YAML errors propagate as exceptions.
      * A plain mapping is read one top-level value, and one sequence item, at a time; a document with anchors, explicit
      * tags, a top-level merge key or another root is composed whole, and its root's values constructed one at a time.
-     * Both give what Yaml(SafeConstructor()).load gives.
+     * Both give what Yaml(SafeConstructor()).load gives, except that an alias expansion past [Expansion]'s limit, an
+     * alias inside its own anchor and, in a document composed whole, a collection as a mapping key fail as YAML errors.
      */
     @JvmStatic
     fun document(text: String): Document {
         val clean = sanitize(text)
         return try {
-            StreamingRead(clean).read()
+            StreamingRead(clean, Expansion(clean.length)).read()
         } catch (e: Unsupported) {
             loadWhole(clean)
         }
@@ -64,36 +68,94 @@ object ClashYaml {
     /** Yaml(SafeConstructor()).load: the same Composer and LoaderOptions, so aliases and their limit are unchanged. */
     private fun loadWhole(text: String): Document {
         val root = Composer(ParserImpl(StreamReader(text), false), Resolver(), LoaderOptions()).getSingleNode()
+        root?.let(::rejectCollectionKeys)
         val constructor = NodeConstructor()
-        if (root is MappingNode && root.tag == Tag.MAP && !root.isTwoStepsConstruction) return constructor.readRoot(root)
-        return rootDocument(root?.let(constructor::constructNode))
+        val expansion = Expansion(text.length)
+        if (root is MappingNode && root.tag == Tag.MAP && !root.isTwoStepsConstruction) return constructor.readRoot(root, expansion)
+        return rootDocument(root?.let(constructor::constructNode), expansion)
     }
 
-    private fun rootDocument(data: Any?): Document {
+    private fun rootDocument(data: Any?, expansion: Expansion): Document {
         val root = data as? Map<*, *> ?: return Document(null, false, false)
-        return Document((root["proxies"] as? List<*>)?.let(::convertEntries), true, root.containsKey("proxy-providers"))
+        return Document((root["proxies"] as? List<*>)?.let(expansion::entries), true, root.containsKey("proxy-providers"))
     }
 
-    /** Each entry is released once converted, so the maps and their JsonObjects are never all alive together. */
-    private fun convertEntries(entries: List<*>): List<JsonObject> {
-        val out = ArrayList<JsonObject>(entries.size)
-        @Suppress("UNCHECKED_CAST")
-        val slots = entries as? ArrayList<Any?>
-        for (i in entries.indices) {
-            out.add(toEntry(entries[i]))
-            slots?.set(i, null)
+    /**
+     * A collection as a mapping key (a set's items are keys too) is hashed, and converted to its text, with its aliases
+     * expanded, before any limit can apply. Clash documents key their mappings by scalars. Each node is visited once.
+     */
+    private fun rejectCollectionKeys(root: Node) {
+        val seen = Collections.newSetFromMap(IdentityHashMap<Node, Boolean>())
+        val pending = ArrayList<Node>().apply { add(root) }
+        while (pending.isNotEmpty()) {
+            val node = pending.removeAt(pending.size - 1)
+            if (!seen.add(node)) continue
+            if (node is SequenceNode) pending.addAll(node.value)
+            if (node is MappingNode) for (tuple in node.value) {
+                if (tuple.keyNode !is ScalarNode) throw YAMLException("A collection as a mapping key is not supported")
+                pending.add(tuple.valueNode)
+            }
         }
-        return out
     }
 
-    private fun toEntry(value: Any?): JsonObject = (convert(value) as? JsonObject) ?: JsonObject()
+    /**
+     * The conversion of constructed values into entries, limited in the values it creates. SafeConstructor gives a node
+     * shared through aliases as one object, which the conversion copies at each use: a few hundred bytes of nested
+     * aliases would expand to billions of values, and an alias inside its own anchor never ends. The limit grows with
+     * the text, so large honest documents with shared options pass, and stops at a fixed ceiling, so padding a small bomb
+     * with comments does not raise it. A collection costs more than a scalar: it takes several objects.
+     */
+    private class Expansion(textLength: Int) {
+        private var left = (textLength.toLong() * VALUES_PER_CHAR).coerceIn(MIN_VALUES, MAX_VALUES)
+        private val open = Collections.newSetFromMap(IdentityHashMap<Any?, Boolean>())
 
-    private fun convert(value: Any?): Any = when (value) {
-        null -> JsonNull
-        is Map<*, *> -> JsonObject().also { obj -> for ((k, v) in value) obj[k.toString()] = convert(v) }
-        is List<*> -> JsonArray().also { arr -> for (v in value) arr.add(convert(v)) }
-        is String, is Boolean, is Long, is Int, is Short, is Byte, is Double, is Float, is BigInteger, is BigDecimal -> value
-        else -> value.toString()
+        /** Each entry is released once converted, so the maps and their JsonObjects are never all alive together. */
+        fun entries(entries: List<*>): List<JsonObject> {
+            val out = ArrayList<JsonObject>(entries.size)
+            @Suppress("UNCHECKED_CAST")
+            val slots = entries as? ArrayList<Any?>
+            for (i in entries.indices) {
+                out.add(entry(entries[i]))
+                slots?.set(i, null)
+            }
+            return out
+        }
+
+        fun entry(value: Any?): JsonObject = (convert(value) as? JsonObject) ?: JsonObject()
+
+        private fun convert(value: Any?): Any {
+            val collection = value is Map<*, *> || value is List<*>
+            spend(if (collection) COLLECTION_COST else 1L)
+            if (collection && !open.add(value)) throw YAMLException("The document contains itself through YAML aliases")
+            val converted = when (value) {
+                null -> JsonNull
+                is Map<*, *> -> JsonObject().also { obj -> for ((k, v) in value) obj[text(k)] = convert(v) }
+                is List<*> -> JsonArray().also { arr -> for (v in value) arr.add(convert(v)) }
+                is String, is Boolean, is Long, is Int, is Short, is Byte, is Double, is Float, is BigInteger, is BigDecimal -> value
+                else -> text(value)
+            }
+            if (collection) open.remove(value)
+            return converted
+        }
+
+        /** Text other than a String is made anew at each use of a shared value (a set, a long number key): it costs its length. */
+        private fun text(value: Any?): String {
+            val text = value.toString()
+            if (value !is String) spend(text.length.toLong())
+            return text
+        }
+
+        private fun spend(cost: Long) {
+            left -= cost
+            if (left < 0) throw YAMLException("The document expands too much through YAML aliases")
+        }
+
+        private companion object {
+            const val COLLECTION_COST = 10L
+            const val VALUES_PER_CHAR = 100L
+            const val MIN_VALUES = 1_000_000L
+            const val MAX_VALUES = 5_000_000L
+        }
     }
 
     /** The document needs what only the whole load does exactly. */
@@ -108,9 +170,9 @@ object ClashYaml {
          * it is `proxies`. A node shared through an alias is constructed again instead of reused: flattenMapping left
          * it without merge keys or duplicates, so it constructs to an equal value. Recursive keys take the whole path.
          */
-        fun readRoot(root: MappingNode): Document {
+        fun readRoot(root: MappingNode, expansion: Expansion): Document {
             flattenMapping(root)
-            if (root.value.any { it.keyNode.isTwoStepsConstruction }) return rootDocument(constructNode(root))
+            if (root.value.any { it.keyNode.isTwoStepsConstruction }) return rootDocument(constructNode(root), expansion)
             var proxies: Any? = null
             var proxyProviders = false
             for (tuple in root.value) {
@@ -118,7 +180,7 @@ object ClashYaml {
                 val value = constructNode(tuple.valueNode)
                 if (key == "proxies") proxies = value else if (key == "proxy-providers") proxyProviders = true
             }
-            return Document((proxies as? List<*>)?.let(::convertEntries), true, proxyProviders)
+            return Document((proxies as? List<*>)?.let(expansion::entries), true, proxyProviders)
         }
     }
 
@@ -134,7 +196,7 @@ object ClashYaml {
      * would inside the whole document. Failures are thrown in SafeConstructor's order once the stream is read: a key
      * first, then the values of the fields that survive the duplicate keys (a repeated key keeps its last value).
      */
-    private class StreamingRead(text: String) {
+    private class StreamingRead(text: String, private val expansion: Expansion) {
         private val parser = ParserImpl(StreamReader(text), false)
         private val resolver = Resolver()
         private val constructor = NodeConstructor()
@@ -199,7 +261,7 @@ object ClashYaml {
                     failure = e
                     continue
                 }
-                items?.add(toEntry(item))
+                items?.add(expansion.entry(item))
             }
             parser.getEvent()
             return Value(failure, items)
