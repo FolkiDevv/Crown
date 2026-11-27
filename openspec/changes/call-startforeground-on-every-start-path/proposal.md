@@ -89,7 +89,11 @@ Debug-сборка `dev.folki.crown.debug`, эмулятор Android 17 (API 37)
 
 ## What Changes
 1. **Каждая ветка `onStartCommand` сначала делает сервис foreground** (уведомление-заглушка, как в ветке
-   `profile == null`), а уже потом решает, что делать.
+   `profile == null`), а уже потом решает, что делать. Заглушка сейчас показывается с типом `systemExempted`
+   (`ServiceNotification.kt:279-284`), а он на API 34+ без согласия на VPN не разрешён — то есть как раз в ветке «нет
+   согласия» `startForeground` может быть отклонён. Для этой ветки нужен тип, не требующий согласия (`shortService`
+   на API 34+ или `specialUse`, см. `fix-proxy-mode-foreground-service-type`). Основная защита — п. 3: внешние
+   входы проверяют согласие до `startService()`, и сервис без согласия не запускается вовсе.
 2. Ветка «нет согласия» в `VpnService.onStartCommand`: вместо `startActivity` из сервиса показать уведомление
    «Нужно разрешение на VPN» с `PendingIntent` на `VpnRequestActivity`, затем `stopRunner`. Из фона прямой запуск
    activity не работает.
