@@ -393,9 +393,18 @@ object TrafficModes {
         "SELECT 1 FROM `${ProxyEntity.TABLE}` WHERE `type` != ? LIMIT 1", arrayOf(AutoSelectorProfiles.TYPE),
     ).use { it.moveToFirst() }
 
+    /**
+     * The ids of the managed auto-selectors ([Managed.selectors]). Each read is a query of the uncached settings, so a
+     * loop over profiles takes the set once and tests `id in` it instead of calling [isManagedSelector] per profile.
+     */
+    fun managedSelectors(): Set<Long> = Managed.selectorSet(
+        store.getLong(KEY_MANAGED_AUTO) ?: 0L,
+        store.getLong(KEY_MANAGED_AUTO_WHITELIST) ?: 0L,
+        store.getLong(KEY_MANAGED_COUNTRY) ?: 0L,
+    )
+
     /** Whether [id] is one of the managed auto-selectors, which stand in for no server of their own. */
-    fun isManagedSelector(id: Long): Boolean = id > 0L && (id == store.getLong(KEY_MANAGED_AUTO) ||
-        id == store.getLong(KEY_MANAGED_AUTO_WHITELIST) || id == store.getLong(KEY_MANAGED_COUNTRY))
+    fun isManagedSelector(id: Long): Boolean = id > 0L && id in managedSelectors()
 
     private inline fun <T> guarded(fallback: T, block: () -> T): T = try {
         block()

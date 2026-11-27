@@ -652,11 +652,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                 try {
                     val managedIds = TrafficModes.managedIds()
                     val selected = ProfileManager.getProfile(DataStore.selectedProxy)
-                    val first = if (selected == null) firstProfile() else null
+                    val first = if (selected == null) firstProfile(managedIds.selectors) else null
                     val shown = selected ?: first
                     // The managed auto-selectors of the traffic modes are no server of their own.
                     val hasServers = TrafficModes.hasServers() ||
-                        selected != null && !TrafficModes.isManagedSelector(selected.id)
+                        selected != null && selected.id !in managedIds.selectors
                     ProfilesSnapshot(
                         profile = shown,
                         fallback = first?.id ?: 0L,
@@ -696,10 +696,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
-    /** The first profile in list order, what a start uses when nothing valid is selected. */
-    private fun firstProfile(): ProxyEntity? = SagerDatabase.groupDao.allGroups().firstNotNullOfOrNull { group ->
-        ProfileManager.members(group.id).firstOrNull { !TrafficModes.isManagedSelector(it.id) }
-    }
+    /**
+     * The first profile in list order, what a start uses when nothing valid is selected. The [managed] auto-selectors
+     * are read once, not per profile.
+     */
+    private fun firstProfile(managed: Set<Long> = TrafficModes.managedSelectors()): ProxyEntity? =
+        SagerDatabase.groupDao.allGroups().firstNotNullOfOrNull { group ->
+            ProfileManager.members(group.id).firstOrNull { it.id !in managed }
+        }
 
     /** Selects [fallbackProfile] when the selected profile is gone; false when there is nothing to start. */
     private suspend fun prepareSelection(): Boolean = withContext(Dispatchers.IO) {
