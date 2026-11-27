@@ -78,10 +78,17 @@ object SimpleImport {
         data class Route(val text: String) : Plan
     }
 
+    /**
+     * Every add flow of [AddViewModel] reads its text here, the clipboard check when the app opens too. A stack overflow
+     * would take the process down from a coroutine; the parsers limit nesting, and this catch is their safety net.
+     */
     fun plan(text: String): Plan = try {
         planOf(CrownLinks.toThrone(text))
     } catch (e: Exception) {
         Logs.w("simple add: reading the text failed", e)
+        Plan.NotRecognized
+    } catch (e: StackOverflowError) {
+        Logs.w("simple add: the text is nested too deeply", e)
         Plan.NotRecognized
     }
 

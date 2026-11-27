@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.outbound.json
 
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 
@@ -10,13 +11,17 @@ import org.json.JSONTokener
  */
 object JsonInput {
 
+    /** Collections nested deeper are refused, as in the JSON editor (JsonTree): org.json reads them by recursion. */
+    const val MAX_DEPTH = 96
+
     /** QString2QJsonObject (Utils.cpp:100-104): an empty object on any failure or when the text is not an object. */
     @JvmStatic
     fun parseObject(text: String): JsonObject = parseObjectOrNull(text) ?: JsonObject()
 
     @JvmStatic
     fun parseObjectOrNull(text: String): JsonObject? = try {
-        fromOrgJson(JSONObject(text))
+        // JSONObject(text) is JSONTokener(text).nextValue() checked to be an object.
+        (DepthTokener(text).nextValue() as? JSONObject)?.let(::fromOrgJson)
     } catch (e: Exception) {
         null
     }
@@ -24,7 +29,7 @@ object JsonInput {
     /** The top-level value of [text] (object, array, string, number, boolean or [JsonNull]); null when unparsable. */
     @JvmStatic
     fun parseValue(text: String): Any? = try {
-        fromOrgJsonValue(JSONTokener(text).nextValue())
+        fromOrgJsonValue(DepthTokener(text).nextValue())
     } catch (e: Exception) {
         null
     }
@@ -54,5 +59,20 @@ object JsonInput {
         value is JSONObject -> fromOrgJson(value)
         value is JSONArray -> fromOrgJson(value)
         else -> JsonValues.normalize(value)
+    }
+
+    /** JSONTokener with [MAX_DEPTH]: a nested value fails before the recursion can exhaust the thread's stack. */
+    private class DepthTokener(text: String) : JSONTokener(text) {
+        private var level = 0
+
+        override fun nextValue(): Any? {
+            // A scalar inside the deepest collection allowed is one level further.
+            if (++level > MAX_DEPTH + 1) throw JSONException("The document is nested too deeply")
+            try {
+                return super.nextValue()
+            } finally {
+                level--
+            }
+        }
     }
 }

@@ -315,6 +315,11 @@ class MainActivity : ThemedActivity(),
                 alert(e.readableMessage).show()
             }
             return
+        } catch (e: StackOverflowError) {
+            // crown: a safety net behind the parsers' nesting limit; uncaught, it takes the UI process down.
+            Logs.w(e)
+            onMainDispatcher { alert(getString(R.string.validation_import_unparsed)).show() }
+            return
         }
         for (message in result.messages) Logs.w(message)
         val profile = result.outbounds.firstOrNull()

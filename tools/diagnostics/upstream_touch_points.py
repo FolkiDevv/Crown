@@ -32,13 +32,15 @@ TOUCH_POINTS: dict[str, str] = {
     "app/build.gradle.kts": "2: Compose plugin, buildFeatures.compose, dependencies, simple source dirs",
     "app/src/main/AndroidManifest.xml": "3: SimpleActivity and WhitelistZoneReceiver declarations; crown: the crown:// link filter",
     "app/src/main/res/menu/main_drawer_menu.xml": "4: 'New interface' drawer item",
-    "app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt": "5: SimpleUi.redirect in onCreate/onNewIntent and the drawer handler; crown: crown:// links opened from outside",
+    "app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt": "5: SimpleUi.redirect in onCreate/onNewIntent and the drawer handler; crown: crown:// links opened from outside; 13: importProfile catches StackOverflowError",
     "app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt": "6: SimpleHooks service start/stop",
     "app/src/main/java/io/nekohasekai/sagernet/group/RemoteRouteUpdater.kt": "7: SimpleConfigRepo.refresh",
     "app/src/main/java/moe/matsuri/nb4a/NativeInterface.kt": "8: network listener keyed by the gomobile refnum (leak fix)",
     "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionFetch.kt": "9: device limit headers of a subscription answer",
     "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionRefresh.kt": "9: SimpleHooks.onSubscriptionFetched/onSubscriptionRefreshed",
-    "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ClashYaml.kt": "11: limit on the values YAML aliases expand to, no collection keys or self-containing aliases",
+    "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ClashYaml.kt": "11: limit on the values YAML aliases expand to, no collection keys or self-containing aliases; 13: nesting limit",
+    "app/src/main/java/io/nekohasekai/sagernet/outbound/json/JsonInput.kt": "13: nesting limit of the JSON read",
+    "app/src/main/java/io/nekohasekai/sagernet/ui/profiles/ProfileImports.kt": "13: the zip import catches StackOverflowError",
 }
 
 # openspec/specs/repository-governance, requirement "Идентичность форка Crown". Keep both in sync.

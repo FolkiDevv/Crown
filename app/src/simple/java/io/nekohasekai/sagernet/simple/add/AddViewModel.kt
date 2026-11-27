@@ -191,9 +191,13 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
             if (imports.isLocked || mutableState.value.offer != null) return@launch
             val offer = withContext(Dispatchers.IO) {
                 try {
+                    val fingerprint = ImportText.fingerprint(text)
+                    if (prefs.getString(KEY_PASSED, null) == fingerprint) return@withContext null
+                    // Written before the read: a text whose read takes the process down is not read again on every start.
+                    prefs.edit().putString(KEY_PASSED, fingerprint).commit()
                     val plan = SimpleImport.plan(text)
                     if (plan !is SimpleImport.Plan.Subscription && plan !is SimpleImport.Plan.Servers) return@withContext null
-                    val fingerprint = ImportText.fingerprint(text)
+                    prefs.edit().remove(KEY_PASSED).apply()
                     if (prefs.getString(KEY_DECLINED, null) == fingerprint) return@withContext null
                     if (SimpleImport.isAdded(plan)) return@withContext null
                     plan to fingerprint
@@ -344,6 +348,9 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         /** The fingerprint of the clipboard content last turned down (ImportText.fingerprint, no text kept). */
         const val KEY_DECLINED = "clipboard_declined"
+
+        /** The fingerprint of the clipboard content found to be nothing to add, or whose read did not finish. */
+        const val KEY_PASSED = "clipboard_passed"
 
         /** The ready settings of the first subscription were turned on (UI process only, design.md D3). */
         const val KEY_FIRST_SUBSCRIPTION = "first_subscription_setup"

@@ -42,6 +42,10 @@ The app SHALL import profiles from share links and raw configs (URL schemes, cli
 - **WHEN** the user imports a supported share link
 - **THEN** a profile is created with the decoded parameters and placed in the chosen group
 
+#### Scenario: Text or file nested too deeply
+- **WHEN** imported text, a file, a share, a link or a subscription document is JSON or Clash YAML with collections nested more than 96 deep (in the text, or through YAML aliases)
+- **THEN** the parse MUST stop before it recurses that deep and the document MUST be reported as unreadable ("The document is nested too deeply"), with nothing added and existing profiles kept unchanged; neither the UI process nor the VPN process crashes, in either interface
+
 ### Requirement: Ordering and pinning
 The app SHALL let the user reorder profiles within a group (manual order and sorted orders such as by test result or traffic) and pin profiles to the top.
 
