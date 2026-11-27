@@ -31,6 +31,10 @@ The app SHALL fetch a subscription URL and replace the group's profiles with the
 - **WHEN** the fetch or parse fails
 - **THEN** existing profiles are kept unchanged and an error is shown
 
+#### Scenario: Subscription document that expands through YAML aliases
+- **WHEN** the fetched document is Clash YAML whose aliases would expand into far more values than its text holds (more than 100 per character, at least 1 million and at most 5 million), or which aliases collections more than 30 times
+- **THEN** the parse MUST stop without converting the expansion, so the VPN process's memory does not grow noticeably; the document is reported as an unreadable Clash configuration in the import report, existing profiles are kept unchanged, and the same document imported from the clipboard, a file or a share in either interface is reported the same way instead of crashing the app
+
 ### Requirement: Import and share
 The app SHALL import profiles from share links and raw configs (URL schemes, clipboard, QR scan, file), and SHALL export a profile as a share link or config text.
 
