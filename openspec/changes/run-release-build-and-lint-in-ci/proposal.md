@@ -79,7 +79,8 @@ Lint настроен строго (`Helpers.kt:73-80`: `checkAllWarnings = true
 - **Ядро throne, сборка, инструменты:** ядро берётся из кэша CI; сборка APK не меняется.
 - **Риски:** время CI на релизном PR растёт на одну R8-сборку (несколько минут). Первый запуск полного lint почти
   наверняка даст много срабатываний — без baseline job будет красным.
-- **Проверка исправления:** PR из шага 2 падает в CI; PR без изменений — зелёный.
+- **Проверка исправления:** PR с вызовом API выше minSdk падает на lint, PR с ошибкой сборки R8 — на release-job; PR из
+  шага 2 (удалённое keep-правило) падает только при smoke-тесте, открывающем список профилей; PR без изменений — зелёный.
 - **Внешние источники:**
   - Improve your code with lint checks (lintVital и fatal-проблемы в release-сборках): https://developer.android.com/studio/write/lint
   - LintOptions / Lint DSL (`checkReleaseBuilds`, `baseline`): https://developer.android.com/reference/tools/gradle-api/com/android/build/api/dsl/Lint
