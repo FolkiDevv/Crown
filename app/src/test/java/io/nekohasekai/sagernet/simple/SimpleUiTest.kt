@@ -1,6 +1,5 @@
 package io.nekohasekai.sagernet.simple
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,102 +7,38 @@ import org.junit.Test
 class SimpleUiTest {
 
     private class MapStore : SimpleUi.Store {
-        val values = mutableMapOf<String, Any>()
-        override fun getBoolean(key: String, default: Boolean) = values[key] as Boolean? ?: default
+        val values = mutableMapOf<String, Boolean>()
+        override fun getBoolean(key: String, default: Boolean) = values[key] ?: default
         override fun putBoolean(key: String, value: Boolean) {
-            values[key] = value
-        }
-
-        override fun getString(key: String) = values[key] as String?
-        override fun putString(key: String, value: String) {
             values[key] = value
         }
     }
 
     @Test
     fun simpleInterfaceIsTheDefault() {
-        val store = MapStore()
-        assertTrue(SimpleUi.isSimpleSelected(store))
-        assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.MAIN", emptySet()))
-        assertTrue(SimpleUi.shouldRedirect(store, null, emptySet()))
+        assertTrue(SimpleUi.shouldRedirect(emptySet()))
     }
 
     @Test
-    fun choiceIsKept() {
-        val store = MapStore()
-        SimpleUi.select(store, simple = false)
-        assertFalse(SimpleUi.isSimpleSelected(store))
-        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.MAIN", emptySet()))
-        SimpleUi.select(store, simple = true)
-        assertTrue(SimpleUi.isSimpleSelected(store))
-        assertEquals(true, store.values[SimpleUi.KEY_SIMPLE])
+    fun classicIsNotRemembered() {
+        // Only an intent carrying the classic flag stays in MainActivity; the next plain launch opens the simple
+        // interface again. A choice an older version stored is not read.
+        assertFalse(SimpleUi.shouldRedirect(setOf(SimpleUi.EXTRA_OPEN_CLASSIC)))
+        assertTrue(SimpleUi.shouldRedirect(emptySet()))
     }
 
     @Test
     fun classicOnlyIntentsStayInMainActivity() {
-        val store = MapStore()
-        assertFalse(
-            SimpleUi.shouldRedirect(store, "android.service.quicksettings.action.QS_TILE_PREFERENCES", emptySet())
-        )
-        assertFalse(SimpleUi.shouldRedirect(store, null, setOf(SimpleUi.EXTRA_OPEN_CLASSIC)))
-        assertFalse(SimpleUi.shouldRedirect(store, null, setOf("wifiPermissionFlow")))
-        assertTrue(SimpleUi.shouldRedirect(store, null, setOf("someOtherExtra")))
+        assertFalse(SimpleUi.shouldRedirect(setOf(SimpleUi.EXTRA_OPEN_CLASSIC)))
+        assertFalse(SimpleUi.shouldRedirect(setOf("wifiPermissionFlow")))
+        assertTrue(SimpleUi.shouldRedirect(setOf("someOtherExtra")))
     }
 
     @Test
     fun importsOpenTheSimpleInterface() {
         // Batch 4: links, files, shares and the QR scanner's texts are imported by the simple interface.
-        val store = MapStore()
-        assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
-        assertTrue(SimpleUi.shouldRedirect(store, "android.intent.action.SEND", setOf("android.intent.extra.TEXT")))
-        assertTrue(SimpleUi.shouldRedirect(store, null, setOf("importTexts")))
-        // A backup the simple interface hands to the classic restore carries the classic flag on its VIEW.
-        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", setOf(SimpleUi.EXTRA_OPEN_CLASSIC)))
-        SimpleUi.select(store, simple = false)
-        assertFalse(SimpleUi.shouldRedirect(store, "android.intent.action.VIEW", emptySet()))
-    }
-
-    @Test
-    fun freshInstallIsNotAnUpgrade() {
-        val store = MapStore()
-        assertFalse(SimpleUi.isUpgrade(store, firstInstallTime = 1000, lastUpdateTime = 1000))
-        assertEquals(SimpleUi.INSTALL_FRESH, store.values[SimpleUi.KEY_INSTALL_KIND])
-        // a later update of this version must not turn a fresh install into an upgrade
-        assertFalse(SimpleUi.isUpgrade(store, firstInstallTime = 1000, lastUpdateTime = 5000))
-    }
-
-    @Test
-    fun upgradeIsRecognisedAndKept() {
-        val store = MapStore()
-        assertTrue(SimpleUi.isUpgrade(store, firstInstallTime = 1000, lastUpdateTime = 5000))
-        assertEquals(SimpleUi.INSTALL_UPGRADE, store.values[SimpleUi.KEY_INSTALL_KIND])
-        assertTrue(SimpleUi.isUpgrade(store, firstInstallTime = 1000, lastUpdateTime = 9000))
-    }
-
-    @Test
-    fun upgradeAlsoOpensTheSimpleInterface() {
-        val store = MapStore()
-        SimpleUi.isUpgrade(store, firstInstallTime = 1000, lastUpdateTime = 5000)
-        assertTrue(SimpleUi.isSimpleSelected(store))
-    }
-
-    @Test
-    fun classicHintShowsOnceAfterAnUpgrade() {
-        val store = MapStore()
-        val upgrade = SimpleUi.isUpgrade(store, firstInstallTime = 1000, lastUpdateTime = 5000)
-        assertTrue(SimpleUi.showsClassicHint(store, upgrade))
-        // still there until it is closed (a restart before closing shows it again)
-        assertTrue(SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(store, 1000, 5000)))
-        SimpleUi.closeClassicHint(store)
-        assertFalse(SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(store, 1000, 9000)))
-    }
-
-    @Test
-    fun classicHintNeverShowsOnAFreshInstall() {
-        val store = MapStore()
-        assertFalse(SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(store, 1000, 1000)))
-        // nor after a later update of a version that started fresh
-        assertFalse(SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(store, 1000, 5000)))
+        assertTrue(SimpleUi.shouldRedirect(setOf("android.intent.extra.TEXT")))
+        assertTrue(SimpleUi.shouldRedirect(setOf("importTexts")))
     }
 
     @Test
@@ -119,12 +54,8 @@ class SimpleUiTest {
     @Test
     fun classicScreensStayInMainActivity() {
         // The advanced mode's links carry the classic flag and the screen; the redirect leaves them to MainActivity.
-        val store = MapStore()
         assertFalse(
-            SimpleUi.shouldRedirect(
-                store, null,
-                setOf(SimpleUi.EXTRA_OPEN_CLASSIC, "io.nekohasekai.sagernet.simple.CLASSIC_SCREEN"),
-            )
+            SimpleUi.shouldRedirect(setOf(SimpleUi.EXTRA_OPEN_CLASSIC, "io.nekohasekai.sagernet.simple.CLASSIC_SCREEN"))
         )
     }
 }

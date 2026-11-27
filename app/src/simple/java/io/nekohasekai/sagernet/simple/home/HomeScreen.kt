@@ -108,9 +108,9 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     /** A remote (D-pad) starts on the connect button, or the first way to add, as the section opens. */
     focus: Boolean = true,
-    /** It moves to the connect button again each time this changes (the hint above it closed). */
+    /** It moves to the connect button again each time this changes (a notice above it closed). */
     focusKey: Any? = null,
-    /** A notice at the top of the scrolling content (the hint after an upgrade), given the width of the cards. */
+    /** A notice at the top of the scrolling content, given the width of the cards. */
     hint: (@Composable (Modifier) -> Unit)? = null,
     /** The whitelist card's «Авто» or «Умный»: the traffic mode to switch to. */
     onLeaveWhitelists: (TrafficMode) -> Unit = {},

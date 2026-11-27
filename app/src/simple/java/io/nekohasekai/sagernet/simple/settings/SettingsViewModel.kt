@@ -77,8 +77,6 @@ data class SettingsUiState(
     val updateCheck: Boolean = false,
     /** Advanced mode, in-app updater builds: the classic «Allow updating to beta versions» (`allow_beta_update`). */
     val betaUpdates: Boolean = false,
-    /** The once-only hint after an upgrade on the way back to the classic interface. */
-    val classicHint: Boolean = false,
 )
 
 /**
@@ -89,10 +87,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val store = SimpleUi.store(application)
     private val mutableState = MutableStateFlow(
-        SettingsUiState(
-            advanced = SimpleUi.isAdvanced(store),
-            classicHint = SimpleUi.showsClassicHint(store, SimpleUi.isUpgrade(application)),
-        )
+        SettingsUiState(advanced = SimpleUi.isAdvanced(store))
     )
     val state: StateFlow<SettingsUiState> = mutableState.asStateFlow()
 
@@ -202,10 +197,5 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setAdvanced(on: Boolean) {
         SimpleUi.setAdvanced(store, on)
         mutableState.update { it.copy(advanced = on) }
-    }
-
-    fun closeClassicHint() {
-        SimpleUi.closeClassicHint(store)
-        mutableState.update { it.copy(classicHint = false) }
     }
 }

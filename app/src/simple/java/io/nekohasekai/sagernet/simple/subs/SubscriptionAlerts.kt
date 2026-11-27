@@ -10,12 +10,10 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.net.toUri
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleActivity
-import io.nekohasekai.sagernet.simple.SimpleUi
 
 /**
  * The notifications of simple-ui "Уведомления о подписке", posted by `:bg` after each update of a subscription: the
@@ -114,24 +112,17 @@ object SubscriptionAlerts {
             .setAutoCancel(true)
             .setContentIntent(open)
         if (news) {
-            // «Подробнее» shows the announcement in the new interface; the classic one has no such sheet, and the
-            // notification's own text holds the whole announcement there.
-            if (SimpleUi.isSimpleSelected(SimpleUi.store(context))) {
-                open?.let { builder.addAction(0, context.getString(R.string.simple_notice_more), it) }
-            }
+            // «Подробнее» shows the announcement in the new interface, which every launch opens.
+            open?.let { builder.addAction(0, context.getString(R.string.simple_notice_more), it) }
         } else {
             val url = facts.webUrl.ifEmpty { facts.supportUrl }
             if (url.isNotEmpty()) {
                 // Through the new interface, which then checks the subscription again when the user comes back (as the
-                // home card's button does); the classic one has no such check, so the page opens straight away there.
-                val view = if (SimpleUi.isSimpleSelected(SimpleUi.store(context))) {
-                    Intent(context, SimpleActivity::class.java)
-                        .putExtra(EXTRA_PROVIDER_GROUP, facts.groupId)
-                        .putExtra(EXTRA_PROVIDER_URL, url)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                } else {
-                    Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
+                // home card's button does).
+                val view = Intent(context, SimpleActivity::class.java)
+                    .putExtra(EXTRA_PROVIDER_GROUP, facts.groupId)
+                    .putExtra(EXTRA_PROVIDER_URL, url)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 // Renewing or topping up for the end and the traffic; the account frees a device of the limit.
                 val label = when {
                     facts.webUrl.isEmpty() -> context.getString(R.string.simple_notice_support)
