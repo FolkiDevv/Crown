@@ -83,6 +83,38 @@ class ClashYamlExpansionTest {
         }
     }
 
+    /** Six levels of five aliases of [leaf] (31 collection aliases): 5^6 uses of it once every alias is copied out. */
+    private fun fanOut(leaf: String): String = buildString {
+        append("b0: &b0 [$leaf]\n")
+        for (i in 1..6) append("b$i: &b$i [${List(5) { "*b${i - 1}" }.joinToString(",")}]\n")
+        append("proxies: [{name: n, x: *b6}]\n")
+    }
+
+    /** A set and a number key print anew at each use: their text counts, not just one value. */
+    @Test
+    fun sharedTextCountsItsLength() {
+        val set = "s: &s !!set {${(0 until 2000).joinToString(", ") { "k$it" }}}\n"
+        var error = timed("shared set", set + fanOut("*s"))
+        assertTrue(error.message, error.message!!.contains("expands too much"))
+        // An explicit key: a plain one is limited to 1024 characters.
+        val key = "m: &m {? ${"9".repeat(5000)} : 1}\n"
+        error = timed("shared number key", key + fanOut("*m"))
+        assertTrue(error.message, error.message!!.contains("expands too much"))
+    }
+
+    /** snakeyaml removes a merge key before it follows it, so a mapping that merges itself ends. */
+    @Test
+    fun selfMergeEnds() {
+        for (text in listOf("a: &a {<<: *a, name: x}\nproxies: [*a]\n", "&r {<<: *r, proxies: [{name: y}]}\n")) {
+            val outcome = try {
+                "${ClashYaml.document(text).proxies?.size} proxies"
+            } catch (e: YAMLException) {
+                "YAMLException: ${e.message}"
+            }
+            println("self merge: $outcome")
+        }
+    }
+
     /** An alias inside its own anchor makes an endless value: rejected instead of overflowing the stack. */
     @Test
     fun aliasInsideItsOwnAnchorIsRejected() {

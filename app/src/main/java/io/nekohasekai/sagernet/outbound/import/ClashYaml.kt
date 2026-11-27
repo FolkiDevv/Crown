@@ -125,18 +125,29 @@ object ClashYaml {
 
         private fun convert(value: Any?): Any {
             val collection = value is Map<*, *> || value is List<*>
-            left -= if (collection) COLLECTION_COST else 1L
-            if (left < 0) throw YAMLException("The document expands too much through YAML aliases")
+            spend(if (collection) COLLECTION_COST else 1L)
             if (collection && !open.add(value)) throw YAMLException("The document contains itself through YAML aliases")
             val converted = when (value) {
                 null -> JsonNull
-                is Map<*, *> -> JsonObject().also { obj -> for ((k, v) in value) obj[k.toString()] = convert(v) }
+                is Map<*, *> -> JsonObject().also { obj -> for ((k, v) in value) obj[text(k)] = convert(v) }
                 is List<*> -> JsonArray().also { arr -> for (v in value) arr.add(convert(v)) }
                 is String, is Boolean, is Long, is Int, is Short, is Byte, is Double, is Float, is BigInteger, is BigDecimal -> value
-                else -> value.toString()
+                else -> text(value)
             }
             if (collection) open.remove(value)
             return converted
+        }
+
+        /** Text other than a String is made anew at each use of a shared value (a set, a long number key): it costs its length. */
+        private fun text(value: Any?): String {
+            val text = value.toString()
+            if (value !is String) spend(text.length.toLong())
+            return text
+        }
+
+        private fun spend(cost: Long) {
+            left -= cost
+            if (left < 0) throw YAMLException("The document expands too much through YAML aliases")
         }
 
         private companion object {
