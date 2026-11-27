@@ -190,8 +190,11 @@ object ClashYaml {
         private var left = (textLength.toLong() * VALUES_PER_CHAR).coerceIn(MIN_VALUES, MAX_VALUES)
         private val open = Collections.newSetFromMap(IdentityHashMap<Any?, Boolean>())
 
-        /** The collections being converted: a value nests deeper through aliases than its text does. */
-        private var level = 0
+        /**
+         * The collections around the value being converted, the root mapping and `proxies` around every entry: through
+         * aliases a value nests deeper than its text does.
+         */
+        private var level = 2
 
         /** Each entry is released once converted, so the maps and their JsonObjects are never all alive together. */
         fun entries(entries: List<*>): List<JsonObject> {
@@ -276,6 +279,8 @@ object ClashYaml {
             if (root.value.any { it.keyNode.isTwoStepsConstruction }) return rootDocument(constructNode(root), expansion)
             var proxies: Any? = null
             var proxyProviders = false
+            // Each value is constructed on its own, inside the root mapping: it counts as the Composer counts it.
+            level = 1
             for (tuple in root.value) {
                 val key = constructNode(tuple.keyNode)
                 val value = constructNode(tuple.valueNode)

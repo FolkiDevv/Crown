@@ -40,6 +40,7 @@ TOUCH_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionRefresh.kt": "9: SimpleHooks.onSubscriptionFetched/onSubscriptionRefreshed",
     "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ClashYaml.kt": "11: limit on the values YAML aliases expand to, no collection keys or self-containing aliases; 13: nesting limit",
     "app/src/main/java/io/nekohasekai/sagernet/outbound/json/JsonInput.kt": "13: nesting limit of the JSON read",
+    "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ProfileImport.kt": "13: the import report names the nesting limit",
     "app/src/main/java/io/nekohasekai/sagernet/ui/profiles/ProfileImports.kt": "13: the zip import catches StackOverflowError",
 }
 

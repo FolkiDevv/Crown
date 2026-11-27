@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.outbound.import
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.ui.json.engine.JsonTree
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -80,6 +81,20 @@ class DeepNestingTest {
         // A NUL is what org.json's nextClean returns at the end: it must not let the next bracket through.
         assertNull(JsonInput.parseValue("[".repeat(96) + "\u0000" + brackets(5_000) + "]".repeat(96)))
         assertNull(JsonInput.parseValue("[".repeat(96) + "\u0000[".repeat(5_000) + "]".repeat(5_096)))
+    }
+
+    /**
+     * The import reports the reason through JsonTree, the JSON editor's parser, which reads one level more: at 97 the
+     * import names the depth itself, at the bracket that opens the 97th collection.
+     */
+    @Test
+    fun depthReasonWhereJsonTreeAcceptsTheText() {
+        assertTrue(JsonTree.parse(brackets(97, "1")).ok)
+        assertEquals(96, JsonInput.tooDeepOffset(brackets(97, "1")))
+        assertEquals(5 * 96, JsonInput.tooDeepOffset("{\"a\":".repeat(97) + "1" + "}".repeat(97)))
+        assertEquals(-1, JsonInput.tooDeepOffset(brackets(96, "1")))
+        // Brackets inside strings, escaped quotes too, are not collections.
+        assertEquals(-1, JsonInput.tooDeepOffset("[\"" + "[".repeat(200) + "\\\"" + "{".repeat(200) + "\"]"))
     }
 
     @Test
@@ -190,6 +205,38 @@ class DeepNestingTest {
             } catch (e: YAMLException) {
                 assertTooDeep(e)
             }
+        }
+    }
+
+    /**
+     * Through an alias the limit counts as the Composer does, the root mapping included: `proxies`, the entry and 93
+     * lists of an anchor at the root make 96 levels; 94 lists make 97 and fail.
+     */
+    @Test
+    fun aliasedDepthLimit() = onAppStack {
+        fun doc(lists: Int) = "base: &b ${brackets(lists, "1")}\nproxies: [{name: n, type: ss, x: *b}]\n"
+        assertEquals(1, ClashYaml.document(doc(93)).proxies!!.size)
+        try {
+            ClashYaml.document(doc(94))
+            fail("97 levels through an alias were accepted")
+        } catch (e: YAMLException) {
+            assertTooDeep(e)
+        }
+    }
+
+    /**
+     * An anchor in the entry is constructed once and reused: only the conversion sees the alias nest it one level
+     * deeper. `[*a]` around 93 lists inside the entry makes 97 levels and fails; `*a` alone makes 96.
+     */
+    @Test
+    fun convertedDepthLimit() = onAppStack {
+        fun doc(alias: String) = "proxies:\n  - name: n\n    type: ss\n    a: &a ${brackets(93, "1")}\n    b: $alias\n"
+        assertEquals(1, ClashYaml.document(doc("*a")).proxies!!.size)
+        try {
+            ClashYaml.document(doc("[*a]"))
+            fail("97 levels through an alias were accepted")
+        } catch (e: YAMLException) {
+            assertTooDeep(e)
         }
     }
 

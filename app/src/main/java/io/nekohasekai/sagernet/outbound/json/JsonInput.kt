@@ -14,6 +14,35 @@ object JsonInput {
     /** Collections nested deeper are refused, as in the JSON editor (JsonTree): org.json reads them by recursion. */
     const val MAX_DEPTH = 96
 
+    /** The reason, worded as JsonTree words its own depth limit. */
+    const val TOO_DEEP = "The document is nested too deeply"
+
+    /**
+     * The offset of the bracket that opens a collection past [MAX_DEPTH] in strict JSON [text] (one JsonTree accepts),
+     * or -1. JsonTree allows one level more, so for such a text it is the only reason the parse above refused it.
+     */
+    @JvmStatic
+    fun tooDeepOffset(text: String): Int {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (i in text.indices) {
+            val c = text[i]
+            when {
+                inString -> when {
+                    escaped -> escaped = false
+                    c == '\\' -> escaped = true
+                    c == '"' -> inString = false
+                }
+
+                c == '"' -> inString = true
+                c == '{' || c == '[' -> if (++depth > MAX_DEPTH) return i
+                c == '}' || c == ']' -> depth--
+            }
+        }
+        return -1
+    }
+
     /** QString2QJsonObject (Utils.cpp:100-104): an empty object on any failure or when the text is not an object. */
     @JvmStatic
     fun parseObject(text: String): JsonObject = parseObjectOrNull(text) ?: JsonObject()
@@ -71,7 +100,7 @@ object JsonInput {
                 // Inside the deepest collection allowed a scalar may follow, another collection may not. A NUL here
                 // (the end, or a NUL character org.json would read past) is no value either.
                 val c = nextClean()
-                if (c == '{' || c == '[' || c == '\u0000') throw JSONException("The document is nested too deeply")
+                if (c == '{' || c == '[' || c == '\u0000') throw JSONException(TOO_DEEP)
                 back()
             }
             level++

@@ -194,12 +194,17 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     // The exact text, not the fingerprint, which drops what follows a '#'.
                     val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
-                    if (prefs.getString(KEY_PASSED, null) == digest) return@withContext null
-                    // Written before the read: a text whose read takes the process down is not read again on every start.
-                    prefs.edit().putString(KEY_PASSED, digest).commit()
+                    synchronized(passedLock) {
+                        if (prefs.getString(KEY_PASSED, null) == digest) return@withContext null
+                        // Written before the read: a text whose read takes the process down is not read again on every start.
+                        prefs.edit().putString(KEY_PASSED, digest).commit()
+                    }
                     val plan = SimpleImport.plan(text)
                     if (plan !is SimpleImport.Plan.Subscription && plan !is SimpleImport.Plan.Servers) return@withContext null
-                    prefs.edit().remove(KEY_PASSED).apply()
+                    // Only this check's mark: another check of a newer clip may have written its own meanwhile.
+                    synchronized(passedLock) {
+                        if (prefs.getString(KEY_PASSED, null) == digest) prefs.edit().remove(KEY_PASSED).commit()
+                    }
                     val fingerprint = ImportText.fingerprint(text)
                     if (prefs.getString(KEY_DECLINED, null) == fingerprint) return@withContext null
                     if (SimpleImport.isAdded(plan)) return@withContext null
@@ -354,6 +359,9 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
 
         /** The SHA-256 of the clipboard text found to be nothing to add, or whose read did not finish (no text kept). */
         const val KEY_PASSED = "clipboard_passed"
+
+        /** [KEY_PASSED] is read and written under it: clipboard checks of this process, also of an earlier screen, overlap. */
+        val passedLock = Any()
 
         /** The ready settings of the first subscription were turned on (UI process only, design.md D3). */
         const val KEY_FIRST_SUBSCRIPTION = "first_subscription_setup"
