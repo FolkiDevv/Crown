@@ -249,6 +249,9 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissDialog() = mutableState.update { it.copy(dialog = null) }
 
+    /** A file another app sent without the right to read it (SimpleUi.redirect could not hand it over). */
+    fun fileUnreadable(name: String) = show(AddDialog.FileUnreadable(name, tooLarge = false))
+
     // ------------------------------------------------------------------------------------------------ import
 
     private suspend fun perform(plan: SimpleImport.Plan, fromClipboard: Boolean) {

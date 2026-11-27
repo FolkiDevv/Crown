@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.service.quicksettings.TileService
+import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.settings.ClassicVisit
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.utils.PlatformNotifications
@@ -55,6 +57,12 @@ object SimpleUi {
      * its own question, never the import of servers (the link may have come from another app).
      */
     const val EXTRA_ROUTE_LINK = "io.nekohasekai.sagernet.simple.ROUTE_LINK"
+
+    /**
+     * A file another app sent without the right to read it ([redirect]): the simple UI says it cannot be read. The
+     * value is the file's name.
+     */
+    const val EXTRA_UNREADABLE_FILE = "io.nekohasekai.sagernet.simple.UNREADABLE_FILE"
 
     /** Extras that carry something to import; with the intent's data they make it an import. */
     private val IMPORT_EXTRAS = setOf(
@@ -158,7 +166,16 @@ object SimpleUi {
             ClassicVisit.attach(activity, intent)
             return false
         }
-        activity.startActivity(simpleIntent(activity, intent))
+        try {
+            activity.startActivity(simpleIntent(activity, intent))
+        } catch (e: SecurityException) {
+            // Another app sent a file without the right to read it: the hand-over cannot pass the read grant on. Nothing
+            // is imported, and the simple UI says the file cannot be read, as the classic import does.
+            Logs.w(e)
+            activity.startActivity(
+                markOwn(Intent(activity, SimpleActivity::class.java).putExtra(EXTRA_UNREADABLE_FILE, fileName(intent)))
+            )
+        }
         activity.finish()
         noTransition(activity)
         return true
@@ -200,6 +217,13 @@ object SimpleUi {
             intent.addFlags(source.flags and URI_GRANTS)
         }
         return intent
+    }
+
+    /** The name of the file an intent names (its data or stream), without reading it. */
+    @Suppress("DEPRECATION")
+    private fun fileName(intent: Intent?): String {
+        val uri = intent?.data ?: runCatching { intent?.getParcelableExtra<Uri>(Intent.EXTRA_STREAM) }.getOrNull()
+        return uri?.let { it.lastPathSegment ?: it.toString() }.orEmpty()
     }
 
     private const val URI_GRANTS = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION

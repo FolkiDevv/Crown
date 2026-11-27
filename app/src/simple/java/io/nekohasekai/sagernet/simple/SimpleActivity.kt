@@ -454,6 +454,10 @@ class SimpleActivity : AppCompatActivity() {
     private fun handleImportIntent(intent: Intent?) {
         intent ?: return
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        intent.getStringExtra(SimpleUi.EXTRA_UNREADABLE_FILE)?.let {
+            if (SimpleUi.isOwn(intent)) add.fileUnreadable(it)
+            return
+        }
         intent.getStringArrayListExtra(MainActivity.EXTRA_IMPORT_TEXTS)?.let {
             if (SimpleUi.isOwn(intent)) add.importTexts(it)
             return
