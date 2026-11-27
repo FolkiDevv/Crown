@@ -63,11 +63,17 @@ object JsonInput {
 
     /** JSONTokener with [MAX_DEPTH]: a nested value fails before the recursion can exhaust the thread's stack. */
     private class DepthTokener(text: String) : JSONTokener(text) {
+        /** The collections around the next value. */
         private var level = 0
 
         override fun nextValue(): Any? {
-            // A scalar inside the deepest collection allowed is one level further.
-            if (++level > MAX_DEPTH + 1) throw JSONException("The document is nested too deeply")
+            if (level == MAX_DEPTH) {
+                // Inside the deepest collection allowed a scalar may follow, another collection may not.
+                val c = nextClean()
+                if (c == '{' || c == '[') throw JSONException("The document is nested too deeply")
+                if (c != '\u0000') back()
+            }
+            level++
             try {
                 return super.nextValue()
             } finally {
