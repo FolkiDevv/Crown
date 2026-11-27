@@ -120,7 +120,6 @@ import io.nekohasekai.sagernet.simple.servers.ServersEvent
 import io.nekohasekai.sagernet.simple.servers.ServersScreen
 import io.nekohasekai.sagernet.simple.servers.ServersViewModel
 import io.nekohasekai.sagernet.simple.settings.SettingsActions
-import io.nekohasekai.sagernet.simple.settings.ClassicHintCard
 import io.nekohasekai.sagernet.simple.settings.ClassicScreen
 import io.nekohasekai.sagernet.simple.settings.ClassicVisit
 import io.nekohasekai.sagernet.simple.settings.SettingsScreen
@@ -154,8 +153,8 @@ import kotlinx.coroutines.withContext
  * Batch 2: the home section (connect button with its status, server and mode cards, problem banner).
  * Batch 4: adding servers (clipboard, QR, link, file; links, files and shares opened from other apps) and the
  * clipboard offer when the interface opens.
- * Batch 10: the whole settings section with the advanced mode (classic screens through [ClassicVisit]) and the
- * once-only hint after an upgrade on the way back to the classic interface.
+ * Batch 10: the whole settings section with the advanced mode (classic screens through [ClassicVisit]); the switch to
+ * the classic interface sits in the advanced mode behind a warning and is not remembered.
  * Batch 7: «Починка» (RepairScreen) over the sections, from the settings' top button and the home banner.
  * Batch 11: home and «Серверы» side by side (ListDetailPaneScaffold) on a wide window that is not low, and the D-pad
  * (Android TV): a focus ring on every control and the focus on the main control of a screen as it opens (Focus.kt).
@@ -936,8 +935,6 @@ fun SimpleApp(
                 HomeSection(
                     home,
                     modes,
-                    settings,
-                    openSettings = { section = SimpleSection.SETTINGS },
                     HomeActions(
                         requestStart = requestStart,
                         openServers = { section = SimpleSection.SERVERS },
@@ -1031,8 +1028,6 @@ private fun Notice.resolve(context: Context): String =
 private fun HomeSection(
     home: HomeViewModel,
     modes: ModesViewModel,
-    settings: SettingsViewModel,
-    openSettings: () -> Unit,
     actions: HomeActions,
     snackbar: SnackbarHostState,
     /** A remote starts on the connect button as the section opens. */
@@ -1045,7 +1040,6 @@ private fun HomeSection(
     val state by home.state.collectAsStateWithLifecycle()
     val noticesState by notices.state.collectAsStateWithLifecycle()
     val modesState by modes.state.collectAsStateWithLifecycle()
-    val settingsState by settings.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(home) {
         home.messages.collect { snackbar.showSnackbar(context.getString(it)) }
@@ -1063,24 +1057,6 @@ private fun HomeSection(
                 state = state,
                 modeCard = modesState.card,
                 actions = actions,
-                // After an upgrade, once: the classic interface is in the settings (simple-ui "Подсказка после обновления").
-                // Shown in the scrolling content, so on a low window it does not take the room of the button.
-                hint = if (settingsState.classicHint) {
-                    { hintModifier ->
-                        ClassicHintCard(
-                            onOpenSettings = {
-                                settings.closeClassicHint()
-                                openSettings()
-                            },
-                            onClose = settings::closeClassicHint,
-                            modifier = hintModifier,
-                        )
-                    }
-                } else {
-                    null
-                },
-                // Closing the hint takes its focused button away: a remote goes back to the connect button.
-                focusKey = settingsState.classicHint,
                 onToggle = { home.toggle(actions.requestStart) },
                 onDismissProblem = home::dismissProblem,
                 onLeaveWhitelists = { mode ->

@@ -5,7 +5,12 @@
     <string name="simple_nav_settings">Настройки</string>
     <string name="simple_servers_empty">Серверов пока нет.</string>
     <string name="simple_settings_classic">Классический интерфейс</string>
-    <string name="simple_settings_classic_summary">Все функции и настройки полного приложения. Вернуться можно из его меню.</string>
+    <string name="simple_settings_classic_summary">Только по указанию поддержки. При следующем запуске снова откроется новый интерфейс.</string>
+    <string name="simple_classic_warning_title">Открыть классический интерфейс?</string>
+    <string name="simple_classic_warning_text">Пользуйтесь классическим интерфейсом, только если об этом прямо попросила поддержка. Изменение настроек в нём может окончательно сломать новый интерфейс: подключение, режимы и серверы перестанут работать как надо.
+
+Выбор не запоминается: при следующем запуске откроется новый интерфейс.</string>
+    <string name="simple_classic_warning_open">Всё равно открыть</string>
     <string name="simple_switch_to_new">Новый интерфейс</string>
 
     <string name="simple_ok">ОК</string>
@@ -278,10 +283,6 @@
     <string name="simple_update_check_summary">Показывать уведомление, когда выходит новая версия</string>
     <string name="simple_update_beta">Предварительные версии</string>
     <string name="simple_update_beta_summary">Также предлагать тестовые версии при проверке обновлений</string>
-    <string name="simple_hint_classic_title">Это новый интерфейс Throne</string>
-    <string name="simple_hint_classic_text">Классический никуда не делся: «Настройки» › «Классический интерфейс».</string>
-    <string name="simple_hint_classic_open">Открыть настройки</string>
-    <string name="simple_hint_classic_close">Понятно</string>
     <string name="simple_server_whitelist">Сервер для белых списков</string>
     <string name="simple_server_working">Работают в этой сети: %1$d из %2$d</string>
     <string name="simple_wl_zone_title">Вы вне зоны белых списков</string>

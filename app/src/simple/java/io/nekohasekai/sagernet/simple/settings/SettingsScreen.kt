@@ -12,13 +12,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -68,6 +71,7 @@ class SettingsActions(
     val setBetaUpdates: (Boolean) -> Unit,
     /** A classic screen: the backup («Перенос на другое устройство») or a screen of the advanced mode. */
     val openClassicScreen: (ClassicScreen) -> Unit,
+    /** The whole classic interface (advanced mode, after [ClassicWarningDialog]); not remembered (see SimpleUi). */
     val openClassic: () -> Unit,
     /** «Починка» (batch 7). */
     val openRepair: () -> Unit,
@@ -78,8 +82,9 @@ class SettingsActions(
 /**
  * The settings section (simple-ui "Короткие настройки упрощённого интерфейса", "Расширенный режим"): the traffic mode,
  * «Приложения без VPN», auto connect at boot, automatic subscription updates, the theme, the move to another device
- * (the classic backup), the classic interface and the advanced mode with its links to the classic screens. Nothing
- * technical shows while the advanced mode is off.
+ * (the classic backup) and the advanced mode with its links to the classic screens and the classic interface. Nothing
+ * technical shows while the advanced mode is off; the classic interface opens only after a warning, since it is meant
+ * for a user support sends there.
  *
  * The first item of the list is the accent «Починка» button (simple-ui "Вход в «Починку» в настройках", batch 7).
  */
@@ -91,6 +96,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     var themeDialog by rememberSaveable { mutableStateOf(false) }
+    var classicDialog by rememberSaveable { mutableStateOf(false) }
     // A remote (D-pad) starts on «Починка»; asked here, not in the item, which appears again as it scrolls into view.
     val list = rememberLazyListState()
     val repairFocus = rememberFocusWhenShown(bringIntoComposition = { list.scrollToItem(0) })
@@ -128,13 +134,6 @@ fun SettingsScreen(
         }
         item { ClassicScreenItem(ClassicScreen.BACKUP, actions.openClassicScreen) }
         item {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.simple_settings_classic)) },
-                supportingContent = { Text(stringResource(R.string.simple_settings_classic_summary)) },
-                modifier = Modifier.clickable(onClick = actions.openClassic),
-            )
-        }
-        item {
             SwitchItem(
                 title = stringResource(R.string.simple_settings_advanced),
                 summary = stringResource(R.string.simple_settings_advanced_summary),
@@ -150,7 +149,24 @@ fun SettingsScreen(
             items(ClassicScreen.entries.filter { it.advanced }, key = { it.name }) { screen ->
                 ClassicScreenItem(screen, actions.openClassicScreen)
             }
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.simple_settings_classic)) },
+                    supportingContent = { Text(stringResource(R.string.simple_settings_classic_summary)) },
+                    modifier = Modifier.clickable { classicDialog = true },
+                )
+            }
         }
+    }
+
+    if (classicDialog) {
+        ClassicWarningDialog(
+            onOpen = {
+                classicDialog = false
+                actions.openClassic()
+            },
+            onDismiss = { classicDialog = false },
+        )
     }
 
     if (themeDialog) {
@@ -387,6 +403,35 @@ private fun ThemeDialog(current: NightMode, onSelect: (NightMode) -> Unit, onDis
     )
 }
 
+/**
+ * The warning before the classic interface: only on support's word, since its settings can break this interface
+ * for good. Cancel has the focus, so a stray press of a remote does not open it.
+ */
+@Composable
+private fun ClassicWarningDialog(onOpen: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Filled.Warning, contentDescription = null) },
+        title = { Text(stringResource(R.string.simple_classic_warning_title)) },
+        text = {
+            Text(
+                stringResource(R.string.simple_classic_warning_text),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onOpen, modifier = Modifier.focusRing(FocusShapes.Pill)) {
+                Text(stringResource(R.string.simple_classic_warning_open))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.focusRing(FocusShapes.Pill).focusWhenShown()) {
+                Text(stringResource(R.string.simple_cancel))
+            }
+        },
+    )
+}
+
 /** «Только выбранные приложения» lost its last app, so «Авто» is on (traffic-modes "Пустой список выбранных приложений"). */
 @Composable
 private fun FallbackNotice(onDismiss: () -> Unit) {
@@ -417,49 +462,6 @@ private fun FallbackNotice(onDismiss: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onDismiss, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_ok)) }
-        }
-    }
-}
-
-/**
- * The once-only hint after an upgrade (simple-ui "Подсказка после обновления"): where the classic interface went.
- * Shown on the home section until closed with either button; the home section gives it the width of its cards.
- */
-@Composable
-fun ClassicHintCard(onOpenSettings: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        ),
-    ) {
-        Row(Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp)) {
-            Icon(Icons.Filled.Info, contentDescription = null, modifier = Modifier.padding(top = 2.dp))
-            Column(
-                Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp),
-            ) {
-                Text(stringResource(R.string.simple_hint_classic_title), style = MaterialTheme.typography.titleSmall)
-                Text(
-                    stringResource(R.string.simple_hint_classic_text),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-        }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(end = 8.dp, bottom = 4.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onOpenSettings, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_hint_classic_open)) }
-            TextButton(onClick = onClose, modifier = Modifier.focusRing(FocusShapes.Pill)) { Text(stringResource(R.string.simple_hint_classic_close)) }
         }
     }
 }
