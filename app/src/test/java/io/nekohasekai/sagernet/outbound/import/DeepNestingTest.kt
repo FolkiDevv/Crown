@@ -97,6 +97,11 @@ class DeepNestingTest {
         assertEquals(-1, JsonInput.tooDeepOffset(brackets(96, "1")))
         // Brackets inside strings, escaped quotes too, are not collections.
         assertEquals(-1, JsonInput.tooDeepOffset("[\"" + "[".repeat(200) + "\\\"" + "{".repeat(200) + "\"]"))
+        // Comments, which JsonTree skips, neither hide the depth nor add to it.
+        val commented = "/* \" */ // \"\n" + brackets(97)
+        assertTrue(JsonTree.parse(commented).ok)
+        assertEquals(commented.indexOf('[') + 96, JsonInput.tooDeepOffset(commented))
+        assertEquals(-1, JsonInput.tooDeepOffset("[ // " + "[".repeat(200) + "\n /* " + "{".repeat(200) + " */ 1]"))
     }
 
     @Test

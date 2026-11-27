@@ -18,16 +18,19 @@ object JsonInput {
     const val TOO_DEEP = "The document is nested too deeply"
 
     /**
-     * The offset of the bracket that opens a collection past [MAX_DEPTH] in strict JSON [text] (one JsonTree accepts),
-     * or -1. JsonTree allows one level more, so for such a text it is the only reason the parse above refused it.
+     * The offset of the bracket that opens a collection past [MAX_DEPTH] in a [text] JsonTree accepts (JSON with `//`
+     * and `/* */` comments), or -1. JsonTree allows one level more, so for such a text it is the only reason the parse
+     * above refused it.
      */
     @JvmStatic
     fun tooDeepOffset(text: String): Int {
         var depth = 0
         var inString = false
         var escaped = false
-        for (i in text.indices) {
+        var i = 0
+        while (i < text.length) {
             val c = text[i]
+            val next = if (i + 1 < text.length) text[i + 1] else ' '
             when {
                 inString -> when {
                     escaped -> escaped = false
@@ -35,10 +38,21 @@ object JsonInput {
                     c == '"' -> inString = false
                 }
 
+                c == '/' && next == '/' -> {
+                    i = text.indexOf('\n', i + 2).let { if (it < 0) text.length else it }
+                    continue
+                }
+
+                c == '/' && next == '*' -> {
+                    i = text.indexOf("*/", i + 2).let { if (it < 0) text.length else it + 2 }
+                    continue
+                }
+
                 c == '"' -> inString = true
                 c == '{' || c == '[' -> if (++depth > MAX_DEPTH) return i
                 c == '}' || c == ']' -> depth--
             }
+            i++
         }
         return -1
     }
