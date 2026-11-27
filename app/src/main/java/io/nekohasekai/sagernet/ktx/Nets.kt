@@ -354,4 +354,4 @@ fun isLoopbackPortFree(port: Int): Boolean = try {
 }
 
 // Crown: its own name with the Throne version (subscription servers may pick a format by it), not the fork version
-const val USER_AGENT = "Crown/Android/" + BuildConfig.UPSTREAM_VERSION_NAME
+const val USER_AGENT = "Crown/Android/" + BuildConfig.VERSION_NAME
