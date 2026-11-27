@@ -69,7 +69,8 @@ object ClashYaml {
     /**
      * snakeyaml 1.30 composes and constructs a collection by recursion without a limit (1.31 added one): a few kilobytes
      * of brackets exhaust the thread's stack. Its parser reads events without recursion, so the counts in the Composer,
-     * the constructor and [Expansion] stop a deep document before the recursion does.
+     * the constructor and [Expansion], and the merge chains measured by [rejectDeepMerges], stop a deep document before
+     * the recursion does.
      */
     private const val MAX_DEPTH = 96
 
@@ -112,6 +113,7 @@ object ClashYaml {
     private fun rejectCollectionKeys(root: Node) {
         val seen = Collections.newSetFromMap(IdentityHashMap<Node, Boolean>())
         val pending = ArrayList<Node>().apply { add(root) }
+        val merging = ArrayList<MappingNode>()
         while (pending.isNotEmpty()) {
             val node = pending.removeAt(pending.size - 1)
             if (!seen.add(node)) continue
@@ -119,6 +121,60 @@ object ClashYaml {
             if (node is MappingNode) for (tuple in node.value) {
                 if (tuple.keyNode !is ScalarNode) throw YAMLException("A collection as a mapping key is not supported")
                 pending.add(tuple.valueNode)
+            }
+            if (node is MappingNode && node.value.any { it.keyNode.tag == Tag.MERGE }) merging.add(node)
+        }
+        rejectDeepMerges(merging)
+    }
+
+    /** The mappings that merge keys (`<<`) of [node] bring in, as SafeConstructor.mergeNode follows them. */
+    private fun mergeTargets(node: MappingNode): List<MappingNode> = node.value.filter { it.keyNode.tag == Tag.MERGE }
+        .flatMap { tuple ->
+            when (val value = tuple.valueNode) {
+                is MappingNode -> listOf(value)
+                is SequenceNode -> value.value.filterIsInstance<MappingNode>()
+                else -> emptyList()
+            }
+        }
+
+    /**
+     * SafeConstructor follows merge keys by a recursion of its own, through aliases too: a chain of anchors that merge
+     * the one before nests deeper than any of them is in the text. The longest chain is measured here without
+     * recursion, each mapping once; a mapping that merges itself, directly or through others, fails as a cycle.
+     */
+    private fun rejectDeepMerges(merging: List<MappingNode>) {
+        class Frame(val node: MappingNode) {
+            val targets = mergeTargets(node).iterator()
+            var longest = 0
+        }
+
+        val chains = IdentityHashMap<MappingNode, Int>()
+        val open = Collections.newSetFromMap(IdentityHashMap<MappingNode, Boolean>())
+        for (start in merging) {
+            if (start in chains) continue
+            val stack = ArrayList<Frame>().apply { add(Frame(start)) }
+            open.add(start)
+            while (stack.isNotEmpty()) {
+                val frame = stack[stack.size - 1]
+                if (frame.targets.hasNext()) {
+                    val next = frame.targets.next()
+                    if (next in open) throw YAMLException("The document contains itself through YAML aliases")
+                    val known = chains[next]
+                    if (known != null) {
+                        frame.longest = maxOf(frame.longest, known)
+                    } else {
+                        if (stack.size >= MAX_DEPTH) throw tooDeep()
+                        open.add(next)
+                        stack.add(Frame(next))
+                    }
+                    continue
+                }
+                val length = frame.longest + 1
+                if (length > MAX_DEPTH) throw tooDeep()
+                chains[frame.node] = length
+                open.remove(frame.node)
+                stack.removeAt(stack.size - 1)
+                if (stack.isNotEmpty()) stack[stack.size - 1].let { it.longest = maxOf(it.longest, length) }
             }
         }
     }
@@ -195,12 +251,13 @@ object ClashYaml {
 
     /** SafeConstructor over one node at a time, each as a document of its own. */
     private class NodeConstructor : SafeConstructor() {
-        /** The nodes being constructed: through aliases a value nests deeper than the composed text did. */
+        /** The collections being constructed: through aliases a value nests deeper than the composed text did. */
         private var level = 0
 
         fun constructNode(node: Node): Any? = constructDocument(node)
 
         override fun constructObject(node: Node): Any? {
+            if (node is ScalarNode) return super.constructObject(node)
             if (++level > MAX_DEPTH) throw tooDeep()
             try {
                 return super.constructObject(node)

@@ -77,6 +77,9 @@ class DeepNestingTest {
     fun lenientJsonCannotHideItsDepth() = onAppStack {
         assertNull(JsonInput.parseValue("[ /* \" */ " + brackets(5_000) + " /* \" */ ]"))
         assertNull(JsonInput.parseValue("['\"', " + brackets(5_000) + ", '\"']"))
+        // A NUL is what org.json's nextClean returns at the end: it must not let the next bracket through.
+        assertNull(JsonInput.parseValue("[".repeat(96) + "\u0000" + brackets(5_000) + "]".repeat(96)))
+        assertNull(JsonInput.parseValue("[".repeat(96) + "\u0000[".repeat(5_000) + "]".repeat(5_096)))
     }
 
     @Test
@@ -133,6 +136,40 @@ class DeepNestingTest {
             for (i in 2..48) append("    a$i: &a$i ${brackets(90, "*a${i - 1}")}\n")
         }
         assertTooDeep(clashRejected(text))
+    }
+
+    /**
+     * snakeyaml follows merge keys by a recursion of its own: 48 anchors, each 90 merges deep around the one before,
+     * make a chain of 4320 merges that none of the nesting counts sees.
+     */
+    @Test
+    fun mergeChainsCannotNestPastTheLimit() {
+        val text = buildString {
+            append("a1: &a1 {x: 1}\n")
+            for (i in 2..48) append("a$i: &a$i ${"{<<: ".repeat(90)}*a${i - 1}${"}".repeat(90)}\n")
+            append("proxies: [{name: n, type: ss}]\n<<: *a48\n")
+        }
+        assertTooDeep(clashRejected(text))
+    }
+
+    /** A mapping that merges itself, directly or through another, is refused like an alias inside its own anchor. */
+    @Test
+    fun mergeCyclesAreRejected() {
+        for (text in listOf("a: &a {<<: *a, name: x}\nproxies: [*a]\n", "&r {<<: *r, proxies: [{name: y}]}\n")) {
+            val error = clashRejected(text)
+            assertTrue(error.message, error.message!!.contains("contains itself"))
+        }
+    }
+
+    @Test
+    fun ordinaryMergesAreUnchanged() = onAppStack {
+        val text = "base: &base {type: ss, port: 1}\nmid: &mid {<<: *base, cipher: x}\n" +
+            "proxies:\n  - {<<: *mid, name: a}\n  - {<<: [*base, {udp: true}], name: b}\n"
+        val proxies = ClashYaml.document(text).proxies!!
+        assertEquals(listOf("a", "b"), proxies.map { it["name"] })
+        assertEquals("ss", proxies[0]["type"])
+        assertEquals("x", proxies[0]["cipher"])
+        assertEquals(true, proxies[1]["udp"])
     }
 
     /** Root, `proxies`, the entry and 93 lists make 96 levels; one more fails, with or without anchors. */

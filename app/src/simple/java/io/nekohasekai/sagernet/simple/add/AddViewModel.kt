@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 
 /** A text for the snackbar: a string, or a plural for [count]. */
 data class Notice(@StringRes val text: Int = 0, @PluralsRes val plural: Int = 0, val count: Int = 0)
@@ -191,13 +192,15 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
             if (imports.isLocked || mutableState.value.offer != null) return@launch
             val offer = withContext(Dispatchers.IO) {
                 try {
-                    val fingerprint = ImportText.fingerprint(text)
-                    if (prefs.getString(KEY_PASSED, null) == fingerprint) return@withContext null
+                    // The exact text, not the fingerprint, which drops what follows a '#'.
+                    val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+                    if (prefs.getString(KEY_PASSED, null) == digest) return@withContext null
                     // Written before the read: a text whose read takes the process down is not read again on every start.
-                    prefs.edit().putString(KEY_PASSED, fingerprint).commit()
+                    prefs.edit().putString(KEY_PASSED, digest).commit()
                     val plan = SimpleImport.plan(text)
                     if (plan !is SimpleImport.Plan.Subscription && plan !is SimpleImport.Plan.Servers) return@withContext null
                     prefs.edit().remove(KEY_PASSED).apply()
+                    val fingerprint = ImportText.fingerprint(text)
                     if (prefs.getString(KEY_DECLINED, null) == fingerprint) return@withContext null
                     if (SimpleImport.isAdded(plan)) return@withContext null
                     plan to fingerprint
@@ -349,7 +352,7 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
         /** The fingerprint of the clipboard content last turned down (ImportText.fingerprint, no text kept). */
         const val KEY_DECLINED = "clipboard_declined"
 
-        /** The fingerprint of the clipboard content found to be nothing to add, or whose read did not finish. */
+        /** The SHA-256 of the clipboard text found to be nothing to add, or whose read did not finish (no text kept). */
         const val KEY_PASSED = "clipboard_passed"
 
         /** The ready settings of the first subscription were turned on (UI process only, design.md D3). */

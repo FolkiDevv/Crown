@@ -67,11 +67,12 @@ object JsonInput {
         private var level = 0
 
         override fun nextValue(): Any? {
-            if (level == MAX_DEPTH) {
-                // Inside the deepest collection allowed a scalar may follow, another collection may not.
+            if (level >= MAX_DEPTH) {
+                // Inside the deepest collection allowed a scalar may follow, another collection may not. A NUL here
+                // (the end, or a NUL character org.json would read past) is no value either.
                 val c = nextClean()
-                if (c == '{' || c == '[') throw JSONException("The document is nested too deeply")
-                if (c != '\u0000') back()
+                if (c == '{' || c == '[' || c == '\u0000') throw JSONException("The document is nested too deeply")
+                back()
             }
             level++
             try {
