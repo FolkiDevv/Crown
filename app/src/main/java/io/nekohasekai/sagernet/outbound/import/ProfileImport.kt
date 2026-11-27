@@ -479,9 +479,12 @@ object ProfileImport {
 
         private fun reportJsonSyntax(text: String) {
             val result = JsonTree.parse(text)
-            if (result.ok) return
-            val lineColumn = JsonTree.lineColumn(text, result.errorSpan.offset)
-            val message = vtr(R.string.validation_import_json_syntax, result.error, lineColumn[0].toString(), lineColumn[1].toString())
+            // crown: JsonInput refuses the 97th nested collection, which JsonTree (the JSON editor's parser) still reads.
+            val deep = if (result.ok) JsonInput.tooDeepOffset(text) else -1
+            if (result.ok && deep < 0) return
+            val lineColumn = JsonTree.lineColumn(text, if (deep >= 0) deep else result.errorSpan.offset)
+            val error = if (deep >= 0) JsonInput.TOO_DEEP else result.error
+            val message = vtr(R.string.validation_import_json_syntax, error, lineColumn[0].toString(), lineColumn[1].toString())
             reportDocument("", listOf(parserError(message)))
         }
 

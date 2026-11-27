@@ -133,6 +133,10 @@ class ProfileImports(private val host: ConfigurationFragment) {
             } catch (e: Exception) {
                 Logs.w(e)
                 host.onUi { snackbar(e.readableMessage).show() }
+            } catch (e: StackOverflowError) {
+                // crown: a safety net behind the parsers' nesting limit; uncaught, it takes the UI process down.
+                Logs.w(e)
+                host.onUi { snackbar(R.string.validation_import_unparsed).show() }
             }
         }
     }

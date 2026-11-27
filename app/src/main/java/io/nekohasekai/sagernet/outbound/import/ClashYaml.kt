@@ -46,7 +46,8 @@ object ClashYaml {
      * A plain mapping is read one top-level value, and one sequence item, at a time; a document with anchors, explicit
      * tags, a top-level merge key or another root is composed whole, and its root's values constructed one at a time.
      * Both give what Yaml(SafeConstructor()).load gives, except that an alias expansion past [Expansion]'s limit, an
-     * alias inside its own anchor and, in a document composed whole, a collection as a mapping key fail as YAML errors.
+     * alias inside its own anchor, collections nested more than [MAX_DEPTH] deep (in the text or through aliases) and,
+     * in a document composed whole, a collection as a mapping key fail as YAML errors.
      */
     @JvmStatic
     fun document(text: String): Document {
@@ -65,9 +66,19 @@ object ClashYaml {
         return s
     }
 
+    /**
+     * snakeyaml 1.30 composes and constructs a collection by recursion without a limit (1.31 added one): a few kilobytes
+     * of brackets exhaust the thread's stack. Its parser reads events without recursion, so the counts in the Composer,
+     * the constructor and [Expansion], and the merge chains measured by [rejectDeepMerges], stop a deep document before
+     * the recursion does.
+     */
+    private const val MAX_DEPTH = 96
+
+    private fun tooDeep() = YAMLException("The document is nested too deeply")
+
     /** Yaml(SafeConstructor()).load: the same Composer and LoaderOptions, so aliases and their limit are unchanged. */
     private fun loadWhole(text: String): Document {
-        val root = Composer(ParserImpl(StreamReader(text), false), Resolver(), LoaderOptions()).getSingleNode()
+        val root = DepthComposer(text).getSingleNode()
         root?.let(::rejectCollectionKeys)
         val constructor = NodeConstructor()
         val expansion = Expansion(text.length)
@@ -80,6 +91,21 @@ object ClashYaml {
         return Document((root["proxies"] as? List<*>)?.let(expansion::entries), true, root.containsKey("proxy-providers"))
     }
 
+    /** The Composer with [MAX_DEPTH]: each collection it composes is one level deeper. */
+    private class DepthComposer(text: String) : Composer(ParserImpl(StreamReader(text), false), Resolver(), LoaderOptions()) {
+        private var level = 0
+
+        override fun composeSequenceNode(anchor: String?): Node {
+            if (++level > MAX_DEPTH) throw tooDeep()
+            return super.composeSequenceNode(anchor).also { level-- }
+        }
+
+        override fun composeMappingNode(anchor: String?): Node {
+            if (++level > MAX_DEPTH) throw tooDeep()
+            return super.composeMappingNode(anchor).also { level-- }
+        }
+    }
+
     /**
      * A collection as a mapping key (a set's items are keys too) is hashed, and converted to its text, with its aliases
      * expanded, before any limit can apply. Clash documents key their mappings by scalars. Each node is visited once.
@@ -87,6 +113,7 @@ object ClashYaml {
     private fun rejectCollectionKeys(root: Node) {
         val seen = Collections.newSetFromMap(IdentityHashMap<Node, Boolean>())
         val pending = ArrayList<Node>().apply { add(root) }
+        val merging = ArrayList<MappingNode>()
         while (pending.isNotEmpty()) {
             val node = pending.removeAt(pending.size - 1)
             if (!seen.add(node)) continue
@@ -94,6 +121,60 @@ object ClashYaml {
             if (node is MappingNode) for (tuple in node.value) {
                 if (tuple.keyNode !is ScalarNode) throw YAMLException("A collection as a mapping key is not supported")
                 pending.add(tuple.valueNode)
+            }
+            if (node is MappingNode && node.value.any { it.keyNode.tag == Tag.MERGE }) merging.add(node)
+        }
+        rejectDeepMerges(merging)
+    }
+
+    /** The mappings that merge keys (`<<`) of [node] bring in, as SafeConstructor.mergeNode follows them. */
+    private fun mergeTargets(node: MappingNode): List<MappingNode> = node.value.filter { it.keyNode.tag == Tag.MERGE }
+        .flatMap { tuple ->
+            when (val value = tuple.valueNode) {
+                is MappingNode -> listOf(value)
+                is SequenceNode -> value.value.filterIsInstance<MappingNode>()
+                else -> emptyList()
+            }
+        }
+
+    /**
+     * SafeConstructor follows merge keys by a recursion of its own, through aliases too: a chain of anchors that merge
+     * the one before nests deeper than any of them is in the text. The longest chain is measured here without
+     * recursion, each mapping once; a mapping that merges itself, directly or through others, fails as a cycle.
+     */
+    private fun rejectDeepMerges(merging: List<MappingNode>) {
+        class Frame(val node: MappingNode) {
+            val targets = mergeTargets(node).iterator()
+            var longest = 0
+        }
+
+        val chains = IdentityHashMap<MappingNode, Int>()
+        val open = Collections.newSetFromMap(IdentityHashMap<MappingNode, Boolean>())
+        for (start in merging) {
+            if (start in chains) continue
+            val stack = ArrayList<Frame>().apply { add(Frame(start)) }
+            open.add(start)
+            while (stack.isNotEmpty()) {
+                val frame = stack[stack.size - 1]
+                if (frame.targets.hasNext()) {
+                    val next = frame.targets.next()
+                    if (next in open) throw YAMLException("The document contains itself through YAML aliases")
+                    val known = chains[next]
+                    if (known != null) {
+                        frame.longest = maxOf(frame.longest, known)
+                    } else {
+                        if (stack.size >= MAX_DEPTH) throw tooDeep()
+                        open.add(next)
+                        stack.add(Frame(next))
+                    }
+                    continue
+                }
+                val length = frame.longest + 1
+                if (length > MAX_DEPTH) throw tooDeep()
+                chains[frame.node] = length
+                open.remove(frame.node)
+                stack.removeAt(stack.size - 1)
+                if (stack.isNotEmpty()) stack[stack.size - 1].let { it.longest = maxOf(it.longest, length) }
             }
         }
     }
@@ -108,6 +189,12 @@ object ClashYaml {
     private class Expansion(textLength: Int) {
         private var left = (textLength.toLong() * VALUES_PER_CHAR).coerceIn(MIN_VALUES, MAX_VALUES)
         private val open = Collections.newSetFromMap(IdentityHashMap<Any?, Boolean>())
+
+        /**
+         * The collections around the value being converted, the root mapping and `proxies` around every entry: through
+         * aliases a value nests deeper than its text does.
+         */
+        private var level = 2
 
         /** Each entry is released once converted, so the maps and their JsonObjects are never all alive together. */
         fun entries(entries: List<*>): List<JsonObject> {
@@ -127,6 +214,7 @@ object ClashYaml {
             val collection = value is Map<*, *> || value is List<*>
             spend(if (collection) COLLECTION_COST else 1L)
             if (collection && !open.add(value)) throw YAMLException("The document contains itself through YAML aliases")
+            if (collection && ++level > MAX_DEPTH) throw tooDeep()
             val converted = when (value) {
                 null -> JsonNull
                 is Map<*, *> -> JsonObject().also { obj -> for ((k, v) in value) obj[text(k)] = convert(v) }
@@ -134,7 +222,10 @@ object ClashYaml {
                 is String, is Boolean, is Long, is Int, is Short, is Byte, is Double, is Float, is BigInteger, is BigDecimal -> value
                 else -> text(value)
             }
-            if (collection) open.remove(value)
+            if (collection) {
+                open.remove(value)
+                level--
+            }
             return converted
         }
 
@@ -163,7 +254,20 @@ object ClashYaml {
 
     /** SafeConstructor over one node at a time, each as a document of its own. */
     private class NodeConstructor : SafeConstructor() {
+        /** The collections being constructed: through aliases a value nests deeper than the composed text did. */
+        private var level = 0
+
         fun constructNode(node: Node): Any? = constructDocument(node)
+
+        override fun constructObject(node: Node): Any? {
+            if (node is ScalarNode) return super.constructObject(node)
+            if (++level > MAX_DEPTH) throw tooDeep()
+            try {
+                return super.constructObject(node)
+            } finally {
+                level--
+            }
+        }
 
         /**
          * constructMapping2ndStep for a plain root, each value constructed as a document of its own and dropped unless
@@ -175,6 +279,8 @@ object ClashYaml {
             if (root.value.any { it.keyNode.isTwoStepsConstruction }) return rootDocument(constructNode(root), expansion)
             var proxies: Any? = null
             var proxyProviders = false
+            // Each value is constructed on its own, inside the root mapping: it counts as the Composer counts it.
+            level = 1
             for (tuple in root.value) {
                 val key = constructNode(tuple.keyNode)
                 val value = constructNode(tuple.valueNode)
@@ -200,6 +306,9 @@ object ClashYaml {
         private val parser = ParserImpl(StreamReader(text), false)
         private val resolver = Resolver()
         private val constructor = NodeConstructor()
+
+        /** The collections open around the next node, the root mapping first ([MAX_DEPTH], as the whole path counts them). */
+        private var level = 1
 
         fun read(): Document {
             parser.getEvent()
@@ -250,6 +359,7 @@ object ClashYaml {
                 }
             }
             parser.getEvent()
+            level++
             val items = if (keep) ArrayList<JsonObject>() else null
             var failure: RuntimeException? = null
             while (!parser.checkEvent(Event.ID.SequenceEnd)) {
@@ -264,6 +374,7 @@ object ClashYaml {
                 items?.add(expansion.entry(item))
             }
             parser.getEvent()
+            level--
             return Value(failure, items)
         }
 
@@ -284,16 +395,19 @@ object ClashYaml {
 
             is SequenceStartEvent -> {
                 if (event.tag != null) throw Unsupported()
+                if (++level > MAX_DEPTH) throw tooDeep()
                 val children = ArrayList<Node>()
                 val tag = resolver.resolve(NodeId.sequence, null, event.implicit)
                 val node = SequenceNode(tag, true, children, event.startMark, null, event.flowStyle)
                 while (!parser.checkEvent(Event.ID.SequenceEnd)) children.add(compose())
                 node.setEndMark(parser.getEvent().endMark)
+                level--
                 node
             }
 
             is MappingStartEvent -> {
                 if (event.tag != null) throw Unsupported()
+                if (++level > MAX_DEPTH) throw tooDeep()
                 val children = ArrayList<NodeTuple>()
                 val tag = resolver.resolve(NodeId.mapping, null, event.implicit)
                 val node = MappingNode(tag, true, children, event.startMark, null, event.flowStyle)
@@ -303,6 +417,7 @@ object ClashYaml {
                     children.add(NodeTuple(key, compose()))
                 }
                 node.setEndMark(parser.getEvent().endMark)
+                level--
                 node
             }
 

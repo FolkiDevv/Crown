@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 
 /** A text for the snackbar: a string, or a plural for [count]. */
 data class Notice(@StringRes val text: Int = 0, @PluralsRes val plural: Int = 0, val count: Int = 0)
@@ -191,8 +192,19 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
             if (imports.isLocked || mutableState.value.offer != null) return@launch
             val offer = withContext(Dispatchers.IO) {
                 try {
+                    // The exact text, not the fingerprint, which drops what follows a '#'.
+                    val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+                    synchronized(passedLock) {
+                        if (prefs.getString(KEY_PASSED, null) == digest) return@withContext null
+                        // Written before the read: a text whose read takes the process down is not read again on every start.
+                        prefs.edit().putString(KEY_PASSED, digest).commit()
+                    }
                     val plan = SimpleImport.plan(text)
                     if (plan !is SimpleImport.Plan.Subscription && plan !is SimpleImport.Plan.Servers) return@withContext null
+                    // Only this check's mark: another check of a newer clip may have written its own meanwhile.
+                    synchronized(passedLock) {
+                        if (prefs.getString(KEY_PASSED, null) == digest) prefs.edit().remove(KEY_PASSED).commit()
+                    }
                     val fingerprint = ImportText.fingerprint(text)
                     if (prefs.getString(KEY_DECLINED, null) == fingerprint) return@withContext null
                     if (SimpleImport.isAdded(plan)) return@withContext null
@@ -344,6 +356,12 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         /** The fingerprint of the clipboard content last turned down (ImportText.fingerprint, no text kept). */
         const val KEY_DECLINED = "clipboard_declined"
+
+        /** The SHA-256 of the clipboard text found to be nothing to add, or whose read did not finish (no text kept). */
+        const val KEY_PASSED = "clipboard_passed"
+
+        /** [KEY_PASSED] is read and written under it: clipboard checks of this process, also of an earlier screen, overlap. */
+        val passedLock = Any()
 
         /** The ready settings of the first subscription were turned on (UI process only, design.md D3). */
         const val KEY_FIRST_SUBSCRIPTION = "first_subscription_setup"
