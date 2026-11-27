@@ -32,7 +32,7 @@ The app SHALL fetch a subscription URL and replace the group's profiles with the
 - **THEN** existing profiles are kept unchanged and an error is shown
 
 #### Scenario: Subscription document that expands through YAML aliases
-- **WHEN** the fetched document is Clash YAML whose aliases would expand into far more values than its text holds (a limit that grows with the text up to a fixed ceiling), whose alias sits inside its own anchor, which aliases collections more than 30 times, or which uses a collection as a mapping key
+- **WHEN** the fetched document is Clash YAML whose aliases would expand into far more values than its text holds (a limit that grows with the text up to a fixed ceiling), whose alias sits inside its own anchor, or which uses a collection as a mapping key
 - **THEN** the parse MUST stop without converting the expansion, so the VPN process's memory does not grow noticeably; the document is reported as an unreadable Clash configuration in the import report, existing profiles are kept unchanged, and the same document imported from the clipboard, a file or a share in either interface is reported the same way instead of crashing the app
 
 ### Requirement: Import and share

@@ -38,7 +38,7 @@ TOUCH_POINTS: dict[str, str] = {
     "app/src/main/java/moe/matsuri/nb4a/NativeInterface.kt": "8: network listener keyed by the gomobile refnum (leak fix)",
     "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionFetch.kt": "9: device limit headers of a subscription answer",
     "app/src/main/java/io/nekohasekai/sagernet/group/SubscriptionRefresh.kt": "9: SimpleHooks.onSubscriptionFetched/onSubscriptionRefreshed",
-    "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ClashYaml.kt": "10: limit on the values YAML aliases expand to, fewer collection aliases",
+    "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ClashYaml.kt": "10: limit on the values YAML aliases expand to, no collection keys or self-containing aliases",
 }
 
 # openspec/specs/repository-governance, requirement "Идентичность форка Crown". Keep both in sync.

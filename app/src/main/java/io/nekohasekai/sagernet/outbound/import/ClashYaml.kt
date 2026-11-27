@@ -46,8 +46,7 @@ object ClashYaml {
      * A plain mapping is read one top-level value, and one sequence item, at a time; a document with anchors, explicit
      * tags, a top-level merge key or another root is composed whole, and its root's values constructed one at a time.
      * Both give what Yaml(SafeConstructor()).load gives, except that an alias expansion past [Expansion]'s limit, an
-     * alias inside its own anchor, more than [MAX_COLLECTION_ALIASES] aliases of collections and, in a document composed
-     * whole, a collection as a mapping key fail as YAML errors.
+     * alias inside its own anchor and, in a document composed whole, a collection as a mapping key fail as YAML errors.
      */
     @JvmStatic
     fun document(text: String): Document {
@@ -59,9 +58,6 @@ object ClashYaml {
         }
     }
 
-    /** snakeyaml's default is 50; Clash subscriptions rarely alias a collection at all. */
-    private const val MAX_COLLECTION_ALIASES = 30
-
     // sanitizeClashYaml (SubscriptionParser.cpp:242-247): NULs and a leading BOM confuse the YAML reader.
     private fun sanitize(text: String): String {
         var s = text.replace("\u0000", "")
@@ -69,10 +65,9 @@ object ClashYaml {
         return s
     }
 
-    /** Yaml(SafeConstructor()).load: the same Composer, with fewer aliases of collections allowed. */
+    /** Yaml(SafeConstructor()).load: the same Composer and LoaderOptions, so aliases and their limit are unchanged. */
     private fun loadWhole(text: String): Document {
-        val options = LoaderOptions().apply { maxAliasesForCollections = MAX_COLLECTION_ALIASES }
-        val root = Composer(ParserImpl(StreamReader(text), false), Resolver(), options).getSingleNode()
+        val root = Composer(ParserImpl(StreamReader(text), false), Resolver(), LoaderOptions()).getSingleNode()
         root?.let(::rejectCollectionKeys)
         val constructor = NodeConstructor()
         val expansion = Expansion(text.length)

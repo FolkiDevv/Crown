@@ -54,7 +54,7 @@ class ClashYamlExpansionTest {
     @Test
     fun aliasBombIsRejectedQuickly() {
         val error = timed("alias bomb", bomb())
-        assertTrue(error.message, error.message!!.contains("aliases"))
+        assertTrue(error.message, error.message!!.contains("expands too much"))
     }
 
     @Test
@@ -92,20 +92,12 @@ class ClashYamlExpansionTest {
         }
     }
 
+    /**
+     * 3000 proxies sharing scalar anchors, merged defaults and shared ws-opts, 48 collection aliases in all (snakeyaml
+     * allows 50), import as Yaml(SafeConstructor()) loads them.
+     */
     @Test
-    fun collectionAliasesAreLimited() {
-        fun doc(aliases: Int) = buildString {
-            append("x-ws: &ws {path: /p}\nproxies:\n")
-            for (i in 0 until aliases) append("  - {name: p$i, type: vmess, server: s, port: 1, uuid: u, ws-opts: *ws}\n")
-        }
-        assertEquals(30, ClashYaml.document(doc(30)).proxies!!.size)
-        val error = rejected(doc(31))
-        assertTrue(error.message, error.message!!.contains("max=30"))
-    }
-
-    /** 3000 proxies sharing scalar anchors, merged defaults and shared ws-opts import as Yaml(SafeConstructor()) loads them. */
-    @Test
-    fun honestSubscriptionWithAnchorsIsUnchanged() {
+    fun honestSubscriptionWith48AliasesIsUnchanged() {
         val text = buildString {
             append("x-defaults: &defaults {udp: true, skip-cert-verify: false, tfo: false}\n")
             append("x-ws: &ws {path: /ray, headers: {Host: example.com}, max-early-data: 2048}\n")
@@ -113,8 +105,8 @@ class ClashYamlExpansionTest {
             append("proxies:\n")
             for (i in 0 until 3000) {
                 when {
-                    i < 10 -> append("  - {<<: *defaults, name: m$i, type: ss, server: s$i.example.com, port: ${1000 + i}, cipher: *cipher, password: p}\n")
-                    i < 30 -> append("  - {name: w$i, type: vmess, server: s$i.example.com, port: 443, uuid: u, alterId: 0, cipher: auto, network: ws, ws-opts: *ws}\n")
+                    i < 40 -> append("  - {<<: *defaults, name: m$i, type: ss, server: s$i.example.com, port: ${1000 + i}, cipher: *cipher, password: p}\n")
+                    i < 48 -> append("  - {name: w$i, type: vmess, server: s$i.example.com, port: 443, uuid: u, alterId: 0, cipher: auto, network: ws, ws-opts: *ws}\n")
                     else -> append("  - {name: n$i, type: ss, server: s$i.example.com, port: ${1000 + i}, cipher: *cipher, password: p, udp: true}\n")
                 }
             }
@@ -126,7 +118,7 @@ class ClashYamlExpansionTest {
         println("3000 proxies with anchors read in ${(System.nanoTime() - started) / 1_000_000} ms")
         assertEquals(3000, actual.size)
         assertEquals(expected, actual)
-        assertEquals("example.com", actual[10].obj("ws-opts").obj("headers").string("Host"))
+        assertEquals("example.com", actual[40].obj("ws-opts").obj("headers").string("Host"))
         assertTrue(actual[0].bool("udp"))
     }
 
