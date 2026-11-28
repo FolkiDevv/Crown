@@ -318,13 +318,27 @@
             android:name="io.nekohasekai.sagernet.ui.route.RouteTesterActivity"
             android:configChanges="uiMode"
             android:windowSoftInputMode="adjustResize" />
+        <!-- Crown (touch point 18): the shortcut executors are not exported. The system starts the app's own
+             shortcuts on its behalf (dynamic ones, pinned ones on Android 8+), the widget uses the app's PendingIntent;
+             the launcher's shortcut picker and the legacy pinned shortcuts of Android 7 go to ShortcutEntryActivity. -->
         <activity
             android:name=".QuickToggleShortcut"
             android:excludeFromRecents="true"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/quick_toggle"
             android:launchMode="singleTask"
             android:process=":bg"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- Crown (touch point 18): hands out the toggle shortcut, and on Android 7 asks before a legacy one toggles.
+             Not singleTask: it returns the shortcut to the launcher (startActivityForResult). Not in :bg: an intent
+             another app sends here cannot take the VPN process down. -->
+        <activity
+            android:name="io.nekohasekai.sagernet.simple.control.ShortcutEntryActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:icon="@drawable/ic_qu_shadowsocks_launcher"
+            android:label="@string/quick_toggle"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
@@ -334,7 +348,7 @@
         <activity
             android:name="io.nekohasekai.sagernet.ui.QuickEnableShortcut"
             android:excludeFromRecents="true"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/quick_enable"
             android:launchMode="singleTask"
             android:process=":bg"
@@ -343,7 +357,7 @@
         <activity
             android:name="io.nekohasekai.sagernet.ui.QuickDisableShortcut"
             android:excludeFromRecents="true"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/quick_disable"
             android:launchMode="singleTask"
             android:process=":bg"
@@ -467,6 +481,21 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Crown (touch point 18): «Allow other apps to control the VPN» (off by default). Exported without a
+             permission, since an automation app cannot hold one of this app's; the receiver does nothing while the
+             switch is off and only connects, disconnects or toggles, with an existing profile at most. -->
+        <receiver
+            android:name="io.nekohasekai.sagernet.simple.control.ExternalControlReceiver"
+            android:exported="true"
+            android:process=":bg"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="${applicationId}.action.CONNECT" />
+                <action android:name="${applicationId}.action.DISCONNECT" />
+                <action android:name="${applicationId}.action.TOGGLE" />
             </intent-filter>
         </receiver>
 

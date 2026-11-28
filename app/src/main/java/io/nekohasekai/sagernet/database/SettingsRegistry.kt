@@ -405,6 +405,8 @@ object SettingsRegistry {
         // Crown (touch point 12): whether this device's connection is to be restored.
         io.nekohasekai.sagernet.simple.ServiceRestore.KEY_WANTED, io.nekohasekai.sagernet.simple.ServiceRestore.KEY_RESTORES,
         io.nekohasekai.sagernet.simple.ServiceRestore.KEY_UNCONNECTED,
+        // Crown (touch point 18): a backup file never lets other apps control this device's VPN.
+        io.nekohasekai.sagernet.simple.control.ExternalControl.KEY_ALLOWED,
     )
 
     // ------------------------------------------------------------------------------------------------ lookup

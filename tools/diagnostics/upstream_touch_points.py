@@ -30,7 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TOUCH_POINTS: dict[str, str] = {
     "build.gradle.kts": "1: Compose compiler plugin declaration",
     "app/build.gradle.kts": "2: Compose plugin, buildFeatures.compose, dependencies, simple source dirs",
-    "app/src/main/AndroidManifest.xml": "3: SimpleActivity and WhitelistZoneReceiver declarations; crown: the crown:// link filter; 12: the restore watchdog service and check job; 15: ScannerActivity not singleTask (returns its result)",
+    "app/src/main/AndroidManifest.xml": "3: SimpleActivity and WhitelistZoneReceiver declarations; crown: the crown:// link filter; 12: the restore watchdog service and check job; 15: ScannerActivity not singleTask (returns its result); 18: the shortcut executors not exported, ShortcutEntryActivity and ExternalControlReceiver",
     "app/src/main/res/menu/main_drawer_menu.xml": "4: 'New interface' drawer item",
     "app/src/main/java/io/nekohasekai/sagernet/ui/MainActivity.kt": "5: SimpleUi.redirect in onCreate/onNewIntent and the drawer handler; crown: crown:// links opened from outside; 13: importProfile catches StackOverflowError; 15: imports from other apps confirmed, scanner texts only from the app itself, nothing imported again from Recents",
     "app/src/main/java/io/nekohasekai/sagernet/bg/BaseService.kt": "6: SimpleHooks service start/stop; 10: in-place restart builds the next core first and keeps the tunnel; 12: sticky service, restore after the process died",
@@ -42,15 +42,18 @@ TOUCH_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/bg/proto/BoxInstance.kt": "10: dashboard port held by the box a restart replaces",
     "app/src/main/java/io/nekohasekai/sagernet/bg/TunSpec.kt": "10: new file, what a restart compares before it reuses the tun",
     "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ClashYaml.kt": "11: limit on the values YAML aliases expand to, no collection keys or self-containing aliases; 13: nesting limit",
-    "app/src/main/java/io/nekohasekai/sagernet/BootReceiver.kt": "12: PackageReplacedReceiver restores a connection the user wanted",
+    "app/src/main/java/io/nekohasekai/sagernet/BootReceiver.kt": "12: PackageReplacedReceiver restores a connection the user wanted; 18: only the boot actions count as a boot",
     "app/src/main/java/io/nekohasekai/sagernet/bg/ServiceNotification.kt": "12: no notification post racing destroy() outlives it",
     "app/src/main/java/io/nekohasekai/sagernet/SagerNet.kt": "12: a new :bg reports a wanted connection no restart brought back; crown: displayed version with the Throne base",
-    "app/src/main/java/io/nekohasekai/sagernet/database/SettingsRegistry.kt": "12: restore keys are device-local; crown: pre-releases looked for by default on a preview build",
+    "app/src/main/java/io/nekohasekai/sagernet/database/SettingsRegistry.kt": "12: restore keys are device-local; crown: pre-releases looked for by default on a preview build; 18: the external control switch is device-local",
     "app/src/main/java/io/nekohasekai/sagernet/outbound/json/JsonInput.kt": "13: nesting limit of the JSON read",
     "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ProfileImport.kt": "13: the import report names the nesting limit",
     "app/src/main/java/io/nekohasekai/sagernet/ui/profiles/ProfileImports.kt": "13: the zip import catches StackOverflowError; 15: the scanner opened for its result",
     "app/src/main/java/io/nekohasekai/sagernet/ui/ScannerActivity.kt": "15: the codes returned to the screen that opened it, or handed to MainActivity as the app's own intent",
     "app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt": "15: the scanner opened for its result",
+    "app/src/main/java/io/nekohasekai/sagernet/QuickToggleShortcut.kt": "18: not the shortcut picker any more, a shortcut of a missing profile changes nothing",
+    "app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt": "18: the pinned server shortcut asks first on Android 7",
+    "app/src/main/res/xml/settings_general.xml": "crown: daily update check switch on by default; 18: the external control switch",
 }
 
 # openspec/specs/repository-governance, requirement "Идентичность форка Crown". Keep both in sync.
