@@ -11,6 +11,8 @@ data class ServerEntry(
     val whitelist: Boolean,
     /** A subscription's placeholder (simple-ui "Сообщения подписки"): in no section, no check, no country. */
     val placeholder: Boolean = false,
+    /** When [latency] was measured (epoch seconds, `latency_at`), 0 never. */
+    val testedAt: Long = 0L,
 )
 
 /** A group as the list needs it, in the user's group order. */

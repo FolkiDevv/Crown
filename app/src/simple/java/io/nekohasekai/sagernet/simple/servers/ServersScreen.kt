@@ -102,6 +102,8 @@ class ServersActions(
     val manage: ManageActions,
     /** Opens the whole announcement of a subscription. */
     val announce: (Long) -> Unit,
+    /** A server row came into view (a country opened, the list scrolled): its delay is checked unless it is fresh. */
+    val serverShown: (Long) -> Unit = {},
 )
 
 /**
@@ -242,6 +244,8 @@ private fun LazyListScope.servers(
     hasMenu: (ServerEntry) -> Boolean = { true },
 ) {
     items(list, key = { "$prefix-${it.id}" }) { server ->
+        // The background round covers a few servers per country; the others are checked as they come into view.
+        LaunchedEffect(server.id) { actions.serverShown(server.id) }
         ChoiceRow(
             leading = { CountryFlag(server.country.code) },
             headline = CountryFromName.withoutLeadingFlag(server.name),

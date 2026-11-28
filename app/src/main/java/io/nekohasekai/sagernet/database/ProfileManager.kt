@@ -500,6 +500,38 @@ object ProfileManager {
         return profile
     }
 
+    /** Crown: one URL test result for [saveUrlTestResults]. */
+    class UrlTestResult(val profileId: Long, val latencyMs: Int, val error: String, val connectOnly: Boolean)
+
+    /**
+     * Crown: [saveUrlTestResult] of many profiles in one transaction, in order, without reading them first: only
+     * `latency`, `latency_at` and `test_error` change, as [ProxyEntity.applyUrlResult] sets them; a gone profile is
+     * skipped. One transaction wakes the invalidation trackers of both processes once.
+     */
+    fun saveUrlTestResults(results: List<UrlTestResult>) {
+        if (results.isEmpty()) return
+        val db = SagerDatabase.instance
+        db.runInTransaction {
+            db.compileStatement(
+                "UPDATE `profiles` SET `latency` = ?, `latency_at` = ?, `test_error` = ? WHERE `id` = ?"
+            ).use { update ->
+                for (result in results) {
+                    try {
+                        val stamped = ProxyEntity().apply { applyUrlResult(result.latencyMs, result.error, result.connectOnly) }
+                        update.clearBindings()
+                        update.bindLong(1, stamped.latency.toLong())
+                        update.bindLong(2, stamped.latencyAt)
+                        stamped.testError?.let { update.bindString(3, it) } ?: update.bindNull(3)
+                        update.bindLong(4, result.profileId)
+                        update.executeUpdateDelete()
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                    }
+                }
+            }
+        }
+    }
+
     /** TestRunner::applyIpResult. */
     fun saveIpTestResult(profileId: Long, ip: String, country: String, error: String): ProxyEntity? {
         val profile = getProfile(profileId) ?: return null

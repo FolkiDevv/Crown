@@ -28,6 +28,7 @@ import io.nekohasekai.sagernet.simple.subs.SubscriptionFacts
 import io.nekohasekai.sagernet.simple.subs.SubscriptionNotices
 import io.nekohasekai.sagernet.simple.subs.SubscriptionState
 import io.nekohasekai.sagernet.ui.test.RowPhase
+import io.nekohasekai.sagernet.ui.test.TestFailure
 import io.nekohasekai.sagernet.ui.test.TestSessionClient
 import io.nekohasekai.sagernet.ui.test.TestUiState
 import kotlinx.coroutines.Dispatchers
@@ -108,9 +109,11 @@ data class ServersMessage(
 /**
  * The «Серверы» section (simple-ui spec "Структура списка серверов", "Выбор сервера в списке", "Определение страны
  * сервера", "Сведения о подписке"): the list read from the database, the choice of «Авто», a country or a server
- * (applied to a running connection at once), the manual update of subscriptions, and the background checks run when
- * the section opens — a URL test of every listed server, then an exit IP check of the servers whose name names no
- * country. Both run as ordinary test sessions of `:bg` (TestSessionClient), which keeps their results in the profiles.
+ * (applied to a running connection at once), the manual update of subscriptions, and the background checks run while
+ * the section is shown (simple-ui "Фоновая проверка серверов") — a URL test of what the list needs ([RoundPlan]), then
+ * an exit IP check of those servers whose name names no country. Both run as ordinary test sessions of `:bg`
+ * (TestSessionClient), which keeps their results in the profiles; this section's own session stops once the section is
+ * hidden for [HIDE_STOP_MS], and what it left is tested at the next show ([RoundRecord], kept on disk).
  */
 class ServersViewModel(application: Application) : AndroidViewModel(application), ProfileManager.Listener {
 
@@ -141,10 +144,27 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     /** The background test session this section started, and the state before it (to tell its states apart). */
     private var ownTest: Int = NONE
     private var stateBeforeTest: TestUiState? = null
-    private var lastUrlTest = 0L
 
-    /** The servers the URL tests since [lastUrlTest] covered. */
-    private val testedIds = HashSet<Long>()
+    /** [TestUiState.startedAt] of that session: tells it from a session another screen started afterwards. */
+    private var ownStartedAt = 0L
+
+    /** The servers of that session. */
+    private var sessionIds: List<Long> = emptyList()
+
+    /** The last round (kept in `simple_ui`); null until the first [reload] has read it. */
+    private var record: RoundRecord? = null
+
+    /** The section is on screen: composed while the activity is started ([shown]). */
+    private var visible = false
+    private var hideJob: Job? = null
+
+    /** The add flow asked to test the new servers: that test runs even while the section is hidden. */
+    private var addedTest = false
+
+    /** Server rows the user scrolled to or opened, to test next ([serverShown]); each row is asked for once a round. */
+    private val wanted = LinkedHashSet<Long>()
+    private val shownAsked = HashSet<Long>()
+    private var wantJob: Job? = null
 
     /**
      * The servers whose country this section has tried to find once since it was created (a URL test, then an exit
@@ -209,9 +229,42 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     // ------------------------------------------------------------------------------------------------ screen events
 
-    /** The section became visible: the list is read again and the background checks run (at most every 2 min). */
-    fun opened() {
+    /**
+     * The section is shown ([on]: composed while the activity is started) or hidden. Shown, the list is read again and
+     * the background checks run (a new round at most every [TEST_INTERVAL_MS]); hidden for [HIDE_STOP_MS], the
+     * section's own session stops and nothing more is started until it is shown again.
+     */
+    fun shown(on: Boolean) {
+        if (on == visible) return
+        visible = on
+        hideJob?.cancel()
+        if (on) {
+            reload(thenTest = true)
+            return
+        }
+        hideJob = viewModelScope.launch {
+            delay(HIDE_STOP_MS)
+            stopOwnTest()
+        }
+    }
+
+    /** The add flow added servers: they are tested now, even while the section is hidden (simple-ui 5.3). */
+    fun testAdded() {
+        addedTest = true
         reload(thenTest = true)
+    }
+
+    /** A server row came into view (a country opened, the list scrolled): tested soon unless this round covered it. */
+    fun serverShown(id: Long) {
+        if (!visible || !shownAsked.add(id)) return
+        wanted += id
+        if (wantJob?.isActive == true) return
+        wantJob = viewModelScope.launch {
+            // Rows come into view a few at a time: one test for those of the moment.
+            delay(SHOWN_DELAY_MS)
+            loadJob?.join()
+            startUrlTest()
+        }
     }
 
     /** Reads the list again (another section or the classic interface may have changed it). */
@@ -220,14 +273,16 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         if (thenTest) testAfterLoad = true
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            val loaded = withContext(Dispatchers.IO) {
+            val stored = record
+            val (loaded, read) = withContext(Dispatchers.IO) {
                 try {
-                    load()
+                    load() to (stored ?: readRecord())
                 } catch (e: Exception) {
                     Logs.w(e)
                     null
                 }
             } ?: return@launch
+            if (record == null) record = read
             // The live results of a running test go over the stored ones here, on the main thread that owns them.
             val live = loaded.copy(sections = loaded.sections?.let(::withLiveLatency))
             mutableState.update { live.copy(pick = it.pick, refreshing = it.refreshing, busy = it.busy, share = it.share) }
@@ -387,9 +442,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             mutableMessages.tryEmit(ServersMessage(R.string.simple_server_test_busy))
             return
         }
-        testedIds += id
-        stateBeforeTest = before
-        ownTest = TestSpec.KIND_URL
+        owned(TestSpec.KIND_URL, listOf(id), before)
         roundBusy = true
         liveLatency.clear()
     }
@@ -513,10 +566,10 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         pulled.removeAll(finished)
         publishCards()
         if (finished.isEmpty()) return
-        // The update ran in :bg: the selectors follow the new servers, the list and the delays are read again.
+        // The update ran in :bg: the selectors follow the new servers. The list is read again, and the servers the
+        // update added are tested, only while the section is shown; hidden, its next show reads and tests them.
         mutableEvents.tryEmit(ServersEvent.Updated)
-        lastUrlTest = 0L
-        reload(thenTest = true)
+        if (visible) reload(thenTest = true)
     }
 
     private fun publishCards() {
@@ -537,19 +590,33 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     // ------------------------------------------------------------------------------------------------ background tests
 
+    /**
+     * A round, or within the interval what is left to test ([RoundPlan]). Only while the section is shown, or for the
+     * servers the add flow just added ([testAdded]).
+     */
     private fun startUrlTest() {
-        val now = SystemClock.elapsedRealtime()
-        val all = mutableState.value.sections?.allServers?.map { it.id }.orEmpty()
-        // Within the interval only servers added since the last round are tested (a server just added by hand).
-        val throttled = lastUrlTest > 0L && now - lastUrlTest < TEST_INTERVAL_MS
-        val ids = if (throttled) all.filter { it !in testedIds } else all
-        if (ids.isEmpty()) return
+        if (!visible && !addedTest) return
+        val sections = mutableState.value.sections ?: return
+        val last = record ?: return
+        val now = System.currentTimeMillis()
+        val fresh = last.due(now, TEST_INTERVAL_MS)
+        val ids = if (fresh) {
+            (wanted.asSequence() + RoundPlan.round(sections).asSequence()).distinct().take(RoundPlan.LIMIT).toList()
+        } else {
+            RoundPlan.followUp(sections, last, last.at / 1000, wanted)
+        }
+        if (ids.isEmpty()) {
+            wanted.clear()
+            if (ownTest == NONE && !roundBusy) addedTest = false
+            return
+        }
         if (ownTest != NONE || roundBusy) {
             // A round runs: the servers it does not cover (one just added) are tested right after it, and those whose
             // country is still open are «being detected» meanwhile.
-            val waiting = mutableState.value.sections?.allServers
-                ?.filter { it.id in ids && it.id !in testedIds && it.country !is ServerCountry.Known && it.id !in countryChecked }
-                ?.map { it.id }.orEmpty()
+            val running = sessionIds.toHashSet()
+            val waiting = sections.allServers
+                .filter { it.id in ids && it.id !in running && it.country !is ServerCountry.Known && it.id !in countryChecked }
+                .map { it.id }
             testAgain = true
             if (waiting.isNotEmpty() && !detecting.containsAll(waiting)) {
                 queued += waiting
@@ -559,15 +626,20 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         val before = TestSessionClient.state.value
-        // Another session (one the user started in the classic interface) runs: this round is skipped.
-        if (!TestSessionClient.startProfiles(TestSpec.KIND_URL, ids)) return
-        if (!throttled) {
-            lastUrlTest = now
-            testedIds.clear()
+        // Another session (the user's, «Починка»'s) runs: this round is skipped, and nothing is recorded as tested.
+        if (!TestSessionClient.startProfiles(TestSpec.KIND_URL, ids)) {
+            addedTest = false
+            return
         }
-        testedIds += ids
-        stateBeforeTest = before
-        ownTest = TestSpec.KIND_URL
+        val all = sections.allServers.map { it.id }
+        Logs.i("simple servers: background ${if (fresh) "round" else "follow-up"} of ${ids.size} of ${all.size} servers")
+        // Every listed server counts as known: those the limit left out wait for their row to show or the next round.
+        saveRecord(if (fresh) RoundRecord(now, all.toSet(), ids.toSet()) else last.copy(known = last.known + all, left = last.left + ids))
+        if (fresh) shownAsked.retainAll(wanted)
+        wanted.removeAll(ids.toSet())
+        // Rows asked for beyond the limit are tested next.
+        if (wanted.isNotEmpty()) testAgain = true
+        owned(TestSpec.KIND_URL, ids, before)
         roundBusy = true
         liveLatency.clear()
         // A server whose country neither the name nor an earlier exit IP check gave is «being detected» until its
@@ -582,10 +654,19 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** The exit IP check of the servers whose country the name does not give, which answered the URL test. */
+    /** The exit IP check of the servers of the URL test just over whose country the name does not give, which answered. */
     private fun startIpTest() {
+        if (!visible && !addedTest) {
+            // Hidden meanwhile: the round ends here; the next one checks them.
+            finishRound()
+            return
+        }
+        val tested = sessionIds.toHashSet()
         val candidates = mutableState.value.sections?.allServers
-            ?.filter { it.country !is ServerCountry.Known && (it.latency > 0 || it.latency == ProxyEntity.LATENCY_CONNECT_ONLY) }
+            ?.filter {
+                it.id in tested && it.country !is ServerCountry.Known &&
+                    (it.latency > 0 || it.latency == ProxyEntity.LATENCY_CONNECT_ONLY)
+            }
             ?.map { it.id }
             .orEmpty()
         // At most IP_TEST_LIMIT per round, those never checked first, so a long list is covered over the rounds.
@@ -598,8 +679,7 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             finishRound()
             return
         }
-        stateBeforeTest = before
-        ownTest = TestSpec.KIND_IP
+        owned(TestSpec.KIND_IP, ids, before)
         ipAttempted += ids
         // The servers that did not answer are through; only those checked for the first time are «being detected».
         countryChecked += roundPending - ids.toSet()
@@ -623,7 +703,11 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     /** Tests what was added while the last round ran (see [startUrlTest]). */
     private fun startQueued() {
-        if (!testAgain) return
+        if (!testAgain) {
+            // The tests the add flow asked for are through.
+            addedTest = false
+            return
+        }
         testAgain = false
         viewModelScope.launch {
             loadJob?.join()
@@ -637,9 +721,44 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** This section's session of [kind] over [ids] has just started; [before] is the state published before it. */
+    private fun owned(kind: Int, ids: List<Long>, before: TestUiState) {
+        stateBeforeTest = before
+        ownTest = kind
+        sessionIds = ids
+        // Published by the start itself: the session's own stamp.
+        ownStartedAt = TestSessionClient.state.value.startedAt
+    }
+
+    /**
+     * Hidden for [HIDE_STOP_MS]: this section's own session stops (its servers left are tested at the next show) and
+     * nothing more starts. A session another screen started (the user's test, «Починка», the classic panel) is left
+     * alone: only the one whose stamp is this section's is stopped.
+     */
+    private fun stopOwnTest() {
+        testAgain = false
+        addedTest = false
+        testAfterLoad = false
+        wanted.clear()
+        wantJob?.cancel()
+        val test = TestSessionClient.state.value
+        if (ownTest != NONE && test.running && test.kind == ownTest && test.startedAt == ownStartedAt) {
+            Logs.i("simple servers: hidden, stopping the background check (${test.done} of ${test.total} done)")
+            TestSessionClient.stop()
+        }
+    }
+
+    private fun readRecord(): RoundRecord =
+        RoundRecord.decode(SimpleUi.store(getApplication()).getString(KEY_ROUND))
+
+    private fun saveRecord(value: RoundRecord) {
+        record = value
+        SimpleUi.store(getApplication()).putString(KEY_ROUND, value.encode())
+    }
+
     private fun onTestState(test: TestUiState) {
         if (ownTest == NONE || test === stateBeforeTest) return
-        if (test.kind != ownTest) {
+        if (test.kind != ownTest || test.startedAt != ownStartedAt) {
             // The session ended and another one (not this section's) runs now.
             if (test.running) {
                 ownTest = NONE
@@ -670,6 +789,13 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         val finished = ownTest
         ownTest = NONE
         stateBeforeTest = null
+        if (finished == TestSpec.KIND_URL) record?.let { last ->
+            // What the round still has to test: none of it after a whole session, else those without a result (a
+            // stop when the section was hidden). A new process learns the same from `latency_at` (RoundPlan.followUp).
+            val whole = !test.cancelled && test.failure == TestFailure.NONE
+            val through = if (whole) sessionIds.toSet() else test.rows.filterValues { it.ok || it.failed }.keys
+            if (last.left.any { it in through }) saveRecord(last.copy(left = last.left - through))
+        }
         // The panel of the classic interface would otherwise show this section's checks.
         TestSessionClient.dismiss()
         viewModelScope.launch {
@@ -744,11 +870,22 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     private companion object {
         const val NONE = -1
+
+        /** A new round at most this often (from the start of the last one, kept on disk as [RoundRecord.at]). */
         const val TEST_INTERVAL_MS = 2 * 60_000L
         const val PULL_GRACE_MS = 3_000L
 
+        /** Hidden this long (not a rotation, not a glance elsewhere), the section's own session stops. */
+        const val HIDE_STOP_MS = 5_000L
+
+        /** Rows that came into view within this time are tested together. */
+        const val SHOWN_DELAY_MS = 1_000L
+
+        /** SharedPreferences `simple_ui`: the last round ([RoundRecord.encode]). */
+        const val KEY_ROUND = "servers_round"
+
         /** Every exit IP check asks a lookup service; a list without country names is checked in part. */
-        const val IP_TEST_LIMIT = 30
+        const val IP_TEST_LIMIT = RoundPlan.NO_COUNTRY
     }
 }
 

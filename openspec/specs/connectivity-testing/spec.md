@@ -24,6 +24,14 @@ The user SHALL be able to trigger URL tests for all profiles in a group; results
 - **WHEN** the user runs a group test
 - **THEN** each profile in the group shows its own result as it arrives
 
+### Requirement: Bounded automatic test rounds
+Test rounds the app starts on its own, not asked for by the user (the background checks of the simple interface's server list), SHALL be limited in the number of profiles (at most 150 per round) and SHALL NOT start while the list is hidden. URL results of a session SHALL be stored in batches (one transaction per batch of at most 50 results or 1 s), without reading each profile first; the client SHALL still get every result as it arrives, and a background-process death SHALL lose at most the batch not stored yet. A session that hands each stored result to a hook (the auto-selector's ranking) SHALL keep storing each result at once.
+
+#### Scenario: A subscription of thousands of servers
+- **GIVEN** a subscription of 3000 servers
+- **WHEN** the simple interface's server list is opened
+- **THEN** its background session tests at most 150 profiles, and their results are stored a batch per transaction
+
 ### Requirement: TCP ping testing
 The app SHALL support TCP ping tests measuring connection setup time to a target, as an alternative to URL tests, with results stored and displayed the same way.
 

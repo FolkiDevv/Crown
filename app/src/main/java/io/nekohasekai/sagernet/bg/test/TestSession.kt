@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.bg.test
 
 import android.database.SQLException
 import android.os.RemoteException
+import android.os.SystemClock
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SpeedTestSettings
 import io.nekohasekai.sagernet.aidl.ITestSessionCallback
@@ -22,6 +23,7 @@ import io.throneproj.mobile.SpeedTestResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -104,10 +106,18 @@ internal class TestSession(
         try {
             coroutineScope {
                 val refresher = launch { notification.refreshLoop() }
+                // Crown: URL results waiting for their batch are stored at the latest [URL_FLUSH_MS] after the first.
+                val flusher = launch {
+                    while (true) {
+                        delay(URL_FLUSH_MS)
+                        storeUrl(force = false)
+                    }
+                }
                 try {
                     if (spec.testCurrent) runCurrent() else runProfiles()
                 } finally {
                     refresher.cancel()
+                    flusher.cancel()
                 }
             }
         } catch (e: CancellationException) {
@@ -116,6 +126,7 @@ internal class TestSession(
         } catch (e: Exception) {
             Logs.w(e)
         } finally {
+            storeUrl(force = true)
             repositionTested()
             notification.finish(assetProblems)
             notifyClient { it.onDone(id, cancelled) }
@@ -180,6 +191,8 @@ internal class TestSession(
         when (kind) {
             TestSpec.KIND_URL -> {
                 UrlTestRunner(this).run(profiles)
+                // Crown: the clearing reads the stored results.
+                storeUrl(force = true)
                 autoClearUnavailable(profiles)
             }
 
@@ -222,6 +235,8 @@ internal class TestSession(
 
     private fun started(count: Int) {
         total = count
+        // Crown: one line per session, for counting the sessions and their size.
+        Logs.i("Test session $id started: kind $kind, $count profiles${if (onUrlStored != null) ", with a result hook" else ""}")
         notifyClient { it.onStarted(id, kind, count) }
         notification.changed()
     }
@@ -250,13 +265,19 @@ internal class TestSession(
      * turns the failure its profile already reported into a success.
      */
     fun reportUrl(results: List<ProbeResult>) {
-        val stored = ArrayList<ProxyEntity>()
-        persist(results) {
-            ProfileManager.saveUrlTestResult(it.profileId, it.latency, it.error, it.connectOnly)?.let(stored::add)
-        }
         val hook = onUrlStored
-        // A failing hook must not end the session, whose other results are still to come.
-        if (hook != null) for (profile in stored) runCatching { hook(profile) }.onFailure { Logs.w(it) }
+        if (hook != null) {
+            // The hook (the auto-selector's ranking) gets each stored profile at once.
+            val stored = ArrayList<ProxyEntity>()
+            persist(results) {
+                ProfileManager.saveUrlTestResult(it.profileId, it.latency, it.error, it.connectOnly)?.let(stored::add)
+            }
+            // A failing hook must not end the session, whose other results are still to come.
+            for (profile in stored) runCatching { hook(profile) }.onFailure { Logs.w(it) }
+        } else {
+            // Crown: stored in batches ([storeUrl]); the client sees each result at once, as before.
+            queueUrl(results)
+        }
         for (result in results) {
             val latency = if (result.measured) latencyCode(result.latency, result.error, result.connectOnly) else 0
             if (result.connectOnly) {
@@ -355,6 +376,40 @@ internal class TestSession(
         notifyClient { it.onSpeedProgress(snapshot) }
     }
 
+    /** Crown: measured URL results not stored yet, in arrival order, and when the first of them came. */
+    private val urlBatch = ArrayList<ProfileManager.UrlTestResult>()
+    private var urlBatchSince = 0L
+
+    private fun queueUrl(results: List<ProbeResult>) {
+        synchronized(urlBatch) {
+            for (result in results) {
+                if (!result.measured) continue
+                if (urlBatch.isEmpty()) urlBatchSince = SystemClock.elapsedRealtime()
+                urlBatch += ProfileManager.UrlTestResult(result.profileId, result.latency, result.error, result.connectOnly)
+            }
+        }
+        storeUrl(force = false)
+    }
+
+    /**
+     * Crown: stores the queued URL results in one transaction without reading the profiles, once [URL_BATCH] of them
+     * wait or the first waited [URL_FLUSH_MS] ([force]: now). Under the batch's lock, so batches land in order; if :bg
+     * dies, at most the batch not stored yet is lost.
+     */
+    private fun storeUrl(force: Boolean) {
+        synchronized(urlBatch) {
+            if (urlBatch.isEmpty()) return
+            if (!force && urlBatch.size < URL_BATCH && SystemClock.elapsedRealtime() - urlBatchSince < URL_FLUSH_MS) return
+            val batch = ArrayList(urlBatch)
+            urlBatch.clear()
+            try {
+                ProfileManager.saveUrlTestResults(batch)
+            } catch (e: Exception) {
+                Logs.w(e)
+            }
+        }
+    }
+
     /** Saves the measured results in one transaction, in order. */
     private fun persist(results: List<ProbeResult>, save: (ProbeResult) -> Unit) {
         if (results.none { it.measured }) return
@@ -400,6 +455,10 @@ internal class TestSession(
 
     companion object {
         const val TYPE_AUTO_SELECTOR = "autoselector"
+
+        /** Crown: URL results stored per transaction ([storeUrl]), and how long the first of a batch may wait. */
+        const val URL_BATCH = 50
+        const val URL_FLUSH_MS = 1_000L
 
         /** ProxyEntity.displayName, parsed without caching it on [profile], which the session keeps until it ends. */
         fun displayNameOf(profile: ProxyEntity): String {
