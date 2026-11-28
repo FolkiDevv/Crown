@@ -277,8 +277,9 @@ class SimpleActivity : AppCompatActivity() {
                             modes.syncGroups()
                             home.refreshServer()
                             modes.refresh()
-                            // The new servers get their delay (and country by exit IP) without waiting for the next round.
-                            servers.reload(thenTest = true)
+                            // The new servers get their delay (and country by exit IP) without waiting for the next round,
+                            // whichever section is shown: the user asked for them.
+                            servers.testAdded()
                             // The import may have switched automatic subscription updates on (never set before).
                             settings.refresh()
                             // Its provider may have sent an announcement or a warning with the first download.
@@ -1140,8 +1141,25 @@ private fun ServersSection(
             }
         }
     }
-    // Opening the section reads the list again and starts the background delay check (simple-ui 5.3).
-    LaunchedEffect(servers) { servers.opened() }
+    // Shown (composed while the activity is started), the section reads the list again and runs its background checks;
+    // hidden, its own check stops after a few seconds (simple-ui "Фоновая проверка серверов"). A rotation hides and
+    // shows it again at once.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(servers, lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> servers.shown(true)
+                Lifecycle.Event.ON_STOP -> servers.shown(false)
+                else -> Unit
+            }
+        }
+        // Brought up to the current state at once: ON_START comes now if the activity is started.
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            servers.shown(false)
+        }
+    }
     SectionScaffold(
         SimpleSection.SERVERS,
         snackbar.takeIf { showSnackbar },
@@ -1182,6 +1200,7 @@ private fun ServersSection(
                     )
                 },
                 announce = announce,
+                serverShown = servers::serverShown,
             ),
             modifier = modifier,
             focus = focus,

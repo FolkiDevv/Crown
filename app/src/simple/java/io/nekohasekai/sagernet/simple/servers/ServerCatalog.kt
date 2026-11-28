@@ -37,6 +37,7 @@ object ServerCatalog {
                     country = CountryFromName.resolve(nameOf(profile), profile.testCountry, profile.id in detecting),
                     whitelist = whitelist.matcher(nameOf(profile)).find(),
                     placeholder = group.isSubscription && SubscriptionState.isPlaceholder(profile),
+                    testedAt = profile.latencyAt,
                 )
             }
         }

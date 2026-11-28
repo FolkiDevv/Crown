@@ -57,6 +57,8 @@ TOUCH_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/QuickToggleShortcut.kt": "18: not the shortcut picker any more, a shortcut of a missing profile changes nothing",
     "app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt": "18: the pinned server shortcut asks first on Android 7",
     "app/src/main/res/xml/settings_general.xml": "crown: daily update check switch on by default; 18: the external control switch",
+    "app/src/main/java/io/nekohasekai/sagernet/database/ProfileManager.kt": "19: URL test results stored in batches without reading the profiles",
+    "app/src/main/java/io/nekohasekai/sagernet/bg/test/TestSession.kt": "19: URL test results stored in batches; a log line per session",
 }
 
 # openspec/specs/repository-governance, requirement "Идентичность форка Crown". Keep both in sync.
