@@ -414,6 +414,17 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:process=":bg" />
+        <!-- Crown (touch point 12): the restore watchdog, alone in its process, bound by the VPN service. -->
+        <service
+            android:name="io.nekohasekai.sagernet.simple.RestoreWatchdog"
+            android:exported="false"
+            android:process=":watch" />
+        <!-- Crown (touch point 12): the periodic restore check, which survives the death of every process of the app. -->
+        <service
+            android:name="io.nekohasekai.sagernet.simple.RestoreCheckJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:process=":bg" />
 
         <service
             android:name="io.nekohasekai.sagernet.bg.TileService"

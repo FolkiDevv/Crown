@@ -402,6 +402,9 @@ object SettingsRegistry {
         Key.WIFI_PERMISSION_ASKED, Key.SERVICE_ERROR, Key.SERVICE_ERROR_DNS, Key.SERVICE_ERROR_GEO,
         Key.SERVICE_ERROR_RULE_SETS, Key.START_WITHOUT_RULE_SETS, Key.RUNNING_PROFILES, Key.RUNNING_ROUTE,
         CORE_BOX_API_PORT.key,
+        // Crown (touch point 12): whether this device's connection is to be restored.
+        io.nekohasekai.sagernet.simple.ServiceRestore.KEY_WANTED, io.nekohasekai.sagernet.simple.ServiceRestore.KEY_RESTORES,
+        io.nekohasekai.sagernet.simple.ServiceRestore.KEY_UNCONNECTED,
     )
 
     // ------------------------------------------------------------------------------------------------ lookup

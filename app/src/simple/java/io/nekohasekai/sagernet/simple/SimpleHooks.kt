@@ -39,6 +39,7 @@ object SimpleHooks {
         restarting = false
         DataStore.configurationStore.putLong(KEY_CONNECTED_SINCE, since)
         countStart()
+        ServiceRestore.onConnected(app)
         NetworkRegimeWatcher.serviceStarted()
     }
 

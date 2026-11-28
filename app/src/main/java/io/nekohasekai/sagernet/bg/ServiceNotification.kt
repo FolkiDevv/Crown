@@ -175,6 +175,7 @@ class ServiceNotification(
 
     @Volatile
     private var closed = false
+    private val postLock = Any()
 
     private val builder = NotificationCompat.Builder(service as Context, channel)
         .setWhen(0)
@@ -296,11 +297,14 @@ class ServiceNotification(
 
     // A late update after destroy() would post the notification again with no service behind it.
     private suspend fun update() = useBuilder {
-        if (!closed) NotificationManagerCompat.from(service as Service).notify(notificationId, it.build())
+        // Crown (touch point 12): checked and posted under the lock destroy() takes, or a post racing it outlives it.
+        synchronized(postLock) {
+            if (!closed) NotificationManagerCompat.from(service as Service).notify(notificationId, it.build())
+        }
     }
 
     fun destroy() {
-        closed = true
+        synchronized(postLock) { closed = true }
         listenPostSpeed = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             (service as Service).stopForeground(Service.STOP_FOREGROUND_REMOVE)

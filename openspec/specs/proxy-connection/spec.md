@@ -36,6 +36,45 @@ Switching the profile of a running service or reloading it (from the UI, the not
 - **WHEN** the user stops the service while a restart builds or starts the next core
 - **THEN** the build is cancelled, the service ends Stopped and the kept VPN interface is closed
 
+### Requirement: Restore after the service process died
+The app SHALL keep a device-local mark, in the shared settings, that the user wants the connection running: set when the user or an autostart (boot, the package-replaced receiver, always-on VPN) starts the service, and removed by every stop — the main button of either interface, the notification, the quick settings tile, a widget, a shortcut, a failed start, the user turning the VPN off in the system or another VPN app taking over (`onRevoke`). A mark from an earlier boot MUST count as absent. While the mark stands the service SHALL be sticky (`START_STICKY`), and a restart after the service process died SHALL start the selected profile again; with no mark it SHALL stop at once. Because Android may postpone or skip the restart of a sticky service when no other process of the app is alive or not cached, the app MUST NOT depend on it: while the mark stands the service SHALL keep a binding to a watchdog service in a process of its own, and the death of the service process SHALL make the watchdog start the service again at once, also when the UI process is dead or cached. When every process of the app dies at once, a periodic check scheduled with the system (at most every 15 min while the mark stands) SHALL find the mark without a running service and start the restore the same way. The connection SHOULD be back within 15 s of the death; when Android itself delays the start of the service (a restart it already scheduled), it MAY take longer, and it MUST come back without the user once Android starts the service. A restore that does not start MUST leave the foreground, so that no notification reads as connected while the VPN is off; the reason it gave up is the message of the Stopped state. Restores MUST be limited to 3 within 10 minutes and to 3 in a row that never reach Connected (the periodic check starts them further apart than that window), counted in the shared settings before each start; a start by the user or an autostart begins the count anew; past the limit the mark is removed and the user gets a notification «VPN stopped after a failure» with a Connect action. A restore MUST NOT start an activity: without the VPN consent, or when Android refuses the foreground start in the background, the mark is removed and a notification with a Connect action is shown instead; a restore whose start fails reports the error in a notification too. A new service process that finds the mark but no running service (no restart came) SHALL post the notification «VPN disconnected unexpectedly». Each of these reports ends the restore: the mark is removed and the reason is kept as the last start error, which both interfaces show until the user dismisses it or starts again. An update installed from outside the app SHALL bring back a connection that ran before the install.
+
+#### Scenario: Service process killed while connected
+- **WHEN** the service process dies while the VPN is connected and the user did not stop it
+- **THEN** the service starts again and the selected profile connects again without the user's action
+
+#### Scenario: Service process killed while the UI process is dead
+- **WHEN** the UI process is dead or cached and the service process dies while the VPN is connected
+- **THEN** the watchdog starts the service again and the selected profile connects without the user opening the app; if Android refuses the start, the notification «VPN disconnected unexpectedly» is shown at once
+
+#### Scenario: Every process of the app killed at once
+- **WHEN** the service process, the watchdog and the UI die together while the VPN is connected and the user did not stop it
+- **THEN** the periodic check starts the service again within its period (or the user is notified when Android refuses), and no notification of the dead service stays after that
+
+#### Scenario: User connects after a restore gave up
+- **WHEN** the user connects again after a restore gave up and the service process then dies
+- **THEN** the restore starts again: the count of restores began anew with the user's start
+
+#### Scenario: Restore gives up
+- **WHEN** a restore does not start (the limit is reached or the VPN consent is gone)
+- **THEN** no notification of the service reads as connected or connecting, and the home screen shows the reason
+
+#### Scenario: Stopped by the user before the process died
+- **WHEN** the user stops the connection and the service process is killed afterwards
+- **THEN** no connection is started again and no notification is shown
+
+#### Scenario: Profile that kills the process on every start
+- **WHEN** every start of the selected profile kills the service process
+- **THEN** the service is started again at most 3 times within 10 minutes, then it stays stopped and the notification «VPN stopped after a failure» is shown
+
+#### Scenario: VPN consent revoked
+- **WHEN** the system restarts the service after its process died and the VPN consent is gone
+- **THEN** no consent screen opens; the notification «VPN not restored» offers to connect
+
+#### Scenario: Installed from a store or adb while connected
+- **WHEN** a new version of the app is installed from outside the app while the connection runs
+- **THEN** the connection starts again after the install, with or without auto-connect
+
 ### Requirement: Foreground service notification
 While the service runs it SHALL present a foreground notification showing the current profile and traffic statistics, and SHALL offer quick actions including stop and switch to next/previous profile.
 

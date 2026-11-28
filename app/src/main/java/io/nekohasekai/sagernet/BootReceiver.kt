@@ -44,7 +44,8 @@ class PackageReplacedReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         val resume = DataStore.resumeAfterUpdate
         if (resume != 0L) DataStore.resumeAfterUpdate = 0
-        val wanted = resume > 0 || DataStore.rememberEnable
+        // Crown (touch point 12): also after an install from elsewhere (a store, adb) while the connection ran.
+        val wanted = resume > 0 || DataStore.rememberEnable || io.nekohasekai.sagernet.simple.ServiceRestore.isWanted()
         if (wanted && DataStore.selectedProxy > 0 && (Build.VERSION.SDK_INT < 24 || SagerNet.user.isUserUnlocked)) {
             SagerNet.startService()
         }

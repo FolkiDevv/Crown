@@ -63,6 +63,8 @@ class SagerNet : Application(),
                 updateNotificationChannels()
                 // A new :bg process means no service runs: heal widgets left "Connected" by a killed one.
                 Widgets.push(this)
+                // Crown (touch point 12): a connection the user wants and no restart brings back is reported.
+                io.nekohasekai.sagernet.simple.ServiceRestore.onBackgroundProcessStart(this)
                 // The core (and its JNI library) is loaded in the :bg process only.
                 CoreRuntime.setup(this)
                 AutoSelectorRuntime.install()

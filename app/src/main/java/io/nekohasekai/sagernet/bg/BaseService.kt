@@ -332,8 +332,10 @@ class BaseService {
 
         fun startRunner() {
             this as Context
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(Intent(this, javaClass))
-            else startService(Intent(this, javaClass))
+            // Crown (touch point 12): the service's own start, not the user's: it keeps the count of restores.
+            val intent = Intent(this, javaClass).putExtra(io.nekohasekai.sagernet.simple.ServiceRestore.EXTRA_INTERNAL, true)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent)
+            else startService(intent)
         }
 
         /** [keepTun]: a restart whose next core is built keeps the VPN interface until that core opens its own. */
@@ -441,6 +443,8 @@ class BaseService {
         fun stopRunner(restart: Boolean = false, msg: String? = null) {
             // A restart's running core keeps serving while the next one is built: its sockets still need protect().
             if (!restart) {
+                // Crown (touch point 12): a stop of any kind ends the connection the system would restore.
+                io.nekohasekai.sagernet.simple.ServiceRestore.onStopRequested()
                 DataStore.baseService = null
                 DataStore.vpnService = null
             }
@@ -648,6 +652,7 @@ class BaseService {
          * without the rule-sets when [ruleSets].
          */
         fun failRunner(message: String, dnsSettings: Boolean = false, geoSettings: Boolean = false, ruleSets: Boolean = false) {
+            io.nekohasekai.sagernet.simple.ServiceRestore.onStartFailed(this as Context, message)
             if (data.state != State.Stopping) {
                 DataStore.serviceError = message
                 DataStore.serviceErrorDns = dnsSettings
@@ -708,12 +713,29 @@ class BaseService {
         /** Always-on VPN starts the service by itself; without a profile it can only explain why nothing connects. */
         fun onNoProfile() {}
 
+        /**
+         * Crown (touch point 12): sticky while the user wants the connection; a restart by the system after the process
+         * died (a null intent) starts the selected profile again, or stops when that is not wanted or not possible.
+         */
         fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
             DataStore.baseService = this
+            val restore = io.nekohasekai.sagernet.simple.ServiceRestore
 
-            if (data.state != State.Stopped) return Service.START_NOT_STICKY
-            startProxy()
-            return Service.START_NOT_STICKY
+            val restart = restore.isRestart(intent) // the system's restart (null intent) or the restore watchdog's
+            if (restart && data.state == State.Stopped && !restore.onSystemRestart(this as Service)) {
+                restore.leaveForeground(this as Service) // nothing of the dead process may stay shown as connected
+                stopRunner(false, restore.takeReason())
+                return Service.START_NOT_STICKY
+            }
+            if (restart && data.state == State.Stopping && data.notification == null) {
+                // A second restore (the watchdog's after the system's) while that one stops: its foreground start too.
+                restore.leaveForeground(this as Service)
+                return Service.START_NOT_STICKY
+            }
+            // A start that comes while a stop is in progress is dropped (below): it must not mark the connection wanted.
+            if (!restart && data.state != State.Stopping) restore.onStartRequested(this as Context, intent)
+            if (data.state == State.Stopped) startProxy()
+            return restore.startResult()
         }
 
         /**
