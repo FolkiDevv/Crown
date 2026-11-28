@@ -541,4 +541,12 @@
     <string name="simple_settings_always_on_unknown">Включите для Crown «Постоянный VPN» и «Блокировать соединения без VPN» в настройках Android, чтобы приложения не выходили в сеть мимо VPN. Приложения без VPN тогда останутся без интернета</string>
     <string name="simple_repair_always_on_title">Без трафика мимо VPN</string>
     <string name="simple_repair_always_on_text">Пока Crown переключает сервер или переподключается, приложения могут на мгновение выйти в сеть напрямую. Чтобы этого не было, включите для Crown «Постоянный VPN» и «Блокировать соединения без VPN» в настройках VPN. Приложения без VPN тогда останутся без интернета.</string>
+    <string name="simple_restore_lost_title">VPN отключился неожиданно</string>
+    <string name="simple_restore_lost_text">Соединение прервалось и не восстановилось само. Приложения выходят в сеть напрямую, без VPN.</string>
+    <string name="simple_restore_failed_title">VPN не переподключился</string>
+    <string name="simple_restore_gave_up_title">VPN остановлен после сбоя</string>
+    <string name="simple_restore_gave_up_text">Соединение сбоило 3 раза за 10 минут, поэтому Crown больше не перезапускает его. Приложения выходят в сеть напрямую, без VPN.</string>
+    <string name="simple_restore_consent_title">VPN не восстановлен</string>
+    <string name="simple_restore_consent_text">Разрешение на VPN отозвано, или его заняло другое VPN-приложение. Приложения выходят в сеть напрямую, без VPN.</string>
+    <string name="simple_restore_connect">Подключить</string>
 </resources>

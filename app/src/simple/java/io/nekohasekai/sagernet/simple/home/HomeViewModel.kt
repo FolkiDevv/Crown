@@ -27,6 +27,7 @@ import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.ConnectionClock
+import io.nekohasekai.sagernet.simple.ServiceRestore
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.modes.Managed
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
@@ -413,10 +414,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
         } catch (_: RemoteException) {
             BaseService.State.Idle
         }
-        // A start left over from a service process that died without stopping (force stop, crash, reboot).
+        // A start left over from a service process that died without stopping (force stop, crash, reboot): the timer
+        // forgets it. Whether the connection comes back is `:bg`'s mark (ServiceRestore), which only the service writes;
+        // while it stands, the loss shows here also when this screen did not see the service die.
         if (!state.started && state != BaseService.State.Stopping) {
             viewModelScope.launch(Dispatchers.IO) {
                 runCatching { DataStore.configurationStore.remove(SimpleHooks.KEY_CONNECTED_SINCE) }
+                // A restore that gave up keeps its reason as the last start error: shown instead of the plain loss.
+                val error = runCatching { DataStore.serviceError }.getOrDefault("").takeIf { it.isNotBlank() }
+                if (error == null && !ServiceRestore.isWanted()) return@launch
+                withContext(Dispatchers.Main) {
+                    if (lost?.detail == null && !serviceState.started && serviceState != BaseService.State.Stopping) {
+                        lost = HomeProblem.ConnectionLost(error)
+                        publish()
+                    }
+                }
             }
         }
         onState(state, null, restartPending = false)

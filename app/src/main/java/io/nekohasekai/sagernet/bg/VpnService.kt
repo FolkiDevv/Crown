@@ -140,16 +140,21 @@ class VpnService : BaseVpnService(),
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // The system starts an always-on VPN whatever the service mode says; the rest of the app follows the mode.
         if (DataStore.serviceMode != Key.MODE_VPN && isAlwaysOnVpn()) DataStore.serviceMode = Key.MODE_VPN
+        // Crown (touch point 12): a restart after the process died is in the background, no activity may start.
+        val restore = io.nekohasekai.sagernet.simple.ServiceRestore
+        val restart = restore.isRestart(intent)
         if (DataStore.serviceMode == Key.MODE_VPN) {
             if (prepare(this) != null) {
-                startActivity(
+                if (restart) restore.onConsentMissing(this)
+                else startActivity(
                     Intent(
                         this, VpnRequestActivity::class.java
                     ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } else return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
         }
-        stopRunner()
+        if (restart) restore.leaveForeground(this)
+        stopRunner(false, if (restart) restore.takeReason() else null)
         return Service.START_NOT_STICKY
     }
 

@@ -551,4 +551,12 @@ The choice is not remembered: the next launch opens the new interface.</string>
     <string name="simple_settings_always_on_unknown">Turn on «Always-on VPN» and «Block connections without VPN» for Crown in Android settings, so apps never go online around the VPN. Apps excluded from the VPN then stay offline</string>
     <string name="simple_repair_always_on_title">No traffic around the VPN</string>
     <string name="simple_repair_always_on_text">While Crown switches servers or reconnects, apps can go online directly for a moment. Turn on «Always-on VPN» and «Block connections without VPN» for Crown in the VPN settings to prevent it. Apps excluded from the VPN then stay offline.</string>
+    <string name="simple_restore_lost_title">VPN disconnected unexpectedly</string>
+    <string name="simple_restore_lost_text">The connection broke and did not come back by itself. Apps now go online directly, without the VPN.</string>
+    <string name="simple_restore_failed_title">VPN could not reconnect</string>
+    <string name="simple_restore_gave_up_title">VPN stopped after a failure</string>
+    <string name="simple_restore_gave_up_text">The connection failed 3 times within 10 minutes, so Crown no longer restarts it. Apps now go online directly, without the VPN.</string>
+    <string name="simple_restore_consent_title">VPN not restored</string>
+    <string name="simple_restore_consent_text">The VPN permission was revoked or another VPN app took over. Apps now go online directly, without the VPN.</string>
+    <string name="simple_restore_connect">Connect</string>
 </resources>

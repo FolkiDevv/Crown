@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.simple.FocusShapes
+import io.nekohasekai.sagernet.simple.ServiceRestore
 import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
 import io.nekohasekai.sagernet.simple.unavailable
@@ -601,6 +602,9 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
         is HomeProblem.ConnectionLost -> R.string.simple_problem_lost_title to R.string.simple_problem_lost_text
         HomeProblem.ServerNotResponding -> R.string.simple_problem_server_title to R.string.simple_problem_server_text
     }
+    // A restore that gave up says why (as the classic interface does); other details stay for «Починка».
+    val context = LocalContext.current
+    val reason = (problem as? HomeProblem.ConnectionLost)?.detail?.takeIf { ServiceRestore.isReason(context, it) }
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -617,7 +621,7 @@ private fun ProblemBanner(problem: HomeProblem, onRepair: () -> Unit, onDismiss:
             ) {
                 Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(2.dp))
-                Text(stringResource(text), style = MaterialTheme.typography.bodyMedium)
+                Text(reason ?: stringResource(text), style = MaterialTheme.typography.bodyMedium)
             }
             IconButton(onClick = onDismiss, modifier = Modifier.focusRing(FocusShapes.Pill, outset = (-3).dp)) {
                 Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.simple_problem_dismiss))
