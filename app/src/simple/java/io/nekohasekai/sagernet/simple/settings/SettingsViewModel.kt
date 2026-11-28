@@ -183,8 +183,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         write {
             DataStore.nightTheme = mode.value
             withContext(Dispatchers.Main) {
-                Theme.currentNightMode = mode.value
-                Theme.applyNightTheme()
+                Theme.applyNightTheme(mode.value)
             }
         }
     }
