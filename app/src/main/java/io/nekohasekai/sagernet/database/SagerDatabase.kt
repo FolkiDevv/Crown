@@ -299,11 +299,12 @@ abstract class SagerDatabase : RoomDatabase() {
             // unbinds (close() needs an open database), which would keep starting a :bg that cannot open either.
             openOrFail(buildProfileDatabase(multiInstance = false)).close()
             val db = openOrFail(buildProfileDatabase(multiInstance = true))
-            openFailure = null
-            opened = db
             SagerNet.application.deleteDatabase(LEGACY_SETTINGS_DB)
+            // Before the database is published: no reader of [instance] sees the settings before their migration.
             runCatching { DataStore.migrateSettings(db.openHelper.writableDatabase) }
                 .onFailure { Log.w(TAG, "settings migration failed", it) }
+            openFailure = null
+            opened = db
             return db
         }
 
