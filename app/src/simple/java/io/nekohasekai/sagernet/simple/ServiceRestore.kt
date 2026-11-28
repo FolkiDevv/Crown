@@ -322,7 +322,7 @@ object ServiceRestore {
             context, REQUEST_CONNECT,
             Intent(context, VpnRequestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags,
         )
-        val notification = NotificationCompat.Builder(context, PlatformNotifications.CHANNEL_WARNINGS)
+        val builder = NotificationCompat.Builder(context, PlatformNotifications.CHANNEL_WARNINGS)
             .setSmallIcon(R.drawable.ic_notification_warning)
             .setContentTitle(context.getString(title))
             .setContentText(text)
@@ -331,7 +331,9 @@ object ServiceRestore {
             .setContentIntent(open)
             .addAction(0, context.getString(R.string.simple_restore_connect), connect)
             .setAutoCancel(true)
-            .build()
+        // The loss came from a crash still offered for a report: one notification instead of two.
+        CrashReport.offerWith(context, builder)
+        val notification = builder.build()
         try {
             NotificationManagerCompat.from(context).notify(TAG, ID, notification)
         } catch (e: SecurityException) {

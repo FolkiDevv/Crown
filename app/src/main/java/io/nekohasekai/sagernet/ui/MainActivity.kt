@@ -47,6 +47,7 @@ import io.nekohasekai.sagernet.ktx.launchCustomTab
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.outbound.`import`.ProfileImport
+import io.nekohasekai.sagernet.simple.CrashReport
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.add.CrownLinks
 import io.nekohasekai.sagernet.ui.route.RouteImports
@@ -668,6 +669,30 @@ class MainActivity : ThemedActivity(),
     override fun onStart() {
         connection.updateConnectionId(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND)
         super.onStart()
+        syncCrashPrompt()
+    }
+
+    /** The question about a crash this activity asks (Crown, touch point 14); it lives until answered or taken. */
+    private var crashDialog: androidx.appcompat.app.AlertDialog? = null
+
+    /**
+     * Crown (touch point 14): a crash is reported here, not by the crashed process. Each start, so a crash while this
+     * activity lived (notifications off) is asked about too, and a question a notification took meanwhile goes away.
+     */
+    private fun syncCrashPrompt() {
+        val prompt = CrashReport.onInterfaceOpen(this)
+        if (prompt == null) {
+            crashDialog?.dismiss()
+            crashDialog = null
+        } else if (crashDialog?.isShowing != true) {
+            crashDialog = MaterialAlertDialogBuilder(this)
+                .setTitle(prompt.title)
+                .setMessage(prompt.text)
+                .setPositiveButton(R.string.simple_crash_send) { _, _ -> CrashReport.answered(this, true) }
+                .setNegativeButton(R.string.simple_crash_dismiss) { _, _ -> CrashReport.answered(this, false) }
+                .setOnCancelListener { CrashReport.answered(this, false) }
+                .show()
+        }
     }
 
     override fun onStop() {
@@ -676,6 +701,7 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun onDestroy() {
+        crashDialog?.dismiss()
         super.onDestroy()
         DataStore.configurationStore.unregisterChangeListener(this)
         connection.disconnect(this)

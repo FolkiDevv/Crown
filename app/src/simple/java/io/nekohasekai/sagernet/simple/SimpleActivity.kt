@@ -200,6 +200,9 @@ class SimpleActivity : AppCompatActivity() {
     /** The battery-optimization prompt is open ([askBattery]); a rotation keeps it. */
     private val batteryPrompt = mutableStateOf(false)
 
+    /** The question whether to send the log of a crash of this process (CrashReport); the marker keeps it. */
+    private val crashPrompt = mutableStateOf<CrashReport.Prompt?>(null)
+
     /** A screen this activity opened itself is in front (system settings, a classic screen, the scanner...). */
     private var ownLaunch = false
 
@@ -251,7 +254,10 @@ class SimpleActivity : AppCompatActivity() {
                     requestedSection = requestedSection.value,
                     onSectionShown = { requestedSection.value = null },
                 )
-                if (batteryPrompt.value) {
+                val crash = crashPrompt.value
+                if (crash != null) {
+                    CrashPromptDialog(crash, onSend = { answerCrash(true) }, onDismiss = { answerCrash(false) })
+                } else if (batteryPrompt.value) {
                     BatteryPromptDialog(onAllow = ::allowBackground, onLater = { batteryPrompt.value = false })
                 }
             }
@@ -315,6 +321,11 @@ class SimpleActivity : AppCompatActivity() {
         outState.putBoolean(STATE_BATTERY_PROMPT, batteryPrompt.value)
         // Called before onStop below Android 9: count the leaving already, so a process killed meanwhile keeps it.
         outState.putBoolean(STATE_LEFT_APP, leftApp || leaving())
+    }
+
+    private fun answerCrash(send: Boolean) {
+        crashPrompt.value = null
+        CrashReport.answered(this, send)
     }
 
     /** Every launch goes through here (startActivity too, and the activity result launchers). */
@@ -383,6 +394,9 @@ class SimpleActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Each start, also after a recreation: a crash while this activity lived is asked about too (notifications off),
+        // and a question a notification took meanwhile goes away. It ends only with an answer.
+        crashPrompt.value = CrashReport.onInterfaceOpen(this)
         home.setForeground(true)
         modes.refresh()
         // Groups added meanwhile in :bg (a subscription added in the classic interface) join the «Авто» selectors.
@@ -1268,6 +1282,25 @@ private fun BatteryPromptDialog(onAllow: () -> Unit, onLater: () -> Unit) {
         },
         dismissButton = {
             TextButton(onClick = onLater, modifier = button) { Text(stringResource(R.string.simple_offer_later)) }
+        },
+    )
+}
+
+/** A crash of the app closed it last time: send the log (CrashReport). */
+@Composable
+private fun CrashPromptDialog(prompt: CrashReport.Prompt, onSend: () -> Unit, onDismiss: () -> Unit) {
+    val button = Modifier.focusRing(FocusShapes.Pill)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(prompt.title)) },
+        text = { Text(stringResource(prompt.text)) },
+        confirmButton = {
+            TextButton(onClick = onSend, modifier = button.focusWhenShown()) {
+                Text(stringResource(R.string.simple_crash_send))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = button) { Text(stringResource(R.string.simple_crash_dismiss)) }
         },
     )
 }

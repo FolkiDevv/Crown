@@ -30,6 +30,20 @@ Before a log is exported or shared, the app SHALL redact sensitive fields — se
 ### Requirement: Crash and error reporting path
 Unexpected service errors SHALL be captured with stack traces in the log so the user can include them in exported diagnostics, without sending any data off-device automatically.
 
+An uncaught exception in any process of the app (the app's process, the service processes `:bg` and `:watch`) MUST end that process: after logging it and writing a small marker file (process, time, exception class; no database access), the handler SHALL pass the exception to Android's own handler, which records the crash and kills the process. A crashed process MUST NOT start an activity and the user's task MUST NOT be cleared. The report SHALL be offered later: a crash of a service process (`:bg`, the restore watchdog `:watch`) by a notification («VPN service stopped because of an error» for `:bg`) whose tap shares the redacted log, posted by the next `:bg` or the next opening of either interface; a crash of the app's process by a dialog «Send log» when either interface opens next (it stays until answered, also across a recreated activity). A crash of the app's process within 60 seconds of the previous one MUST NOT open the dialog; it gets the notification instead, so a report that crashes cannot loop. When the connection restore reports the lost connection while the crash notification is shown or a service process's crash is not reported yet, one notification SHALL carry both actions. A crash while the log is being shared leaves no marker. A report MUST NOT be taken unseen: while notifications are off for the app (the Android 13+ permission not granted, or the warnings channel off) no notification takes the marker, and the next opening of either interface asks about the crash instead — about a repeated crash of the app only once its 60 seconds have passed.
+
 #### Scenario: Service error captured
 - **WHEN** the connection service hits an unexpected error
 - **THEN** the error and stack trace appear in the log and no data is transmitted automatically
+
+#### Scenario: Crash of the service process in the background
+- **WHEN** the main thread of `:bg` throws an uncaught exception while no window of the app is visible
+- **THEN** the process ends, no activity is started, and the next service process posts the notification «VPN service stopped because of an error», whose tap opens the log share
+
+#### Scenario: Crash of the app process
+- **WHEN** the app's process crashes and the user opens either interface afterwards
+- **THEN** the interface works and asks whether to send the log; the question is not shown again once answered
+
+#### Scenario: Crash on every opening
+- **WHEN** the app's process crashes again within 60 seconds of its previous crash
+- **THEN** the app is not restarted by itself and the next opening shows no dialog, only the notification
