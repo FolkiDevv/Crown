@@ -33,7 +33,7 @@ VERSION_NAME=1.0.0
 RELEASE=preview
 ```
 
-- `RELEASE=preview` — следующий preview `v<VERSION_NAME>-pre.<N>`: N на единицу больше последнего опубликованного preview этой версии. Его получают приложения с включённым «Разрешить обновления до beta-версий». Хранятся 10 последних preview.
+- `RELEASE=preview` — следующий preview `v<VERSION_NAME>-pre.<N>`: N на единицу больше последнего опубликованного preview этой версии. Его получают приложения с включённым «Разрешить обновления до beta-версий». Хранятся 3 последних preview.
 - `RELEASE=stable` — стабильный релиз `v<VERSION_NAME>`, его получают все. Перед ним добавьте раздел `#### <VERSION_NAME>` в `CROWN_CHANGELOG.md`, иначе в заметки попадёт список коммитов.
 
 Обычный цикл:
@@ -41,6 +41,11 @@ RELEASE=preview
 1. В `develop` копятся фичи, каждый выпуск `develop` → `main` даёт `1.0.0-pre.12`, `1.0.0-pre.13`, …
 2. Перед стабильной версией pull request в `develop` ставит `RELEASE=stable` и раздел changelog, затем выпуск `develop` → `main` публикует `v1.0.0`.
 3. Сразу после этого pull request в `develop` поднимает `VERSION_NAME=1.0.1` и возвращает `RELEASE=preview`. Пока этого нет, Release plan в pull request'ах в `develop` предупреждает, а в `main` — падает: preview уже выпущенной версии или повтор релиза опубликовать нельзя.
+
+Постоянные ссылки на APK (в релизах файлы называются `Crown-<abi>.apk` без версии, `<abi>` — `arm64-v8a`, `armeabi-v7a` или `x86_64`):
+
+- последний стабильный релиз: `https://github.com/FolkiDevv/Crown/releases/latest/download/Crown-arm64-v8a.apk`. Заработает после первого `RELEASE=stable`: «latest» у GitHub — только стабильный релиз;
+- последний preview: `https://github.com/FolkiDevv/Crown/releases/download/preview/Crown-arm64-v8a.apk`. Pre-release `preview` пересоздаётся каждым preview и не входит в три хранимых; встроенное обновление его не видит.
 
 Release plan также падает, если `versionCode` новой сборки не выше уже опубликованных (например, `VERSION_NAME` понизили). Workflow сам ничего не коммитит. Если публикация упала, перезапустите его или запустите **Release** вручную на `main`. Ручной запуск на другой ветке собирает APK только как artifact запуска.
 

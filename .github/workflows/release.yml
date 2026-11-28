@@ -16,7 +16,10 @@ permissions:
   contents: write
 env:
   # pre-releases kept on GitHub: the updater reads the newest 20 releases, so stable ones must stay among them
-  KEEP_PREVIEWS: 10
+  KEEP_PREVIEWS: 3
+  # A pre-release that always holds the newest preview's APKs: a fixed link releases/download/preview/Crown-<abi>.apk.
+  # It has no throne-update.json and its tag is not a version, so the in-app updater and release_plan.sh ignore it.
+  PREVIEW_TAG: preview
 jobs:
   release:
     name: Build and publish a release
@@ -110,6 +113,20 @@ jobs:
             } > "$NOTES"
             gh release create "$TAG" dist/* --prerelease --target "$GITHUB_SHA" --title "$TAG" --notes-file "$NOTES"
           fi
+      - name: Update the preview link
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.publish == 'true' && steps.plan.outputs.channel == 'preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$PREVIEW_TAG" > /dev/null 2>&1; then
+            gh release delete "$PREVIEW_TAG" --cleanup-tag --yes
+          fi
+          gh release create "$PREVIEW_TAG" dist/*.apk dist/SHA256SUMS --prerelease --target "$GITHUB_SHA" \
+            --title "Latest preview ($TAG)" \
+            --notes "The newest preview, currently [$TAG](https://github.com/$GH_REPO/releases/tag/$TAG). Every preview replaces this release, so its download links stay the same."
       - name: Prune old previews
         if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.publish == 'true' && steps.plan.outputs.channel == 'preview'
         env:
@@ -118,7 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release list --limit 200 --json tagName,isPrerelease,createdAt \
-            --jq "[.[] | select(.isPrerelease)] | sort_by(.createdAt) | reverse | .[${KEEP_PREVIEWS}:] | .[].tagName" |
+            --jq "[.[] | select(.isPrerelease and .tagName != \"$PREVIEW_TAG\")] | sort_by(.createdAt) | reverse | .[${KEEP_PREVIEWS}:] | .[].tagName" |
           while read -r OLD; do
             echo "Deleting the old preview $OLD"
             gh release delete "$OLD" --cleanup-tag --yes
