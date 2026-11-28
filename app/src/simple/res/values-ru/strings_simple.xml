@@ -560,6 +560,7 @@
     <string name="simple_shortcut_state_changed">VPN за это время изменился, ничего не сделано. Нажмите ярлык ещё раз</string>
     <string name="simple_crash_vpn_title">Служба VPN остановилась из-за ошибки</string>
     <string name="simple_crash_app_title">Crown остановился из-за ошибки</string>
+    <string name="simple_crash_service_title">Фоновый процесс Crown остановился из-за ошибки</string>
     <string name="simple_crash_notification_text">Нажмите, чтобы отправить журнал разработчикам.</string>
     <string name="simple_crash_prompt_text">В прошлый раз Crown неожиданно закрылся. Отправить журнал разработчикам, чтобы они исправили ошибку?</string>
     <string name="simple_crash_send">Отправить журнал</string>

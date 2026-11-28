@@ -121,10 +121,11 @@ object CrashReport {
 
     private fun notify(context: Context, crash: CrashMarker) {
         Logs.w("crash: ${crash.process} stopped with ${crash.exception}")
-        @StringRes val title = if (CrashRules.isBackground(crash.process)) {
-            R.string.simple_crash_vpn_title
-        } else {
-            R.string.simple_crash_app_title
+        // The watchdog's crash leaves the VPN running: its title does not say the VPN stopped.
+        @StringRes val title = when {
+            CrashRules.isBackground(crash.process) -> R.string.simple_crash_vpn_title
+            CrashRules.isApp(crash.process) -> R.string.simple_crash_app_title
+            else -> R.string.simple_crash_service_title
         }
         val text = context.getString(R.string.simple_crash_notification_text)
         // The app's process creates the channels off the main thread: they must exist before the post.
