@@ -2,6 +2,9 @@
 """Collects the per-ABI release APKs of one build into a directory ready for a GitHub release: the APKs, SHA256SUMS and
 throne-update.json, the manifest the in-app updater reads (io.nekohasekai.sagernet.update.UpdateChecker).
 
+Crown: the APKs are published as <ARTIFACT_NAME>-<abi>.apk (fork.properties), without the version, so that
+https://github.com/<repo>/releases/latest/download/Crown-arm64-v8a.apk stays a fixed download link.
+
 Usage: release_assets.py <apk-dir> <dist-dir> <stable|preview>
 
 <apk-dir> is AGP's output directory (app/build/outputs/apk/oss/release) with output-metadata.json. Every APK must be
@@ -52,11 +55,15 @@ def run(*args, merge_stderr=False):
     return result.stdout + result.stderr if merge_stderr else result.stdout
 
 
-def core_ref():
-    for line in (ROOT / "nb4a.properties").read_text().splitlines():
-        if line.startswith("THRONE_CORE_REF="):
+def prop(file, key):
+    for line in (ROOT / file).read_text().splitlines():
+        if line.startswith(key + "="):
             return line.split("=", 1)[1].strip()
-    fail("THRONE_CORE_REF missing in nb4a.properties")
+    fail(f"{key} missing in {file}")
+
+
+def core_ref():
+    return prop("nb4a.properties", "THRONE_CORE_REF")
 
 
 def signer_sha256(apksigner, apk):
@@ -99,6 +106,7 @@ def main():
     apk_dir, dist, channel = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
     metadata = json.loads((apk_dir / "output-metadata.json").read_text())
     apksigner, aapt2 = build_tool("apksigner"), build_tool("aapt2")
+    artifact = prop("fork.properties", "ARTIFACT_NAME")
 
     by_abi = {}
     for element in metadata["elements"]:
@@ -142,8 +150,9 @@ def main():
         elif manifest != common:
             fail(f"{apk.name} differs from the other APKs: {common} != {manifest}")
 
-        shutil.copy2(apk, dist / apk.name)
-        assets[abi] = {"name": apk.name, "size": apk.stat().st_size, "sha256": sha256(apk)}
+        name = f"{artifact}-{abi}.apk"
+        shutil.copy2(apk, dist / name)
+        assets[abi] = {"name": name, "size": apk.stat().st_size, "sha256": sha256(apk)}
 
     (dist / "SHA256SUMS").write_text("".join(f"{a['sha256']}  {a['name']}\n" for a in assets.values()), newline="\n")
     # throne-update.json is the in-app updater manifest. Crown publishes previews as pre-releases of the same package,
