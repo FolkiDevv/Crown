@@ -53,6 +53,7 @@ TOUCH_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/ui/BlankActivity.kt": "14: opened from a crash report; the reporting flag ends with the share",
     "app/src/main/java/io/nekohasekai/sagernet/ui/ScannerActivity.kt": "15: the codes returned to the screen that opened it, or handed to MainActivity as the app's own intent",
     "app/src/main/java/io/nekohasekai/sagernet/ui/RouteFragment.kt": "15: the scanner opened for its result",
+    "app/src/main/java/io/nekohasekai/sagernet/bg/SagerConnection.kt": "16: the service state outside :bg follows the bindings (read on connect, Idle when the service dies)",
     "app/src/main/java/io/nekohasekai/sagernet/QuickToggleShortcut.kt": "18: not the shortcut picker any more, a shortcut of a missing profile changes nothing",
     "app/src/main/java/io/nekohasekai/sagernet/ui/profile/ProfileSettingsActivity.kt": "18: the pinned server shortcut asks first on Android 7",
     "app/src/main/res/xml/settings_general.xml": "crown: daily update check switch on by default; 18: the external control switch",

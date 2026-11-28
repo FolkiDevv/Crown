@@ -4,13 +4,17 @@ import android.content.Context
 import android.os.SystemClock
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 import io.nekohasekai.sagernet.simple.ConnectionClock
+import io.nekohasekai.sagernet.simple.ServiceStateSync
 import io.nekohasekai.sagernet.simple.SimpleHooks
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
+import io.nekohasekai.sagernet.simple.regime.NetworkRegimeWatcher
 import io.nekohasekai.sagernet.simple.regime.ProbeGate
 import io.nekohasekai.sagernet.simple.regime.Regime
 import io.nekohasekai.sagernet.simple.regime.RegimeRecord
@@ -198,9 +202,10 @@ object TrafficModeApplier {
     private fun switchTo(target: Long, rebuilt: Boolean): Long {
         val before = DataStore.selectedProxy
         if (target != before) DataStore.selectedProxy = target
-        val state = DataStore.serviceState
+        if (target == before && !rebuilt) return target
+        val state = serviceState()
         // A service stopping for a restart is watched too: it may have read the old choice already.
-        if ((target != before || rebuilt) && isRunning(state)) {
+        if (isRunning(state)) {
             // `:bg` drops a reload that reaches it while it is stopping, and a reload that reaches a start still
             // connecting stops the service altogether (a cancelled start counts as a stop there). So a reload is sent at
             // once only to a service that is connected and not restarting; otherwise [settle] sends it once it is.
@@ -213,6 +218,8 @@ object TrafficModeApplier {
                 Logs.i("simple servers: server $target chosen, applied once the service is connected")
                 if (rebuilt) pendingRebuild = target
                 settle(target)
+                // This process may be gone before the service is connected: `:bg` checks the choice too.
+                NetworkRegimeWatcher.requestVerify(app)
             }
         }
         return target
@@ -262,7 +269,7 @@ object TrafficModeApplier {
      * pending and reloaded once.
      */
     private fun reloadWhenConnected(message: String, verifiable: Boolean = false) {
-        val state = DataStore.serviceState
+        val state = serviceState()
         if (!isRunning(state)) return
         val quiet = state == BaseService.State.Connected && settleJob?.isActive != true &&
             SystemClock.elapsedRealtime() - lastReloadAt >= RESTART_WAIT_MS
@@ -273,6 +280,55 @@ object TrafficModeApplier {
             if (!verifiable) pendingApply = true
         }
         settle(DataStore.selectedProxy)
+        // This process may be gone before the service is connected: `:bg` checks the server and routing too.
+        if (!quiet) NetworkRegimeWatcher.requestVerify(app)
+    }
+
+    /**
+     * The service state to decide by (proxy-connection «UI process binding»). `DataStore.serviceState` follows the
+     * service in `:bg` and while a binding of this process does (a screen); a process without one (started for a
+     * notification's action, say) binds here and asks the service, and keeps that binding for [HOLD_MS] so the watch
+     * of [settle] reads the state the service reports. Idle when the service gave no answer in [BIND_WAIT_MS]: nothing
+     * is sent then that could reach a start still connecting.
+     */
+    private fun serviceState(): BaseService.State {
+        if (app.isBgProcess) return DataStore.serviceState
+        if (ServiceStateSync.isLive() && !holding()) return DataStore.serviceState
+        hold()
+        val deadline = SystemClock.elapsedRealtime() + BIND_WAIT_MS
+        while (!ServiceStateSync.isLive() && SystemClock.elapsedRealtime() < deadline) Thread.sleep(BIND_POLL_MS)
+        if (ServiceStateSync.isLive()) return DataStore.serviceState
+        Logs.w("simple modes: the service gave no state in $BIND_WAIT_MS ms, it is not reloaded from here")
+        return BaseService.State.Idle
+    }
+
+    private val holdLock = Any()
+
+    /** The binding [serviceState] made; null while there is none. */
+    private var holder: SagerConnection? = null
+
+    @Volatile
+    private var holdUntil = 0L
+
+    private fun holding(): Boolean = synchronized(holdLock) { holder != null }
+
+    /** Binds now or keeps the binding [HOLD_MS] longer. */
+    private fun hold() = synchronized(holdLock) {
+        holdUntil = SystemClock.elapsedRealtime() + HOLD_MS
+        if (holder != null) return@synchronized
+        val connection = SagerConnection(SagerConnection.CONNECTION_ID_SHORTCUT)
+        holder = connection
+        runOnMainDispatcher { connection.connect(app, null) }
+        settleScope.launch {
+            while (true) {
+                delay((holdUntil - SystemClock.elapsedRealtime()).coerceAtLeast(BIND_POLL_MS))
+                val done = synchronized(holdLock) {
+                    (SystemClock.elapsedRealtime() >= holdUntil).also { if (it) holder = null }
+                }
+                if (done) break
+            }
+            runOnMainDispatcher { connection.disconnect(app) }
+        }
     }
 
     /**
@@ -291,7 +347,9 @@ object TrafficModeApplier {
      * Makes the running service end up on [target]: whenever it is connected (and not just asked to reload — a reload
      * sent moments ago may not have reached `:bg` yet), the profile it started with is compared with the choice and it
      * reloads if they differ, or once anyway while [pendingRebuild] names it (rebuilt under the same id).
-     * Twice at most. A newer choice, a stopped service or the time limit ends the watch.
+     * Twice at most. A newer choice, a stopped service or the time limit ends the watch; at the time limit a service
+     * still running is looked at once more: connected, it reloads if it missed the choice, otherwise the difference is
+     * logged and `:bg` checks it once the service is connected.
      */
     private fun settle(target: Long) {
         settleJob?.cancel()
@@ -299,11 +357,11 @@ object TrafficModeApplier {
             var reloads = 0
             var restartSeen = false
             val deadline = SystemClock.elapsedRealtime() + SETTLE_MS
-            while (isActive && SystemClock.elapsedRealtime() < deadline) {
-                delay(SETTLE_STEP_MS)
-                try {
+            try {
+                while (isActive && SystemClock.elapsedRealtime() < deadline) {
+                    delay(SETTLE_STEP_MS)
                     if (DataStore.selectedProxy != target) return@launch
-                    val state = DataStore.serviceState
+                    val state = serviceState()
                     if (!isRunning(state)) {
                         // Stopped for good: the next start reads the settings as they are now.
                         pendingApply = false
@@ -314,24 +372,51 @@ object TrafficModeApplier {
                         continue
                     }
                     if (!restartSeen && SystemClock.elapsedRealtime() - lastReloadAt < RESTART_WAIT_MS) continue
-                    val running = DataStore.currentProfile
-                    val routeRuns = DataStore.runningRouteId.let { it == 0L || it == DataStore.currentRouteId }
-                    if (pendingRebuild != target && !pendingApply && running == target && routeRuns) return@launch
-                    if (reloads >= 2) return@launch
+                    val reason = missed(target) ?: return@launch
+                    if (reloads >= 2) return@launch Logs.w("$reason — two reloads did not bring it, left as it is")
                     reloads++
                     restartSeen = false
-                    reloadNow(
-                        when {
-                            running != target -> "simple servers: the service runs $running, not the chosen $target; reload"
-                            pendingApply || !routeRuns -> "simple modes: the connected service missed the applied mode; reload"
-                            else -> "simple servers: selector $target was rebuilt; reload"
-                        }
-                    )
-                } catch (e: Exception) {
-                    Logs.w(e)
+                    reloadNow(reason)
+                }
+                if (!isActive || DataStore.selectedProxy != target) return@launch
+                // The time is up with the service not seen connected (or just reloaded): never given up unsaid.
+                val state = serviceState()
+                if (!isRunning(state)) {
+                    pendingApply = false
                     return@launch
                 }
+                val reason = if (state == BaseService.State.Connected) missed(target) else null
+                val settled = SystemClock.elapsedRealtime() - lastReloadAt >= RESTART_WAIT_MS
+                when {
+                    state == BaseService.State.Connected && reason == null -> Unit
+                    reason != null && settled && reloads < 2 -> reloadNow("$reason (the watch ran out)")
+                    else -> {
+                        Logs.w(
+                            "simple servers: the watch for $target ran out with the service ${state.name.lowercase()}" +
+                                (reason?.let { ", $it not sent" } ?: "") + "; `:bg` checks the running core"
+                        )
+                        NetworkRegimeWatcher.requestVerify(app)
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Logs.w(e)
             }
+        }
+    }
+
+    /** Why the connected service has to reload for [target] (the chosen one); null when it runs it. */
+    private fun missed(target: Long): String? {
+        val mismatch = RunningCore.mismatch()
+        return when {
+            mismatch == RunningCore.Mismatch.SERVER ->
+                "simple servers: the service runs ${DataStore.currentProfile}, not the chosen $target; reload"
+
+            pendingApply || mismatch == RunningCore.Mismatch.ROUTE ->
+                "simple modes: the connected service missed the applied mode; reload"
+
+            pendingRebuild == target -> "simple servers: selector $target was rebuilt; reload"
+            else -> null
         }
     }
 
@@ -340,6 +425,13 @@ object TrafficModeApplier {
 
     /** How long a reload sent from here may take to reach `:bg` and show as a state change. */
     private const val RESTART_WAIT_MS = 5_000L
+
+    /** How long [serviceState] waits for a binding it made to hear from the service. */
+    private const val BIND_WAIT_MS = 3_000L
+    private const val BIND_POLL_MS = 50L
+
+    /** How long a binding [serviceState] made stays after its last use: the whole watch of [settle]. */
+    private const val HOLD_MS = SETTLE_MS + 5_000L
 
     private fun countrySelectorChanged(ensured: TrafficModes.Ensured): Boolean = ensured.countryGone ||
         ensured.countryChanged && ensured.ids.country > 0L && DataStore.selectedProxy == ensured.ids.country
