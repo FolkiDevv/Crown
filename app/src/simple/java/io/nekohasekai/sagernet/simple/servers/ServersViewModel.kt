@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.simple.servers
 
 import android.app.Application
+import android.content.Context
 import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
@@ -754,12 +755,14 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun readRecord(): RoundRecord =
-        RoundRecord.decode(SimpleUi.store(getApplication()).getString(KEY_ROUND))
+    /** SharedPreferences `simple_ui`: only the UI process reads and writes it. */
+    private val prefs get() = getApplication<Application>().getSharedPreferences(SimpleUi.PREFS, Context.MODE_PRIVATE)
+
+    private fun readRecord(): RoundRecord = RoundRecord.decode(prefs.getString(KEY_ROUND, null))
 
     private fun saveRecord(value: RoundRecord) {
         record = value
-        SimpleUi.store(getApplication()).putString(KEY_ROUND, value.encode())
+        prefs.edit().putString(KEY_ROUND, value.encode()).apply()
     }
 
     private fun onTestState(test: TestUiState) {
