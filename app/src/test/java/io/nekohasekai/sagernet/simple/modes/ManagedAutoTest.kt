@@ -85,11 +85,11 @@ class ManagedAutoTest {
         assertEquals(ManagedAuto.Update(save = false, tuning = done), update(stored(selector), pending))
     }
 
-    /** A stale save of `:bg` put the whole old JSON back after the move: the next ensure moves again. */
+    /** A stale save of `:bg` put the whole old JSON back after the move: the next ensure moves again, once. */
     @Test
     fun aStaleSaveIsMovedAgain() {
         val selector = oldSelector()
-        assertEquals(ManagedAuto.Update(save = true, tuning = pending), update(selector, pending))
+        assertEquals(ManagedAuto.Update(save = true, tuning = done), update(selector, pending))
         assertTrue(selector.passive)
         assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, selector.watchIntervalSec)
     }
@@ -98,12 +98,19 @@ class ManagedAutoTest {
     @Test
     fun aStaleSaveOfAPartMoveIsMovedAgain() {
         val selector = oldSelector().apply { watchIntervalSec = 30 }
-        val moved = ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_PASSIVE)
-        assertEquals(moved, update(selector, ManagedAuto.PENDING_PASSIVE))
+        assertEquals(ManagedAuto.Update(save = true, tuning = done), update(selector, ManagedAuto.PENDING_PASSIVE))
         assertTrue(selector.passive)
         assertEquals(30, selector.watchIntervalSec)
-        val confirmed = ManagedAuto.Update(save = false, tuning = done)
-        assertEquals(confirmed, update(stored(selector), ManagedAuto.PENDING_PASSIVE))
+    }
+
+    /** The second move is the last: passive turned off by hand after it is not turned on again. */
+    @Test
+    fun afterTheSecondMoveAHandEditStays() {
+        val selector = oldSelector().apply { watchIntervalSec = 30 }
+        val marker = update(selector, ManagedAuto.PENDING_PASSIVE).tuning
+        selector.passive = false
+        assertEquals(ManagedAuto.Update(save = false, tuning = done), update(selector, marker))
+        assertFalse(selector.passive)
     }
 
     /** Only the interval moved (passive was on already); a stale save put 15 s back: it moves again. */
@@ -112,8 +119,7 @@ class ManagedAutoTest {
         val selector = oldSelector().apply { passive = true }
         assertEquals(ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_WATCH), update(selector, 0L))
         val stale = oldSelector().apply { passive = true }
-        val again = ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_WATCH)
-        assertEquals(again, update(stale, ManagedAuto.PENDING_WATCH))
+        assertEquals(ManagedAuto.Update(save = true, tuning = done), update(stale, ManagedAuto.PENDING_WATCH))
         assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, stale.watchIntervalSec)
     }
 

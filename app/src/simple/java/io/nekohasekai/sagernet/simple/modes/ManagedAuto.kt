@@ -58,8 +58,10 @@ object ManagedAuto {
      *   editor) stays; when anything moved the marker becomes one of the pending ones below, which also says which
      *   settings moved (moved, but not yet seen stored);
      * - pending: the next ensure confirms it. Only when every setting that moved is back at its old default (a stale
-     *   whole-selector save of `:bg`, which loaded it before the move, put the old JSON back) they move again; when
-     *   only one of two moved settings is back, it was changed by hand and stays.
+     *   whole-selector save of `:bg`, which loaded it before the move, put the old JSON back) they move again, once:
+     *   the marker becomes [TUNING_VERSION] with it. An old value alone cannot tell that stale save from the user
+     *   putting the setting back in the classic editor before the confirmation, so such an edit is undone at most this
+     *   one time and stays when repeated. When only one of two moved settings is back, it was changed by hand and stays.
      */
     fun update(existing: AutoSelector, groups: List<Long>, firstTier: String, tuning: Long): Update {
         var changed = false
@@ -84,6 +86,7 @@ object ManagedAuto {
         if (movePassive) existing.passive = PASSIVE
         if (moveWatch) existing.watchIntervalSec = WATCH_INTERVAL_SEC
         val marker = when {
+            tuning == PENDING_BOTH || tuning == PENDING_PASSIVE || tuning == PENDING_WATCH -> TUNING_VERSION
             movePassive && moveWatch -> PENDING_BOTH
             movePassive -> PENDING_PASSIVE
             moveWatch -> PENDING_WATCH
