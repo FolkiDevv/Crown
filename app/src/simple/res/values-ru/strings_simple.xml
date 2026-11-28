@@ -533,4 +533,12 @@
     <string name="simple_server_test_busy">Проверка уже идёт</string>
     <string name="simple_share_no_link">У этого сервера нет ссылки, которой можно поделиться</string>
     <string name="simple_change_failed">Не удалось сохранить изменение</string>
+    <!-- «Постоянный VPN» (keep-tunnel-during-in-place-restart) -->
+    <string name="simple_settings_always_on">Постоянный VPN</string>
+    <string name="simple_settings_always_on_off">Выключен. Включите для Crown «Постоянный VPN» и «Блокировать соединения без VPN» в настройках Android: тогда приложения не выйдут в сеть мимо VPN, даже пока он переподключается. Приложения без VPN тогда останутся без интернета</string>
+    <string name="simple_settings_always_on_on">Включён, но соединения без VPN не блокируются: пока VPN переподключается, приложения могут выйти в сеть напрямую. Включите «Блокировать соединения без VPN»; приложения без VPN тогда останутся без интернета</string>
+    <string name="simple_settings_always_on_lockdown">Включён, соединения без VPN блокируются</string>
+    <string name="simple_settings_always_on_unknown">Включите для Crown «Постоянный VPN» и «Блокировать соединения без VPN» в настройках Android, чтобы приложения не выходили в сеть мимо VPN. Приложения без VPN тогда останутся без интернета</string>
+    <string name="simple_repair_always_on_title">Без трафика мимо VPN</string>
+    <string name="simple_repair_always_on_text">Пока Crown переключает сервер или переподключается, приложения могут на мгновение выйти в сеть напрямую. Чтобы этого не было, включите для Crown «Постоянный VPN» и «Блокировать соединения без VPN» в настройках VPN. Приложения без VPN тогда останутся без интернета.</string>
 </resources>

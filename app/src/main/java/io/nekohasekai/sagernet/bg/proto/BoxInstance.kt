@@ -43,6 +43,13 @@ abstract class BoxInstance(
     /** The bridge ports [config] listens on (Xray may bind them late), no other box's until [close]. */
     private val ports = PortLease()
 
+    /** The dashboard port [config] listens on, 0 without the dashboard. */
+    var apiPort = 0
+        private set
+
+    /** The dashboard port of the box this one replaces: it is still running while this one is built (a restart). */
+    var replacedApiPort = 0
+
     fun isInitialized(): Boolean {
         return ::config.isInitialized && ::box.isInitialized
     }
@@ -52,11 +59,14 @@ abstract class BoxInstance(
         if (DataStore.randomInboundPort) DataStore.inboundSocksPort = mkPort()
         // The dashboard is on by default, so another app holding its port must not fail the start: it moves, and the
         // dashboard screen follows the saved port.
-        if (DataStore.apiDashboardEnabled && !isLoopbackPortFree(DataStore.coreBoxApiPort)) {
+        if (DataStore.apiDashboardEnabled && DataStore.coreBoxApiPort != replacedApiPort &&
+            !isLoopbackPortFree(DataStore.coreBoxApiPort)
+        ) {
             val port = mkPort()
             Logs.w("sing-box API port ${DataStore.coreBoxApiPort} is in use, the dashboard moves to $port")
             DataStore.coreBoxApiPort = port
         }
+        apiPort = if (DataStore.apiDashboardEnabled) DataStore.coreBoxApiPort else 0
         // A custom full config keeps its own rule-sets as written.
         if (isCustomFullConfig()) deferRuleSets = false
         val route = RouteManager.routeFor(profile.groupId)

@@ -56,6 +56,7 @@ import io.nekohasekai.sagernet.simple.modes.AppList
 import io.nekohasekai.sagernet.simple.modes.ModeCard
 import io.nekohasekai.sagernet.simple.modes.ModesUiState
 import io.nekohasekai.sagernet.simple.modes.TrafficMode
+import io.nekohasekai.sagernet.utils.AlwaysOnVpn
 
 /** What the settings section opens and changes. */
 class SettingsActions(
@@ -75,6 +76,8 @@ class SettingsActions(
     val openClassic: () -> Unit,
     /** «Починка» (batch 7). */
     val openRepair: () -> Unit,
+    /** The system VPN settings, where «Постоянный VPN» and «Блокировать соединения без VPN» are. */
+    val openVpnSettings: () -> Unit,
     /** The in-app updater's check, at once; null where the build has no in-app updater (fdroid). */
     val checkUpdates: (() -> Unit)?,
 )
@@ -120,6 +123,13 @@ fun SettingsScreen(
                 summary = stringResource(R.string.simple_settings_auto_update_summary),
                 checked = settings.autoUpdate,
                 onChange = actions.setAutoUpdate,
+            )
+        }
+        item {
+            NavigationItem(
+                title = stringResource(R.string.simple_settings_always_on),
+                summary = stringResource(settings.alwaysOn.summary),
+                onClick = actions.openVpnSettings,
             )
         }
 
@@ -465,3 +475,13 @@ private fun FallbackNotice(onDismiss: () -> Unit) {
         }
     }
 }
+
+/** «Постоянный VPN»: lockdown keeps apps from going online around the VPN while it reconnects or switches servers. */
+@get:StringRes
+private val AlwaysOnVpn.State.summary: Int
+    get() = when (this) {
+        AlwaysOnVpn.State.OFF -> R.string.simple_settings_always_on_off
+        AlwaysOnVpn.State.ON -> R.string.simple_settings_always_on_on
+        AlwaysOnVpn.State.LOCKDOWN -> R.string.simple_settings_always_on_lockdown
+        AlwaysOnVpn.State.UNKNOWN -> R.string.simple_settings_always_on_unknown
+    }

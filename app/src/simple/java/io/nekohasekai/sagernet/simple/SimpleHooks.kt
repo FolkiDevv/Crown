@@ -57,6 +57,13 @@ object SimpleHooks {
     }
 
     /**
+     * An in-place restart is about to build its next core while the old one still runs: the build reads the per-app
+     * keys before [onServiceStopped], so the start counts here already (counted again there; only a change matters).
+     */
+    @JvmStatic
+    fun onRestartBuilding() = guarded { countStart() }
+
+    /**
      * A subscription fetch ended (touch point 9 in `group/SubscriptionRefresh.kt`): [deviceLimit] the panel's device
      * limit headers, [servers] the answer had servers, [announce] it had an announcement. Keeps the mark of
      * simple-ui "Сообщения подписки" until a fetch brings servers again; a failed fetch changes nothing else.
