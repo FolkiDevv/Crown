@@ -537,6 +537,23 @@ class BaseService {
                 } catch (error: Throwable) {
                     recordCleanupFailure("process-cleanup-boundary", error)
                 }
+                // The old core's traffic counter wrote its last bytes as it stopped, after the next core read its
+                // profiles: their totals are read again, or the next counter would start below the stored ones.
+                next?.let { prepared ->
+                    try {
+                        withContext(Dispatchers.IO) {
+                            val entities = prepared.trafficMap.values.flatten()
+                            val stored = SagerDatabase.proxyDao.getEntities(entities.map { it.id }.distinct())
+                                .associateBy { it.id }
+                            for (entity in entities) stored[entity.id]?.let {
+                                entity.rx = it.rx
+                                entity.tx = it.tx
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        recordCleanupFailure("next-traffic", error)
+                    }
+                }
 
                 // A stop, reload or selection that came meanwhile: the built core is not what should run. A fresh
                 // start replaces the kept interface (or a stop closes it); nothing suspends after the last check.

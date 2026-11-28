@@ -263,8 +263,8 @@ class VpnService : BaseVpnService(),
             Logs.i("VpnLifecycleTrace stage=tun-reuse")
             return retired.fd.fd
         }
-        // Changed after killProcesses kept the interface: close it first here too (see killProcesses). Android learns of
-        // the closed interface asynchronously (netd), and an establish() before that would still hand the network
+        // Changed after killProcesses kept the interface: close it first here too (see killProcesses). Android learns
+        // of the closed interface asynchronously (netd), and an establish() before that would still hand the network
         // over: give it a moment, as the old core's close does on the usual path. Rare: a change in that short window.
         if (retired?.spec?.needsNewNetwork(spec, meteredApplies()) == true) {
             releaseRetiredTun()
@@ -293,17 +293,27 @@ class VpnService : BaseVpnService(),
     private fun tunSpec(
         options: TunOptions, allowed: List<String>, denied: List<String>, bypass: Boolean, metered: Boolean,
     ): TunSpec {
+        // Reads exactly what openTun reads, under the same conditions: some getters are unsafe where the builder
+        // skips them (the DNS address without DNS derivation).
         fun routes(prefixes: RoutePrefixIterator) = buildList { prefixes.forEach { add(it.address() to it.prefix()) } }
-        val proxy = options.isHTTPProxyEnabled()
+        val autoRoute = options.getAutoRoute()
+        val dnsMode = if (autoRoute) options.getDNSMode().value else null
+        val proxy = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && options.isHTTPProxyEnabled()
         return TunSpec(
-            mtu = options.getMTU(), autoRoute = options.getAutoRoute(), dnsMode = options.getDNSMode().value,
-            dns = options.getDNSServerAddress().toList(),
-            routes = listOf(
-                routes(options.getInet4Address()), routes(options.getInet6Address()),
-                routes(options.getInet4RouteAddress()), routes(options.getInet6RouteAddress()),
-                routes(options.getInet4RouteExcludeAddress()), routes(options.getInet6RouteExcludeAddress()),
-                routes(options.getInet4RouteRange()), routes(options.getInet6RouteRange()),
-            ),
+            mtu = options.getMTU(), autoRoute = autoRoute, dnsMode = dnsMode,
+            dns = if (autoRoute && dnsMode != Mobile.DNSModeDisabled) {
+                options.getDNSServerAddress().toList()
+            } else {
+                emptyList()
+            },
+            routes = listOf(routes(options.getInet4Address()), routes(options.getInet6Address())) + when {
+                !autoRoute -> emptyList()
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(
+                    routes(options.getInet4RouteAddress()), routes(options.getInet6RouteAddress()),
+                    routes(options.getInet4RouteExcludeAddress()), routes(options.getInet6RouteExcludeAddress()),
+                )
+                else -> listOf(routes(options.getInet4RouteRange()), routes(options.getInet6RouteRange()))
+            },
             allowed = TunSpec.apps(allowed, ::uidOf), denied = TunSpec.apps(denied, ::uidOf),
             httpProxy = if (proxy) {
                 listOf(
