@@ -129,6 +129,12 @@ class ShortcutEntryActivity : Activity(), SagerConnection.Callback {
      * changed since, the toggle now means something else (a «Connect?» would stop the VPN), so nothing is done.
      */
     private fun runConfirmed(shown: ControlRules.Command) {
+        // The server may have been deleted while the dialog was open (a subscription update): then nothing changes.
+        val asked = profile
+        if (asked is ControlRules.Profile.Existing && !ExternalControl.profileExists(asked.id)) {
+            Toast.makeText(this, R.string.simple_shortcut_server_missing, Toast.LENGTH_SHORT).show()
+            return
+        }
         val now = try {
             connection.service?.let { service ->
                 ControlRules.decide(
