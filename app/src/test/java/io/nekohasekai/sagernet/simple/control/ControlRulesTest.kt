@@ -24,6 +24,18 @@ class ControlRulesTest {
     }
 
     @Test
+    fun profileExtraOfAnyNumberTypeOrNone() {
+        assertEquals(-1L, ControlRules.profileExtra(false, null))
+        assertEquals(5L, ControlRules.profileExtra(true, 5L))
+        assertEquals(5L, ControlRules.profileExtra(true, 5))
+        assertEquals(5L, ControlRules.profileExtra(true, " 5 "))
+        // There but no id: the request is ignored, not carried out on the selected profile.
+        assertNull(ControlRules.profileExtra(true, "five"))
+        assertNull(ControlRules.profileExtra(true, null))
+        assertNull(ControlRules.profileExtra(true, 5.0))
+    }
+
+    @Test
     fun aMissingProfileNeverChangesTheConnection() {
         // It used to select the id and stop the VPN with "profile_empty" (simple UI: «Соединение потеряно»).
         for (request in Request.entries) for (state in State.entries) {

@@ -36,6 +36,18 @@ object ControlRules {
         data class Switch(val profile: Long) : Command
     }
 
+    /**
+     * The id in the `profile` extra: -1 when there is none, null when it is there but no id (then the request is
+     * ignored, not carried out on the selected profile). Automation apps send numbers as Int, Long or text.
+     */
+    fun profileExtra(present: Boolean, value: Any?): Long? = when {
+        !present -> -1L
+        value is Long -> value
+        value is Int -> value.toLong()
+        value is String -> value.trim().toLongOrNull()
+        else -> null
+    }
+
     fun profile(raw: Long, exists: (Long) -> Boolean): Profile = when {
         raw < 0L -> Profile.None
         exists(raw) -> Profile.Existing(raw)

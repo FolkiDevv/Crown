@@ -331,14 +331,14 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- Crown (touch point 18): hands out the toggle shortcut, and on Android 7 asks before a legacy one toggles.
-             Not singleTask: it returns the shortcut to the launcher (startActivityForResult). -->
+             Not singleTask: it returns the shortcut to the launcher (startActivityForResult). Not in :bg: an intent
+             another app sends here cannot take the VPN process down. -->
         <activity
             android:name="io.nekohasekai.sagernet.simple.control.ShortcutEntryActivity"
             android:excludeFromRecents="true"
             android:exported="true"
             android:icon="@drawable/ic_qu_shadowsocks_launcher"
             android:label="@string/quick_toggle"
-            android:process=":bg"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>

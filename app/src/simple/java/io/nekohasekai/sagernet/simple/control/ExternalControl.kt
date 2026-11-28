@@ -38,6 +38,21 @@ object ExternalControl {
     }
 
     /**
+     * The profile of an intent from outside the app, null when its extras cannot be read or its `profile` is no id:
+     * such an intent is ignored. Reading the extras unparcels them, which throws on a bundle made to fail.
+     */
+    @Suppress("DEPRECATION")
+    fun profileOf(intent: Intent): ControlRules.Profile? = try {
+        val present = intent.hasExtra(ControlRules.EXTRA_PROFILE)
+        ControlRules.profileExtra(present, if (present) intent.extras?.get(ControlRules.EXTRA_PROFILE) else null)
+            ?.let { ControlRules.profile(it, ::profileExists) }
+            .also { if (it == null) Logs.w("external control: the profile extra is no id, ignored") }
+    } catch (e: Exception) {
+        Logs.w("external control: unreadable extras, ignored", e)
+        null
+    }
+
+    /**
      * Carries out [command] the way the app's own controls do: a start goes through [SagerNet.startService] (an
      * explicit start: it marks the connection as wanted and starts the restore count over), a stop through
      * [SagerNet.stopService] (clears the mark), a switch selects the profile and reloads.
@@ -46,8 +61,15 @@ object ExternalControl {
         when (command) {
             ControlRules.Command.Ignore -> Unit
             is ControlRules.Command.Start -> {
+                val previous = DataStore.selectedProxy
                 command.select?.let { DataStore.selectedProxy = it }
-                SagerNet.startService()
+                try {
+                    SagerNet.startService()
+                } catch (e: Exception) {
+                    // Android refused the start (a foreground service from the background): keep the old choice.
+                    if (command.select != null) DataStore.selectedProxy = previous
+                    throw e
+                }
             }
 
             ControlRules.Command.Stop -> SagerNet.stopService()
@@ -61,7 +83,7 @@ object ExternalControl {
 
 /**
  * The one entry point another app may use to change the connection, `<applicationId>.action.CONNECT|DISCONNECT|TOGGLE`
- * with an optional long extra `profile`. Ignored while [ExternalControl.isAllowed] is off. It never asks for VPN
+ * with an optional extra `profile` (a long, int or text id). Ignored while [ExternalControl.isAllowed] is off. It never asks for VPN
  * consent (no activity may start from here) and never changes anything else: no settings, no imports, no profile that
  * does not exist.
  */
@@ -74,9 +96,7 @@ class ExternalControlReceiver : BroadcastReceiver() {
                 Logs.w("external control: ${request.name} ignored, other apps may not control the VPN")
                 return
             }
-            val profile = ControlRules.profile(
-                intent.getLongExtra(ControlRules.EXTRA_PROFILE, -1L), ExternalControl::profileExists
-            )
+            val profile = ExternalControl.profileOf(intent) ?: return
             if (profile is ControlRules.Profile.Missing) {
                 Logs.w("external control: ${request.name} ignored, no profile ${profile.id}")
                 return

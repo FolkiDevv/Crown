@@ -68,11 +68,11 @@ class ExportedComponentsTest {
             assertEquals(name, "false", executor.attr("exported"))
             assertFalse(name, executor.hasFilter())
         }
-        // The launcher's shortcut picker goes to the entry, which only hands out the shortcut.
-        assertEquals(
-            setOf("android.intent.action.CREATE_SHORTCUT"),
-            component("io.nekohasekai.sagernet.simple.control.ShortcutEntryActivity").actions(),
-        )
+        // The launcher's shortcut picker goes to the entry, which only hands out the shortcut. It stays out of :bg, so
+        // an intent another app makes to fail cannot take the VPN process down.
+        val entry = component("io.nekohasekai.sagernet.simple.control.ShortcutEntryActivity")
+        assertEquals(setOf("android.intent.action.CREATE_SHORTCUT"), entry.actions())
+        assertEquals("", entry.attr("process"))
     }
 
     @Test

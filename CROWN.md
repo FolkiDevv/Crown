@@ -84,11 +84,11 @@ Remnawave (Subpage Builder): кнопка `subscriptionLink` со ссылкой
 
 | Action | Что делает |
 |---|---|
-| `<пакет>.action.CONNECT` | подключить; с long extra `profile` — выбрать этот сервер (при работающем VPN — переключиться на него) |
+| `<пакет>.action.CONNECT` | подключить; с extra `profile` (id сервера: long, int или строка) — выбрать этот сервер (при работающем VPN — переключиться на него) |
 | `<пакет>.action.DISCONNECT` | отключить |
 | `<пакет>.action.TOGGLE` | как ярлык «Переключить»: отключить или подключить; с `profile` другого сервера — переключиться |
 
-`<пакет>` — `dev.folki.crown` (debug: `dev.folki.crown.debug`), получатель `io.nekohasekai.sagernet.simple.control.ExternalControlReceiver`. Несуществующий `profile` ничего не меняет. Без выданного ранее разрешения на VPN подключение не начинается: диалог согласия из фона не показать.
+`<пакет>` — `dev.folki.crown` (debug: `dev.folki.crown.debug`), получатель `io.nekohasekai.sagernet.simple.control.ExternalControlReceiver`. Несуществующий или нечисловой `profile` ничего не меняет. Без выданного ранее разрешения на VPN подключение не начинается: диалог согласия из фона не показать.
 
 ## Слияние upstream
 

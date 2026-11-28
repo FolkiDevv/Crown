@@ -79,9 +79,10 @@ class ShortcutEntryActivity : Activity(), SagerConnection.Callback {
                     finish()
                     return
                 }
-                profile = ControlRules.profile(
-                    intent.getLongExtra(ControlRules.EXTRA_PROFILE, -1L), ExternalControl::profileExists
-                )
+                profile = ExternalControl.profileOf(intent) ?: run {
+                    finish()
+                    return
+                }
                 if (profile is ControlRules.Profile.Missing) {
                     Toast.makeText(this, R.string.simple_shortcut_server_missing, Toast.LENGTH_SHORT).show()
                     finish()
