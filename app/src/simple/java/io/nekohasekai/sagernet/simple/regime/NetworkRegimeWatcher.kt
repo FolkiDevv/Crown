@@ -7,12 +7,14 @@ import android.content.IntentFilter
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.SystemClock
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.simple.config.SimpleConfigRepo
+import io.nekohasekai.sagernet.simple.modes.RunningCore
 import io.nekohasekai.sagernet.simple.modes.ServiceChange
 import io.nekohasekai.sagernet.simple.modes.TrafficMode
 import io.nekohasekai.sagernet.simple.modes.TrafficModeApplier
@@ -53,6 +55,12 @@ object NetworkRegimeWatcher {
 
     /** The simple UI asks for a check (the user chose «Авто»); only a running watcher hears it. */
     private const val ACTION_CHECK = "io.nekohasekai.sagernet.simple.CHECK_REGIME"
+
+    /** The UI process applied a choice it could not see the service take: the connected core is compared with it. */
+    private const val ACTION_VERIFY = "io.nekohasekai.sagernet.simple.VERIFY_RUNNING"
+
+    /** How long a connected core runs without a restart before [verifyLater] compares it (the UI's own reload first). */
+    private const val VERIFY_STEADY_MS = 10_000L
 
     /** The user left the configuration for whitelists (UI process): the repeating notification ends now. */
     private const val ACTION_WARNING_OFF = "io.nekohasekai.sagernet.simple.WHITELIST_ZONE_OFF"
@@ -100,6 +108,12 @@ object NetworkRegimeWatcher {
         /** A result changed the routing while the service was not connected: waits for Connected, then reloads. */
         var pendingReload: Job? = null
 
+        /** Compares the connected core with the stored choice ([verifyLater]); null while no comparison waits. */
+        var verify: Job? = null
+
+        /** A reload [verifyLater] sent is sent once per choice: one that did not bring it would only loop. */
+        val verifyGuard = RunningCore.ReloadGuard()
+
         /** Posts the notification about a configuration for whitelists and repeats it; null while there is none. */
         var warning: Job? = null
     }
@@ -111,8 +125,11 @@ object NetworkRegimeWatcher {
         session = started
         Logs.i("simple regime: watcher started with the VPN")
         started.receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) =
-                if (intent.action == ACTION_WARNING_OFF) onWarningOff(started) else onCheckRequested(started)
+            override fun onReceive(context: Context, intent: Intent) = when (intent.action) {
+                ACTION_WARNING_OFF -> onWarningOff(started)
+                ACTION_VERIFY -> verifyLater(started, "asked by the UI process")
+                else -> onCheckRequested(started)
+            }
         }.also { register(it) }
         val monitor = PhysicalNetworkMonitor { onNetwork(started, it) }
         if (monitor.start()) {
@@ -129,6 +146,8 @@ object NetworkRegimeWatcher {
                 onTimer(started)
             }
         }
+        // A choice the UI process applied while this first core connected was asked for before anyone listened.
+        verifyLater(started, "VPN connected")
     }
 
     /** SimpleHooks: the service stopped for good (not a restart in place); no more checks until the next start. */
@@ -200,6 +219,15 @@ object NetworkRegimeWatcher {
      */
     fun warningOff(context: Context) {
         context.sendBroadcast(Intent(ACTION_WARNING_OFF).setPackage(context.packageName))
+    }
+
+    /**
+     * TrafficModeApplier (UI process) applied a server or mode while the service could not reload at once, and this
+     * process may be gone before it can: a running watcher compares the core with the stored choice once it is
+     * connected ([verifyLater]). With the VPN off nobody receives it, and the next start reads the stored choice.
+     */
+    fun requestVerify(context: Context) {
+        context.sendBroadcast(Intent(ACTION_VERIFY).setPackage(context.packageName))
     }
 
     // ------------------------------------------------------------------------------------------------ events
@@ -423,7 +451,8 @@ object NetworkRegimeWatcher {
      * awaited until Connected and reloaded only if the core it started does not run the routing and server now stored.
      */
     private fun oweReload(owner: Session, change: ServiceChange) {
-        if (change == ServiceChange.NONE) return
+        // Nothing changed here, but the UI process may have written the same choice before and never reloaded.
+        if (change == ServiceChange.NONE) return verifyLater(owner, "after a network check")
         synchronized(lock) {
             if (session !== owner) return
             if (DataStore.serviceState == BaseService.State.Connected && owner.pendingReload?.isActive != true) {
@@ -439,7 +468,7 @@ object NetworkRegimeWatcher {
                     delay(POLL_MS)
                     waited += POLL_MS
                 }
-                if (DataStore.runningRouteId != DataStore.currentRouteId || DataStore.currentProfile != DataStore.selectedProxy) {
+                if (RunningCore.mismatch() != null) {
                     Logs.i("simple regime: the connected core runs another routing than the network's, reload")
                     SagerNet.reloadService()
                 }
@@ -447,8 +476,61 @@ object NetworkRegimeWatcher {
         }
     }
 
+    /**
+     * proxy-connection «UI process binding», the safety net in `:bg`: once the service has been connected for
+     * [VERIFY_STEADY_MS] without a restart (so a reload the UI process sent itself goes first), the running core is
+     * compared with the stored server and routing ([RunningCore]) and reloaded only if they differ — once per choice
+     * ([Session.verifyGuard]), so a reload that cannot bring it never loops. One comparison waits at a time; a
+     * restart meanwhile makes it wait for the next steady core. Gives up after [CONNECT_WAIT_MS] without one.
+     */
+    private fun verifyLater(owner: Session, reason: String) = synchronized(lock) {
+        if (session !== owner || owner.verify?.isActive == true) return@synchronized
+        owner.verify = owner.scope.launch(Dispatchers.IO) {
+            try {
+                val deadline = SystemClock.elapsedRealtime() + CONNECT_WAIT_MS
+                while (true) {
+                    if (SystemClock.elapsedRealtime() >= deadline) {
+                        return@launch Logs.i("simple regime: check of the running core ($reason): not connected, none")
+                    }
+                    if (DataStore.serviceState != BaseService.State.Connected || owner.pendingReload?.isActive == true) {
+                        delay(POLL_MS)
+                        continue
+                    }
+                    val starts = TrafficModeApplier.serviceStarts()
+                    delay(VERIFY_STEADY_MS)
+                    if (DataStore.serviceState == BaseService.State.Connected && TrafficModeApplier.serviceStarts() == starts) break
+                }
+                val target = RunningCore.target()
+                val mismatch = RunningCore.mismatch(DataStore.currentProfile, DataStore.runningRouteId, target.selected, target.route)
+                if (mismatch == null) {
+                    owner.verifyGuard.settled()
+                    return@launch
+                }
+                if (!owner.verifyGuard.admit(target)) {
+                    return@launch Logs.w(
+                        "simple regime: the running core still differs from the choice ($mismatch, server " +
+                            "${target.selected}) after a reload for it; not reloaded again"
+                    )
+                }
+                Logs.i(
+                    "simple regime: the running core (server ${DataStore.currentProfile}, routing " +
+                        "${DataStore.runningRouteId}) differs from the choice (server ${target.selected}, routing " +
+                        "${target.route}) ($reason), reload"
+                )
+                SagerNet.reloadService()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logs.w(e)
+            }
+        }
+    }
+
     private fun register(receiver: BroadcastReceiver) {
-        val filter = IntentFilter(ACTION_CHECK).apply { addAction(ACTION_WARNING_OFF) }
+        val filter = IntentFilter(ACTION_CHECK).apply {
+            addAction(ACTION_WARNING_OFF)
+            addAction(ACTION_VERIFY)
+        }
         val permission = "${app.packageName}.SERVICE"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             app.registerReceiver(receiver, filter, permission, null, Context.RECEIVER_NOT_EXPORTED)

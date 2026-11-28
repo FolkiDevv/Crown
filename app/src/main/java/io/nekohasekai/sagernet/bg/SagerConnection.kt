@@ -16,6 +16,7 @@ import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorClient
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
+import io.nekohasekai.sagernet.simple.ServiceStateSync
 
 class SagerConnection(
     private var connectionId: Int,
@@ -69,7 +70,8 @@ class SagerConnection(
         override fun stateChanged(state: Int, profileName: String?, msg: String?) {
             if (state < 0) return // skip private
             val s = BaseService.State.values()[state]
-            DataStore.serviceState = s
+            // Crown (touch point 16): the state outside `:bg` follows the bindings (proxy-connection «UI process binding»).
+            ServiceStateSync.changed(this@SagerConnection, s)
             val callback = callback ?: return
             runOnMainDispatcher {
                 callback.stateChanged(s, profileName, msg)
@@ -129,6 +131,8 @@ class SagerConnection(
             check(!callbackRegistered)
             service.registerCallback(serviceCallback, connectionId)
             callbackRegistered = true
+            // Crown (touch point 16): the state the running service has now, unless a change came in meanwhile.
+            ServiceStateSync.bound(this) { service.state }
         } catch (e: RemoteException) {
             e.printStackTrace()
         }
@@ -139,6 +143,7 @@ class SagerConnection(
     }
 
     override fun onServiceDisconnected(name: ComponentName?) {
+        ServiceStateSync.lost(this) // Crown (touch point 16): the service's process died
         unregisterCallback()
         AutoSelectorClient.reset()
         callback?.onServiceDisconnected()
@@ -147,6 +152,7 @@ class SagerConnection(
     }
 
     override fun binderDied() {
+        ServiceStateSync.lost(this) // Crown (touch point 16)
         service = null
         callbackRegistered = false
         AutoSelectorClient.reset()
@@ -174,6 +180,7 @@ class SagerConnection(
     }
 
     fun disconnect(context: Context) {
+        ServiceStateSync.unbound(this) // Crown (touch point 16)
         unregisterCallback()
         if (connectionActive) try {
             context.unbindService(this)

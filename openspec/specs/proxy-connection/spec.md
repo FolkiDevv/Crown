@@ -89,9 +89,29 @@ While the service runs it SHALL present a foreground notification showing the cu
 ### Requirement: UI process binding
 The UI process SHALL communicate with the running service over an AIDL connection, receiving state changes, traffic updates, and test results, and SHALL degrade gracefully (show Idle) when no service is running.
 
+Outside the service process the stored service state MUST follow the bindings: a binding that connects to a running service MUST store the state the service reports at that moment, unless a state change reached the process after the binding registered its callback; the death of the service process MUST store Idle. A process without a live binding (for example one started only for a notification action) MUST NOT decide from the stored state whether to reload the running service: it MUST first bind and read the service's state, and MUST send a reload only to a service confirmed Connected. The service process MUST compare a connected core with the stored server and routing after each network check and when the UI process asks for it, and MUST reload on a difference at most once per choice; it MUST NOT reload when they match.
+
 #### Scenario: UI reconnects to a running service
 - **WHEN** the UI process starts while a service is already running
 - **THEN** it binds, receives the current state, and reflects it without restarting the service
+
+#### Scenario: New UI process knows the running state before any change
+- **GIVEN** the VPN is connected and Android ended the UI process
+- **WHEN** the app is opened again and binds to the service
+- **THEN** the stored state in the UI process is Connected before the service reports any change, and a server chosen now reloads the running service at once
+
+#### Scenario: Service process died
+- **WHEN** the service process dies while the UI process is bound
+- **THEN** the stored state in the UI process is Idle, and app requests made "through the proxy" report that no profile is running instead of trying the closed local port
+
+#### Scenario: Choice made without a live binding
+- **GIVEN** the UI process has no binding to the service
+- **WHEN** it applies a server or traffic mode
+- **THEN** it binds, reads the service state, reloads the service only if it is Connected, and otherwise leaves the reload to the watch that waits for Connected and to the check in the service process
+
+#### Scenario: A reload that cannot bring the choice
+- **WHEN** the service process found the connected core different from the choice and reloaded it, and the new core still differs from the same choice
+- **THEN** it does not reload again and logs the difference
 
 ### Requirement: External control actions
 The app SHALL support broadcast/Intent actions to stop the service, reload the running configuration, switch to the next or previous profile, and switch to a profile by id, invokable from the notification, widgets, the quick settings tile and the app's own launcher shortcuts (dynamic, and pinned ones the system starts on the app's behalf).
