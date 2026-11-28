@@ -39,12 +39,20 @@ object ManagedAuto {
         watchIntervalSec = WATCH_INTERVAL_SEC
     }
 
+    /** What [update] did: whether the selector must be saved, and the tuning marker to store with it. */
+    data class Update(val save: Boolean, val tuning: Long)
+
     /**
-     * Brings the stored selector [existing] up to date: the groups, tiers and strategy always; with [tune] (its check
-     * settings are older than [TUNING_VERSION]) also each check setting still at its old default, while one set
-     * otherwise (in the classic editor) stays. Returns whether [existing] changed and must be saved.
+     * Brings the stored selector [existing] up to date: the groups, tiers and strategy always, and its check settings
+     * by the stored marker [tuning]:
+     * - [TUNING_VERSION]: done, nothing is moved again (a value put back by hand stays);
+     * - older (0 = never): each check setting still at its old default moves, one set otherwise (in the classic
+     *   editor) stays; when anything moved the marker becomes -[TUNING_VERSION], moved but not yet seen stored;
+     * - -[TUNING_VERSION]: the next ensure confirms it. Only when every check setting is back at its old default (a
+     *   stale whole-selector save of `:bg`, which loaded it before the move, put the old JSON back) they move again;
+     *   a single one changed by hand stays.
      */
-    fun update(existing: AutoSelector, groups: List<Long>, firstTier: String, tune: Boolean): Boolean {
+    fun update(existing: AutoSelector, groups: List<Long>, firstTier: String, tuning: Long): Update {
         var changed = false
         val tiers = listOf(AutoSelector.Tier(-1, firstTier))
         if (existing.gids != groups || existing.tiers != tiers || !existing.prioritized) {
@@ -53,15 +61,18 @@ object ManagedAuto {
             existing.strategy = AutoSelector.STRATEGY_PRIORITY
             changed = true
         }
-        if (!tune) return changed
+        if (tuning == TUNING_VERSION) return Update(changed, tuning)
+        val reverted = existing.passive == OLD_PASSIVE && existing.watchIntervalSec == OLD_WATCH_INTERVAL_SEC
+        if (tuning == -TUNING_VERSION && !reverted) return Update(changed, TUNING_VERSION)
+        var moved = false
         if (existing.passive == OLD_PASSIVE) {
             existing.passive = PASSIVE
-            changed = true
+            moved = true
         }
         if (existing.watchIntervalSec == OLD_WATCH_INTERVAL_SEC) {
             existing.watchIntervalSec = WATCH_INTERVAL_SEC
-            changed = true
+            moved = true
         }
-        return changed
+        return Update(changed || moved, if (moved) -TUNING_VERSION else TUNING_VERSION)
     }
 }

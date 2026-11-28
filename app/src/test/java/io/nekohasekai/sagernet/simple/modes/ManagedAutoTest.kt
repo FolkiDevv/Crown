@@ -11,6 +11,8 @@ class ManagedAutoTest {
 
     private val groups = listOf(3L, 7L)
     private val tier = "^(?!.*(wl)).*$"
+    private val done = ManagedAuto.TUNING_VERSION
+    private val pending = -ManagedAuto.TUNING_VERSION
 
     /** A selector as the simple UI made it before the check settings moved: the AutoSelector defaults. */
     private fun oldSelector() = AutoSelector().apply {
@@ -22,6 +24,8 @@ class ManagedAutoTest {
 
     /** What the database holds after a save: the JSON parsed again (normalize included). */
     private fun stored(selector: AutoSelector) = AutoSelector().apply { parseFromJson(selector.exportToJson()) }
+
+    private fun update(selector: AutoSelector, tuning: Long) = ManagedAuto.update(selector, groups, tier, tuning)
 
     @Test
     fun newSelectorTakesTheFastSettings() {
@@ -40,7 +44,7 @@ class ManagedAutoTest {
     @Test
     fun existingSelectorAtTheOldDefaultsMoves() {
         val selector = oldSelector()
-        assertTrue(ManagedAuto.update(selector, groups, tier, tune = true))
+        assertEquals(ManagedAuto.Update(save = true, tuning = pending), update(selector, 0L))
         val saved = stored(selector)
         assertTrue(saved.passive)
         assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, saved.watchIntervalSec)
@@ -54,7 +58,7 @@ class ManagedAutoTest {
             expected = 2
             intervalSec = 120
         }
-        assertTrue(ManagedAuto.update(selector, groups, tier, tune = true))
+        assertTrue(update(selector, 0L).save)
         assertEquals(30, selector.watchIntervalSec)
         assertEquals(4, selector.dialRetries)
         assertEquals(2, selector.expected)
@@ -64,20 +68,45 @@ class ManagedAutoTest {
     }
 
     @Test
-    fun nothingToMoveNothingToSave() {
+    fun nothingToMoveIsDoneAtOnce() {
         val selector = oldSelector().apply {
             passive = true
             watchIntervalSec = 10
         }
-        assertFalse(ManagedAuto.update(selector, groups, tier, tune = true))
+        assertEquals(ManagedAuto.Update(save = false, tuning = done), update(selector, 0L))
         assertEquals(10, selector.watchIntervalSec)
     }
 
-    /** After the move a setting the user puts back to the old value in the classic editor is not moved again. */
+    /** The next ensure finds the move stored: it is done, and nothing changes. */
     @Test
-    fun onceMovedTheOldValuesStay() {
+    fun theMoveIsConfirmed() {
         val selector = oldSelector()
-        assertFalse(ManagedAuto.update(selector, groups, tier, tune = false))
+        update(selector, 0L)
+        assertEquals(ManagedAuto.Update(save = false, tuning = done), update(stored(selector), pending))
+    }
+
+    /** A stale save of `:bg` put the whole old JSON back after the move: the next ensure moves again. */
+    @Test
+    fun aStaleSaveIsMovedAgain() {
+        val selector = oldSelector()
+        assertEquals(ManagedAuto.Update(save = true, tuning = pending), update(selector, pending))
+        assertTrue(selector.passive)
+        assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, selector.watchIntervalSec)
+    }
+
+    /** Between the move and its confirmation the user turned passive judging off: that stays. */
+    @Test
+    fun aHandEditBeforeTheConfirmationStays() {
+        val selector = oldSelector().apply { watchIntervalSec = ManagedAuto.WATCH_INTERVAL_SEC }
+        assertEquals(ManagedAuto.Update(save = false, tuning = done), update(selector, pending))
+        assertFalse(selector.passive)
+    }
+
+    /** Once done, a setting the user puts back to the old value in the classic editor is not moved again. */
+    @Test
+    fun onceDoneTheOldValuesStay() {
+        val selector = oldSelector()
+        assertEquals(ManagedAuto.Update(save = false, tuning = done), update(selector, done))
         assertFalse(selector.passive)
         assertEquals(15, selector.watchIntervalSec)
     }
@@ -85,7 +114,7 @@ class ManagedAutoTest {
     @Test
     fun groupsAndTiersAreStillKeptUpToDate() {
         val selector = oldSelector().apply { passive = true; watchIntervalSec = 5 }
-        assertTrue(ManagedAuto.update(selector, listOf(9L), "other", tune = false))
+        assertTrue(ManagedAuto.update(selector, listOf(9L), "other", done).save)
         assertEquals(listOf(9L), selector.gids)
         assertEquals(listOf(AutoSelector.Tier(-1, "other")), selector.tiers)
         assertTrue(selector.passive)

@@ -580,9 +580,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     now = now,
                 )
                 if (!due) return@withContext
-                store.putLong(AutoRecheck.KEY_LAST_AT, now)
                 Logs.i("simple home: a check through the auto-selector failed, asking it to re-check every server now")
+                // Stored only once `:bg` took the request: a dead service must not use up the limit.
                 service.autoSelectorRecheck()
+                store.putLong(AutoRecheck.KEY_LAST_AT, now)
             } catch (e: Exception) {
                 Logs.w(e)
             }

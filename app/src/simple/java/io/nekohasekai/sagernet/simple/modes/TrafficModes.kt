@@ -262,9 +262,10 @@ object TrafficModes {
             if (stored <= 0L) return@withLock false
             SagerDatabase.instance.runInTransaction(Callable {
                 val existing = AutoSelectorProfiles.load(stored) ?: return@Callable false
-                val tune = (store.getLong(tuningKey) ?: 0L) < ManagedAuto.TUNING_VERSION
-                if (ManagedAuto.update(existing, groups, firstTier, tune)) AutoSelectorProfiles.save(stored, existing)
-                if (tune) store.putLong(tuningKey, ManagedAuto.TUNING_VERSION)
+                val tuning = store.getLong(tuningKey) ?: 0L
+                val update = ManagedAuto.update(existing, groups, firstTier, tuning)
+                if (update.save) AutoSelectorProfiles.save(stored, existing)
+                if (update.tuning != tuning) store.putLong(tuningKey, update.tuning)
                 true
             })
         }
@@ -293,7 +294,7 @@ object TrafficModes {
 
     private const val SELECTOR_GROUP_NAME = "Auto"
 
-    /** After a managed selector's key: the ManagedAuto.TUNING_VERSION its check settings were last moved to. */
+    /** After a managed selector's key: how far its check settings moved (the marker of ManagedAuto.update). */
     private const val TUNING_SUFFIX = "_tuning"
 
     // ------------------------------------------------------------------------------------------------ country
