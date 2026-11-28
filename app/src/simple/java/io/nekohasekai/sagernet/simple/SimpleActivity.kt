@@ -139,6 +139,7 @@ import io.nekohasekai.sagernet.ui.VpnRequestActivity
 import io.nekohasekai.sagernet.ui.profile.ProfileSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.profileSettingsIntent
 import io.nekohasekai.sagernet.update.UpdateActivity
+import io.nekohasekai.sagernet.utils.AlwaysOnVpn
 import io.nekohasekai.sagernet.utils.BatteryOptimizations
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -1211,6 +1212,7 @@ private fun SettingsSection(
     val state by modes.state.collectAsStateWithLifecycle()
     val settingsState by settings.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     LaunchedEffect(modes) {
         modes.messages.collect { snackbar.showSnackbar(context.getString(it)) }
     }
@@ -1231,6 +1233,11 @@ private fun SettingsSection(
                 openClassicScreen = openClassicScreen,
                 openClassic = onOpenClassic,
                 openRepair = openRepair,
+                openVpnSettings = {
+                    if (!AlwaysOnVpn.openSettings(context)) {
+                        scope.launch { snackbar.showSnackbar(context.getString(R.string.vpn_settings_missing)) }
+                    }
+                },
                 checkUpdates = if (BuildConfig.IN_APP_UPDATER) {
                     { UpdateActivity.start(context) }
                 } else {

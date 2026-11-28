@@ -18,6 +18,9 @@ import io.throneproj.mobile.RoutePrefixIterator
 import io.throneproj.mobile.StringIterator
 import io.throneproj.mobile.TunOptions
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.net.VpnService as BaseVpnService
 
 class VpnService : BaseVpnService(),
@@ -31,9 +34,24 @@ class VpnService : BaseVpnService(),
         const val PRIVATE_VLAN6_CLIENT = "fdfe:dcba:9876::1"
         const val PRIVATE_VLAN6_ROUTER = "fdfe:dcba:9876::2"
 
+        /** How long [openTun] lets Android drop a closed interface's network before the next establish(). */
+        private const val HANDOVER_SETTLE_MS = 500L
+
     }
 
     var conn: ParcelFileDescriptor? = null
+
+    /** What [conn] was built from ([tunSpec]). */
+    private var connSpec: TunSpec? = null
+
+    private class Retired(val fd: ParcelFileDescriptor, val spec: TunSpec?)
+
+    /**
+     * The interface of the core a restart replaced: it stays the VPN network until the next core takes it over (the
+     * same interface when its configuration is unchanged) or establish() replaces it, so nothing leaves around the
+     * tunnel meanwhile. Closed then, or by [releaseRetiredTun] when no new one comes.
+     */
+    private val retiredConn = AtomicReference<Retired?>()
 
     private var metered = false
 
@@ -45,16 +63,31 @@ class VpnService : BaseVpnService(),
     }
 
     @Suppress("EXPERIMENTAL_API_USAGE")
-    override suspend fun killProcesses(): Throwable? {
+    override suspend fun killProcesses(keepTun: Boolean): Throwable? {
         val currentConnection = conn
         var cleanupError: Throwable? = null
+        // A changed metered flag, or a listed package installed, removed or reinstalled since, needs a new network
+        // that a handover would not make (TunSpec.needsNewNetwork): the interface closes first, as a plain restart.
+        // A failed read counts as changed; the package lookups are binder calls, so off the main thread.
+        val spec = connSpec
+        val keep = keepTun && (spec == null || withContext(Dispatchers.IO) {
+            runCatching {
+                !spec.needsNewNetwork(spec.now(DataStore.meteredNetwork, ::uidOf), meteredApplies())
+            }.getOrDefault(false)
+        })
         Logs.i(
             "VpnLifecycleTrace stage=tun-close begin " +
-                "hasConnection=${currentConnection != null}"
+                "hasConnection=${currentConnection != null} keepTun=$keepTun keep=$keep"
         )
         try {
-            currentConnection?.close()
-            Logs.i("VpnLifecycleTrace stage=tun-close success")
+            if (keep) {
+                currentConnection?.let { retiredConn.getAndSet(Retired(it, connSpec))?.fd?.close() }
+                Logs.i("VpnLifecycleTrace stage=tun-close deferred")
+            } else {
+                releaseRetiredTun()
+                currentConnection?.close()
+                Logs.i("VpnLifecycleTrace stage=tun-close success")
+            }
         } catch (error: Throwable) {
             Logs.w(
                 "VpnLifecycleTrace stage=tun-close failed " +
@@ -64,7 +97,7 @@ class VpnService : BaseVpnService(),
         } finally {
             conn = null
         }
-        super.killProcesses()?.let { error ->
+        super.killProcesses(keepTun)?.let { error ->
             if (cleanupError == null) {
                 cleanupError = error
             } else if (cleanupError !== error) {
@@ -75,6 +108,16 @@ class VpnService : BaseVpnService(),
             "VpnLifecycleTrace stage=kill done hasCleanupError=${cleanupError != null}"
         )
         return cleanupError
+    }
+
+    override fun releaseRetiredTun() {
+        val retired = retiredConn.getAndSet(null) ?: return
+        try {
+            retired.fd.close()
+            Logs.i("VpnLifecycleTrace stage=retired-tun-close success")
+        } catch (error: Throwable) {
+            Logs.w("VpnLifecycleTrace stage=retired-tun-close failed message=${error.message}")
+        }
     }
 
     override fun onBind(intent: Intent) = when (intent.action) {
@@ -118,6 +161,9 @@ class VpnService : BaseVpnService(),
     // The generated tun inbound is the only source of truth for the interface layout.
     fun openTun(options: TunOptions): Int {
         if (prepare(this) != null) error("android: missing VPN permission")
+        // Read once: the spec below must describe exactly what the builder gets.
+        val bypass = DataStore.allowBypass
+        val meteredNow = DataStore.meteredNetwork
         val builder = Builder()
             .setConfigureIntent(SagerNet.configureIntent(this))
             .setSession(getString(R.string.app_name))
@@ -163,24 +209,26 @@ class VpnService : BaseVpnService(),
             }
         }
 
+        val allowed = ArrayList<String>()
         val includePackage = options.getIncludePackage()
         if (includePackage.hasNext()) {
-            val added = includePackage.toList().count {
+            includePackage.toList().forEach {
                 try {
                     builder.addAllowedApplication(it)
-                    true
+                    allowed += it
                 } catch (_: PackageManager.NameNotFoundException) {
-                    false
                 }
             }
             // None of the chosen apps is installed: an empty allow list would capture every app instead of none.
-            if (added == 0) builder.addAllowedApplication(packageName)
+            if (allowed.isEmpty()) builder.addAllowedApplication(packageName).also { allowed += packageName }
         }
+        val denied = ArrayList<String>()
         val excludePackage = options.getExcludePackage()
         if (excludePackage.hasNext()) {
             excludePackage.toList().forEach {
                 try {
                     builder.addDisallowedApplication(it)
+                    denied += it
                 } catch (_: PackageManager.NameNotFoundException) {
                 }
             }
@@ -197,13 +245,86 @@ class VpnService : BaseVpnService(),
         }
 
         // Apps may then bind sockets to the underlying network themselves; FCM does this for its push channel.
-        if (DataStore.allowBypass) builder.allowBypass()
+        if (bypass) builder.allowBypass()
         updateUnderlyingNetwork(builder)
-        metered = DataStore.meteredNetwork
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(metered)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(meteredNow)
+        // A restart whose interface would come out the same keeps it: establish() would make Android reset the old
+        // interface before the new one has its routes (Vpn.establish: jniReset after an async LinkProperties update),
+        // and for that moment apps reach the network around the VPN. The builder is then dropped unused.
+        val spec = tunSpec(options, allowed, denied, bypass, meteredNow)
+        val retired = retiredConn.get()
+        if (retired != null) {
+            Logs.i("VpnLifecycleTrace stage=tun-compare changed=${spec.diff(retired.spec)} ${spec.appCounts()}")
+        }
+        if (retired != null && retired.spec == spec && retiredConn.compareAndSet(retired, null)) {
+            conn = retired.fd
+            connSpec = spec
+            updateUnderlyingNetwork()
+            Logs.i("VpnLifecycleTrace stage=tun-reuse")
+            return retired.fd.fd
+        }
+        // Changed after killProcesses kept the interface: close it first here too (see killProcesses). Android learns
+        // of the closed interface asynchronously (netd), and an establish() before that would still hand the network
+        // over: give it a moment, as the old core's close does on the usual path. Rare: a change in that short window.
+        if (retired?.spec?.needsNewNetwork(spec, meteredApplies()) == true) {
+            releaseRetiredTun()
+            Thread.sleep(HANDOVER_SETTLE_MS)
+        }
         val connection = builder.establish() ?: throw NullConnectionException()
         conn = connection
+        connSpec = spec
+        metered = meteredNow
+        // Android has already reset the old interface inside establish(): keeping its fd longer changes nothing.
+        releaseRetiredTun()
+        // The core dups this fd and closes only its own copy (core/mobile/service.go OpenInterface): conn alone
+        // holds the interface, so it goes down exactly when conn is closed.
         return connection.fd
+    }
+
+    private fun meteredApplies() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+
+    private fun uidOf(name: String): Int? = try {
+        packageManager.getPackageUid(name, 0)
+    } catch (_: PackageManager.NameNotFoundException) {
+        null
+    }
+
+    /** The [TunSpec] of what the builder got: the app lists as added, each package with its uid now. */
+    private fun tunSpec(
+        options: TunOptions, allowed: List<String>, denied: List<String>, bypass: Boolean, metered: Boolean,
+    ): TunSpec {
+        // Reads exactly what openTun reads, under the same conditions: some getters are unsafe where the builder
+        // skips them (the DNS address without DNS derivation).
+        fun routes(prefixes: RoutePrefixIterator) = buildList { prefixes.forEach { add(it.address() to it.prefix()) } }
+        val autoRoute = options.getAutoRoute()
+        val dnsMode = if (autoRoute) options.getDNSMode().value else null
+        val proxy = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && options.isHTTPProxyEnabled()
+        return TunSpec(
+            mtu = options.getMTU(), autoRoute = autoRoute, dnsMode = dnsMode,
+            dns = if (autoRoute && dnsMode != Mobile.DNSModeDisabled) {
+                options.getDNSServerAddress().toList()
+            } else {
+                emptyList()
+            },
+            routes = listOf(routes(options.getInet4Address()), routes(options.getInet6Address())) + when {
+                !autoRoute -> emptyList()
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(
+                    routes(options.getInet4RouteAddress()), routes(options.getInet6RouteAddress()),
+                    routes(options.getInet4RouteExcludeAddress()), routes(options.getInet6RouteExcludeAddress()),
+                )
+                else -> listOf(routes(options.getInet4RouteRange()), routes(options.getInet6RouteRange()))
+            },
+            allowed = TunSpec.apps(allowed, ::uidOf), denied = TunSpec.apps(denied, ::uidOf),
+            httpProxy = if (proxy) {
+                listOf(
+                    options.getHTTPProxyServer(), options.getHTTPProxyServerPort(),
+                    options.getHTTPProxyBypassDomain().toList(),
+                )
+            } else {
+                null
+            },
+            bypass = bypass, metered = metered,
+        )
     }
 
     fun updateUnderlyingNetwork(builder: Builder? = null) {
@@ -219,6 +340,7 @@ class VpnService : BaseVpnService(),
     override fun onRevoke() = stopRunner()
 
     override fun onDestroy() {
+        releaseRetiredTun()
         DataStore.vpnService = null
         super.onDestroy()
         data.binder.close()

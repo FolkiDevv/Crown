@@ -46,6 +46,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,6 +58,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.simple.FocusShapes
 import io.nekohasekai.sagernet.simple.ServiceDetail
@@ -61,6 +66,7 @@ import io.nekohasekai.sagernet.simple.focusRing
 import io.nekohasekai.sagernet.simple.focusWhenShown
 import io.nekohasekai.sagernet.simple.unavailable
 import io.nekohasekai.sagernet.simple.wholeInViewOnFocus
+import io.nekohasekai.sagernet.utils.AlwaysOnVpn
 import kotlin.math.abs
 
 /** Where a button of «Починка» leads: a system settings screen (only the user changes Android's settings) or «Серверы». */
@@ -182,6 +188,17 @@ fun RepairScreen(
                         ExportButton(state, actions.export, main = verdict is RepairVerdict.Unknown)
                     }
                 }
+                item(key = "always-on") {
+                    // Read again on each return, from the system VPN settings too.
+                    var alwaysOn by remember { mutableStateOf(AlwaysOnVpn.State.UNKNOWN) }
+                    LifecycleResumeEffect(Unit) {
+                        alwaysOn = AlwaysOnVpn.state()
+                        onPauseOrDispose {}
+                    }
+                    if (alwaysOn == AlwaysOnVpn.State.OFF || alwaysOn == AlwaysOnVpn.State.ON) {
+                        AlwaysOnTip(actions.open, width.padding(bottom = 12.dp))
+                    }
+                }
             }
             if (!detail.isNullOrBlank()) {
                 item(key = "detail") {
@@ -284,6 +301,24 @@ private fun StatusIcon(state: StepState) {
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.clearAndSetSemantics { },
             )
+        }
+    }
+}
+
+/**
+ * A switch of servers or a reconnect can let apps go online around the VPN for a moment: Android's «Постоянный VPN»
+ * with «Блокировать соединения без VPN» prevents it, and only the user can turn them on.
+ */
+@Composable
+private fun AlwaysOnTip(open: (RepairAction) -> Unit, modifier: Modifier) {
+    Card(modifier = modifier) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.simple_repair_always_on_title), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.simple_repair_always_on_text), style = MaterialTheme.typography.bodyMedium)
+            TextButton(
+                onClick = { open(RepairAction.VPN_SETTINGS) },
+                modifier = Modifier.focusRing(FocusShapes.Pill),
+            ) { Text(stringResource(RepairAction.VPN_SETTINGS.label)) }
         }
     }
 }

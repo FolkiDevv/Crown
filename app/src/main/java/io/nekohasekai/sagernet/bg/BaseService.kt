@@ -135,6 +135,9 @@ class BaseService {
         /** A plain stop asked for while a restart was stopping the old core: the restart ends stopped instead. */
         var stopRequested = false
 
+        /** A reload asked for while a restart was building the next core: it builds it again with the new settings. */
+        var restartAgain = false
+
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
             state = s
@@ -298,6 +301,7 @@ class BaseService {
             when {
                 s == State.Stopped -> startRunner()
                 s.canStop -> AutoSelectorRuntime.restart(this) { stopRunner(true) }
+                s == State.Stopping -> data.restartAgain = true
                 else -> Logs.w("Illegal state $s when invoking use")
             }
         }
@@ -332,7 +336,8 @@ class BaseService {
             else startService(Intent(this, javaClass))
         }
 
-        suspend fun killProcesses(): Throwable? {
+        /** [keepTun]: a restart whose next core is built keeps the VPN interface until that core opens its own. */
+        suspend fun killProcesses(keepTun: Boolean = false): Throwable? {
             val proxy = data.proxy
             val serviceId = Integer.toHexString(System.identityHashCode(data))
             val proxyId = proxy?.let { Integer.toHexString(System.identityHashCode(it)) } ?: "none"
@@ -385,13 +390,60 @@ class BaseService {
             return cleanupError
         }
 
+        /** Closes the interface a restart kept ([killProcesses] keepTun) when no new core is going to replace it. */
+        fun releaseRetiredTun() {}
+
+        /**
+         * The next core of a restart, built while the running one still carries traffic (and the app's own requests
+         * of the build, geo downloads and measurements, still have a working network); null when it could not be
+         * built or a stop came, and the restart then closes the tunnel first, as a plain one. A reload or another
+         * selection meanwhile builds it again. Built instances it does not return are left in [discarded]: they are
+         * closed once the running core is, as closing a core drops the socket protector the newest one installed.
+         */
+        private suspend fun prepareRestart(deferRuleSets: Boolean, discarded: MutableList<ProxyInstance>): ProxyInstance? {
+            repeat(3) {
+                data.restartAgain = false
+                // The build reads the per-app keys now: an app list edit must see a start (SimpleHooks).
+                io.nekohasekai.sagernet.simple.SimpleHooks.onRestartBuilding()
+                val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy) ?: return null
+                val next = ProxyInstance(profile, this).also {
+                    it.deferRuleSets = deferRuleSets
+                    it.replacedApiPort = data.proxy?.apiPort ?: 0
+                }
+                discarded += next
+                // A Stop cancels it (stopRunner): the build may wait for downloads.
+                val job = CoroutineScope(Dispatchers.Main).launch {
+                    try {
+                        withContext(coreDispatcher) { next.init() }
+                    } catch (e: Throwable) {
+                        Logs.w("restart: next core not built, the tunnel closes first: ${e.readableMessage}")
+                    }
+                }
+                data.connectingJob = job
+                try {
+                    job.join()
+                } finally {
+                    if (data.connectingJob === job) data.connectingJob = null
+                }
+                if (!next.isInitialized() || data.stopRequested) return null
+                if (!data.restartAgain && next.profile.id == DataStore.selectedProxy) {
+                    discarded -= next
+                    return next
+                }
+            }
+            return null
+        }
+
         /**
          * A restart keeps the service, its notification and the receiver: the new core starts in place, so a switch
          * from the notification or a widget never needs another foreground-service start from the background.
          */
         fun stopRunner(restart: Boolean = false, msg: String? = null) {
-            DataStore.baseService = null
-            DataStore.vpnService = null
+            // A restart's running core keeps serving while the next one is built: its sockets still need protect().
+            if (!restart) {
+                DataStore.baseService = null
+                DataStore.vpnService = null
+            }
 
             val serviceId = Integer.toHexString(System.identityHashCode(data))
             val proxy = data.proxy
@@ -407,7 +459,12 @@ class BaseService {
             )
             if (data.state == State.Stopping) {
                 // the old core now closes off the main thread, so a Stop can arrive in the middle of a restart
-                if (!restart) data.stopRequested = true
+                if (!restart) {
+                    data.stopRequested = true
+                    data.connectingJob?.cancel() // the build of the next core (prepareRestart)
+                } else {
+                    data.restartAgain = true
+                }
                 Logs.i(
                     "ServiceStopTrace serviceId=$serviceId proxyId=$proxyId " +
                         "stage=ignored-already-stopping"
@@ -460,14 +517,66 @@ class BaseService {
                     }
                 }
 
+                // An in-place restart builds the next core first and keeps the interface while it starts.
+                val discarded = ArrayList<ProxyInstance>()
+                var deferRuleSets: Boolean? = null
+                var next: ProxyInstance? = null
+                if (keepNotification) {
+                    try {
+                        val consent = DeferredRuleSets.consume()
+                        deferRuleSets = consent
+                        next = prepareRestart(consent, discarded)
+                    } catch (error: Throwable) {
+                        recordCleanupFailure("next-build", error)
+                    }
+                }
+                DataStore.baseService = null
+                DataStore.vpnService = null
                 try {
-                    killProcesses()?.let { recordCleanupFailure("process-cleanup", it) }
+                    killProcesses(keepTun = next != null)?.let { recordCleanupFailure("process-cleanup", it) }
                 } catch (error: Throwable) {
                     recordCleanupFailure("process-cleanup-boundary", error)
                 }
+                // The old core's traffic counter wrote its last bytes as it stopped, after the next core read its
+                // profiles: their totals are read again, or the next counter would start below the stored ones.
+                next?.let { prepared ->
+                    try {
+                        withContext(Dispatchers.IO) {
+                            val entities = prepared.trafficMap.values.flatten()
+                            val stored = SagerDatabase.proxyDao.getEntities(entities.map { it.id }.distinct())
+                                .associateBy { it.id }
+                            for (entity in entities) stored[entity.id]?.let {
+                                entity.rx = it.rx
+                                entity.tx = it.tx
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        recordCleanupFailure("next-traffic", error)
+                    }
+                }
 
+                // A stop, reload or selection that came meanwhile: the built core is not what should run. A fresh
+                // start replaces the kept interface (or a stop closes it); nothing suspends after the last check.
+                while (true) {
+                    next?.takeIf { data.stopRequested || data.restartAgain || it.profile.id != DataStore.selectedProxy }
+                        ?.let {
+                            discarded += it
+                            next = null
+                        }
+                    if (discarded.isEmpty()) break
+                    for (instance in discarded) {
+                        try {
+                            withContext(coreDispatcher) { instance.close() }
+                        } catch (error: Throwable) {
+                            recordCleanupFailure("next-close", error)
+                        }
+                    }
+                    discarded.clear()
+                }
                 val stopInstead = restart && data.stopRequested
                 data.stopRequested = false
+                data.restartAgain = false
+                if (stopInstead) releaseRetiredTun()
                 if (stopInstead && keepNotification) {
                     keepNotification = false
                     try {
@@ -520,7 +629,7 @@ class BaseService {
 
                 try {
                     when {
-                        keepNotification -> startProxy()
+                        keepNotification -> startProxy(next, deferRuleSets)
                         finishRestart -> startRunner()
                         else -> stopSelf() // stop the service if nothing has bound to it
                     }
@@ -607,11 +716,14 @@ class BaseService {
             return Service.START_NOT_STICKY
         }
 
-        /** Starts the selected profile; the notification and the receiver of a restart are reused. */
-        fun startProxy() {
+        /**
+         * Starts the selected profile, or [prepared], the one a restart built already; the notification and the receiver
+         * of a restart are reused. [deferRuleSets]: the consent a restart has taken already.
+         */
+        fun startProxy(prepared: ProxyInstance? = null, deferRuleSets: Boolean? = null) {
             DataStore.baseService = this
             val data = data
-            val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
+            val profile = prepared?.profile ?: SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
             this as Context
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107
                 if (data.notification == null) data.notification = createNotification("")
@@ -621,8 +733,9 @@ class BaseService {
             }
             PlatformNotifications.cancelAlwaysOnNoProfile(this)
 
-            val proxy = ProxyInstance(profile, this)
-            proxy.deferRuleSets = DeferredRuleSets.consume()
+            val proxy = prepared ?: ProxyInstance(profile, this).also {
+                it.deferRuleSets = deferRuleSets ?: DeferredRuleSets.consume()
+            }
             data.proxy = proxy
             BootReceiver.enabled = DataStore.rememberEnable
             if (!data.closeReceiverRegistered) {
@@ -676,12 +789,13 @@ class BaseService {
             data.connectingJob = CoroutineScope(Dispatchers.Main).launch {
                 try {
                     preInit()
-                    withContext(coreDispatcher) { proxy.init() }
+                    if (prepared == null) withContext(coreDispatcher) { proxy.init() }
                     DataStore.currentProfile = profile.id
                     DataStore.runningProfiles = proxy.config.involvedProfileIds.map { it.toString() }
                     DataStore.runningRouteId = proxy.routeId
 
                     withContext(coreDispatcher) { startProcesses() }
+                    releaseRetiredTun() // a config without a tun inbound never replaces it
                     io.nekohasekai.sagernet.simple.SimpleHooks.onServiceStarted()
                     data.changeState(State.Connected)
                     runCatching { watchWifiRules(proxy) }.onFailure { Logs.w(it) }

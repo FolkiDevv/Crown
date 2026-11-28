@@ -10,6 +10,7 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.add.SimpleImport
 import io.nekohasekai.sagernet.update.UpdateScheduler
+import io.nekohasekai.sagernet.utils.AlwaysOnVpn
 import io.nekohasekai.sagernet.utils.Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -77,6 +78,8 @@ data class SettingsUiState(
     val updateCheck: Boolean = false,
     /** Advanced mode, in-app updater builds: the classic «Allow updating to beta versions» (`allow_beta_update`). */
     val betaUpdates: Boolean = false,
+    /** «Постоянный VPN»: Android's always-on VPN for Crown, with or without blocking connections without VPN. */
+    val alwaysOn: AlwaysOnVpn.State = AlwaysOnVpn.State.UNKNOWN,
 )
 
 /**
@@ -114,10 +117,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val night = NightMode.of(DataStore.nightTheme)
         val updateCheck = DataStore.updateCheckAuto
         val betaUpdates = DataStore.allowBetaUpdate
+        val alwaysOn = AlwaysOnVpn.state()
         mutableState.update {
             it.copy(
                 autostart = autostart, autoUpdate = autoUpdate, nightMode = night,
-                updateCheck = updateCheck, betaUpdates = betaUpdates,
+                updateCheck = updateCheck, betaUpdates = betaUpdates, alwaysOn = alwaysOn,
             )
         }
     }
