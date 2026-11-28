@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 @Database(
     entities = [
         ProxyGroup::class, ProxyEntity::class, RouteProfileEntity::class, RouteRuleEntity::class,
-        SettingEntry::class, MarkerEntity::class,
+        SettingEntry::class, MarkerEntity::class, IpListEntity::class, IpListEntryEntity::class, IpScanEntity::class,
     ],
     version = SagerDatabase.VERSION,
     autoMigrations = [
@@ -43,7 +43,7 @@ abstract class SagerDatabase : RoomDatabase() {
         private const val TAG = "SagerDatabase"
 
         /** The schema version (@Database). Crown: a test checks the migrations reach it from [FIRST_MIGRATED]. */
-        const val VERSION = 20
+        const val VERSION = 22
 
         /** The oldest version a migration starts from; older files (never seen by this app) are rebuilt empty. */
         const val FIRST_MIGRATED = 8
@@ -188,6 +188,38 @@ abstract class SagerDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 20 -> 21: route_profiles.remote_rules (870c720b), NULL so existing profiles read with the legacy rule origins,
+         * and groups.show_services (1c4d920a).
+         */
+        val MIGRATION_20_21: Migration = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `route_profiles` ADD COLUMN `remote_rules` TEXT")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `show_services` INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        /**
+         * 21 -> 22: profiles / groups.endpoint_json, groups.visible_columns and custom_order_json, route_profiles
+         * .display_order (all rows 0, so they keep their id order) and the scanner's IP list tables (GroupsRepo.cpp,
+         * RouteRepo.cpp, IpListsRepo.cpp, IpScansRepo.cpp).
+         */
+        val MIGRATION_21_22: Migration = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `profiles` ADD COLUMN `endpoint_json` TEXT NOT NULL DEFAULT '{}'")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `endpoint_json` TEXT NOT NULL DEFAULT '{}'")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `visible_columns` INTEGER NOT NULL DEFAULT 79")
+                // The columns test_items_to_show showed; unknown values showed everything (TestShowItems.of).
+                db.execSQL(
+                    "UPDATE `groups` SET `visible_columns` = CASE `test_items_to_show` " +
+                        "WHEN 1 THEN 79 WHEN 2 THEN 95 WHEN 3 THEN 111 ELSE 127 END"
+                )
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `custom_order_json` TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE `route_profiles` ADD COLUMN `display_order` INTEGER NOT NULL DEFAULT 0")
+                IpListSchema.create(db)
+            }
+        }
+
         /** Configs.cpp:35-39: a new database starts with an ordinary group named "Default". */
         private val callback = object : RoomDatabase.Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
@@ -195,9 +227,11 @@ abstract class SagerDatabase : RoomDatabase() {
             }
         }
 
+        /** test_items_to_show 1 (NONE) mirrors the default visible_columns 79. */
         private fun insertDefaultGroup(db: SupportSQLiteDatabase) {
             db.execSQL(
-                "INSERT INTO `groups` (`name`, `display_order`) SELECT ?, 1 WHERE NOT EXISTS (SELECT 1 FROM `groups`)",
+                "INSERT INTO `groups` (`name`, `display_order`, `test_items_to_show`) SELECT ?, 1, 1 " +
+                    "WHERE NOT EXISTS (SELECT 1 FROM `groups`)",
                 arrayOf<Any?>(defaultGroupName())
             )
         }
@@ -208,6 +242,7 @@ abstract class SagerDatabase : RoomDatabase() {
         val MIGRATIONS: Array<Migration>
             get() = arrayOf(
                 MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
+                MIGRATION_20_21, MIGRATION_21_22,
             )
 
         @OptIn(DelicateCoroutinesApi::class)
@@ -267,6 +302,8 @@ abstract class SagerDatabase : RoomDatabase() {
             openFailure = null
             opened = db
             SagerNet.application.deleteDatabase(LEGACY_SETTINGS_DB)
+            runCatching { DataStore.migrateSettings(db.openHelper.writableDatabase) }
+                .onFailure { Log.w(TAG, "settings migration failed", it) }
             return db
         }
 
@@ -287,6 +324,8 @@ abstract class SagerDatabase : RoomDatabase() {
         val routeDao get() = instance.routeDao()
         val settingsDao get() = instance.settingsDao()
         val markerDao get() = instance.markerDao()
+        val ipListDao get() = instance.ipListDao()
+        val ipScanDao get() = instance.ipScanDao()
 
     }
 
@@ -295,5 +334,7 @@ abstract class SagerDatabase : RoomDatabase() {
     abstract fun routeDao(): RouteDao
     abstract fun settingsDao(): SettingEntry.Dao
     abstract fun markerDao(): MarkerEntity.Dao
+    abstract fun ipListDao(): IpListDao
+    abstract fun ipScanDao(): IpScanDao
 
 }

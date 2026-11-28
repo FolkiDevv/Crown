@@ -39,6 +39,7 @@ import kotlinx.coroutines.sync.withLock
 import moe.matsuri.nb4a.Protocols
 import moe.matsuri.nb4a.utils.Util
 import java.net.UnknownHostException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 class BaseService {
@@ -97,7 +98,7 @@ class BaseService {
                         proxy?.boxOrNull?.resetNetwork()
                         runOnMainDispatcher {
                             Util.collapseStatusBar(ctx)
-                            Toast.makeText(ctx, "Reset upstream connections done", Toast.LENGTH_SHORT)
+                            Toast.makeText(ctx, R.string.reset_upstream_connections_done, Toast.LENGTH_SHORT)
                                 .show()
                         }
                     }
@@ -138,6 +139,8 @@ class BaseService {
 
         /** A reload asked for while a restart was building the next core: it builds it again with the new settings. */
         var restartAgain = false
+        /** A start asked for while stopping, the later of it and [stopRequested] winning: the stop ends in a start. */
+        var startRequested = false
 
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
@@ -178,13 +181,14 @@ class BaseService {
 
     class Binder(private var data: Data? = null) : ISagerNetService.Stub(), CoroutineScope,
         AutoCloseable {
+        /** Client binder -> connection id: a remote client's callback arrives as a new proxy object on every call. */
+        private val callbackIds = ConcurrentHashMap<IBinder, Int>()
+
         private val callbacks = object : RemoteCallbackList<ISagerNetServiceCallback>() {
             override fun onCallbackDied(callback: ISagerNetServiceCallback?, cookie: Any?) {
-                super.onCallbackDied(callback, cookie)
+                callback?.let { callbackIds.remove(it.asBinder()) }
             }
         }
-
-        val callbackIdMap = mutableMapOf<ISagerNetServiceCallback, Int>()
 
         override val coroutineContext = Dispatchers.Main.immediate + Job()
 
@@ -196,10 +200,10 @@ class BaseService {
                 Runtime.getRuntime().exit(0)
                 return
             }
-            if (!callbackIdMap.contains(cb)) {
-                callbacks.register(cb)
+            val binder = cb.asBinder()
+            synchronized(callbackIds) {
+                if (callbackIds.put(binder, id) == null && !callbacks.register(cb)) callbackIds.remove(binder)
             }
-            callbackIdMap[cb] = id
         }
 
         private val broadcastMutex = Mutex()
@@ -221,9 +225,17 @@ class BaseService {
             }
         }
 
+        /** [work] for the callbacks registered with [id] only. */
+        suspend fun broadcast(id: Int, work: (ISagerNetServiceCallback) -> Unit) =
+            broadcast { if (callbackIds[it.asBinder()] == id) work(it) }
+
+        fun hasCallback(id: Int): Boolean = callbackIds.containsValue(id)
+
         override fun unregisterCallback(cb: ISagerNetServiceCallback) {
-            callbackIdMap.remove(cb)
-            callbacks.unregister(cb)
+            synchronized(callbackIds) {
+                callbackIds.remove(cb.asBinder())
+                callbacks.unregister(cb)
+            }
         }
 
         override fun resetTraffic(profileIds: LongArray) {
@@ -273,6 +285,20 @@ class BaseService {
 
         override fun liveStats(session: Long, afterSerial: Long): LiveStatsBatch = LiveStatsRecorder.batch(session, afterSerial)
 
+        override fun vpnAuthState(): String = VpnAuthRuntime.stateJson()
+
+        override fun submitVpnChallenge(tag: String?, id: String?, answerJson: String?): String =
+            VpnAuthRuntime.submit(tag.orEmpty(), id.orEmpty(), answerJson.orEmpty())
+
+        override fun cancelVpnChallenge(tag: String?, id: String?): String = VpnAuthRuntime.cancel(tag.orEmpty(), id.orEmpty())
+
+        /** A screen of the app is in the foreground: MainActivity between onStart and onStop, or the VPN sign-in prompt. */
+        fun uiForeground(): Boolean = callbackIds.values.any {
+            it == SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND || it == SagerConnection.CONNECTION_ID_VPN_AUTH
+        }
+
+        fun vpnAuthChanged(json: String) = launch { broadcast { it.cbVpnAuthUpdate(json) } }
+
         fun stateChanged(s: State, msg: String?) = launch {
             val profileName = profileName
             broadcast { it.stateChanged(s.ordinal, profileName, msg) }
@@ -280,6 +306,7 @@ class BaseService {
 
         override fun close() {
             callbacks.kill()
+            callbackIds.clear()
             cancel()
             data = null
         }
@@ -466,6 +493,7 @@ class BaseService {
                 // the old core now closes off the main thread, so a Stop can arrive in the middle of a restart
                 if (!restart) {
                     data.stopRequested = true
+                    data.startRequested = false
                     data.connectingJob?.cancel() // the build of the next core (prepareRestart)
                 } else {
                     data.restartAgain = true
@@ -479,6 +507,7 @@ class BaseService {
             this as Service
 
             data.stopRequested = false
+            data.startRequested = false
             data.changeState(State.Stopping)
             val originalMessage = msg
 
@@ -505,7 +534,8 @@ class BaseService {
                     data.connectingJob = null
                 }
 
-                var keepNotification = restart && data.notification != null
+                // A start that already came in keeps the notification too, so it needs no second startForeground.
+                val keepNotification = (restart || data.startRequested) && data.notification != null
                 if (keepNotification) {
                     try {
                         data.notification?.postNotificationTitle(getString(R.string.notification_switching))
@@ -526,7 +556,7 @@ class BaseService {
                 val discarded = ArrayList<ProxyInstance>()
                 var deferRuleSets: Boolean? = null
                 var next: ProxyInstance? = null
-                if (keepNotification) {
+                if (restart && keepNotification) {
                     try {
                         val consent = DeferredRuleSets.consume()
                         deferRuleSets = consent
@@ -579,11 +609,17 @@ class BaseService {
                     discarded.clear()
                 }
                 val stopInstead = restart && data.stopRequested
+                val startInstead = data.startRequested
                 data.stopRequested = false
                 data.restartAgain = false
-                if (stopInstead) releaseRetiredTun()
-                if (stopInstead && keepNotification) {
-                    keepNotification = false
+                data.startRequested = false
+                val finishRestart = restart && !stopInstead
+                // A start asked for meanwhile runs in place: on the kept notification or on the one it put up itself.
+                val startInPlace = startInstead || (finishRestart && data.notification != null)
+
+                if (!startInPlace) {
+                    // Crown (touch point 10): nothing starts on the interface a restart kept
+                    releaseRetiredTun()
                     try {
                         data.notification?.destroy()
                     } catch (error: Throwable) {
@@ -591,10 +627,6 @@ class BaseService {
                     } finally {
                         data.notification = null
                     }
-                }
-                val finishRestart = restart && !stopInstead
-
-                if (!keepNotification) {
                     try {
                         if (data.closeReceiverRegistered) {
                             unregisterReceiver(data.receiver)
@@ -625,7 +657,8 @@ class BaseService {
                 }
                 Logs.i(
                     "ServiceStopTrace serviceId=$serviceId proxyId=$proxyId " +
-                        "stage=stopped restart=$restart hasCleanupError=${cleanupError != null}"
+                        "stage=stopped restart=$restart startInstead=$startInstead " +
+                        "hasCleanupError=${cleanupError != null}"
                 )
                 if (!finishRestart) {
                     DeferredRuleSets.serviceStopped()
@@ -634,13 +667,13 @@ class BaseService {
 
                 try {
                     when {
-                        keepNotification -> startProxy(next, deferRuleSets)
+                        startInPlace -> startProxy(next, deferRuleSets)
                         finishRestart -> startRunner()
                         else -> stopSelf() // stop the service if nothing has bound to it
                     }
                 } catch (error: Throwable) {
                     recordCleanupFailure("service-finish", error)
-                    if (keepNotification) {
+                    if (startInPlace) {
                         failRunner("${getString(R.string.service_failed)} ${error.readableMessage}")
                     }
                 }
@@ -735,9 +768,22 @@ class BaseService {
                 restore.leaveForeground(this as Service)
                 return Service.START_NOT_STICKY
             }
-            // A start that comes while a stop is in progress is dropped (below): it must not mark the connection wanted.
-            if (!restart && data.state != State.Stopping) restore.onStartRequested(this as Context, intent)
-            if (data.state == State.Stopped) startProxy()
+            // A start that comes while a stop is in progress ends that stop in a start (below), so it marks it wanted too.
+            if (!restart) restore.onStartRequested(this as Context, intent)
+            when (data.state) {
+                State.Stopped -> startProxy()
+                // startForeground now, as this start requires; the stop then ends in a start instead of stopSelf.
+                State.Stopping -> if (!restart) {
+                    if (data.notification == null) {
+                        val title = (this as Context).getString(R.string.notification_switching)
+                        data.notification = createNotification(title)
+                    }
+                    data.stopRequested = false
+                    data.startRequested = true
+                }
+
+                else -> {}
+            }
             return restore.startResult()
         }
 
