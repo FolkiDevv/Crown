@@ -90,11 +90,35 @@ The UI process SHALL communicate with the running service over an AIDL connectio
 - **THEN** it binds, receives the current state, and reflects it without restarting the service
 
 ### Requirement: External control actions
-The app SHALL support broadcast/Intent actions to stop the service, reload the running configuration, switch to the next or previous profile, and switch to a profile by id, invokable from the notification, widgets, and quick settings tile.
+The app SHALL support broadcast/Intent actions to stop the service, reload the running configuration, switch to the next or previous profile, and switch to a profile by id, invokable from the notification, widgets, the quick settings tile and the app's own launcher shortcuts (dynamic, and pinned ones the system starts on the app's behalf).
+
+Another app MUST NOT be able to start, stop or switch the connection unless the user allowed it: the activities that carry out a shortcut (toggle, enable, disable) MUST NOT be exported, and the only exported shortcut entry MUST only hand the toggle shortcut to the launcher's shortcut picker (`ACTION_CREATE_SHORTCUT`) or, for a pinned shortcut the launcher starts itself (Android 7.0–7.1), ask the user before it toggles; it MUST NOT change the connection by itself on Android 8 and later. A shortcut, widget or tile start SHALL stay an explicit start by the user (it marks the connection as wanted and starts the restore count over), and a stop from them SHALL clear the mark. A profile id from a shortcut or another app MUST be acted on only when that profile exists; an unknown id MUST change nothing (no stop, no selection). The boot receiver MUST act only on `BOOT_COMPLETED`/`LOCKED_BOOT_COMPLETED`, which only the system can send, and ignore any other action.
+
+The setting «Allow other apps to control the VPN» (classic Settings › General, simple settings in the advanced mode) SHALL be off by default and device-local (never exported to or restored from a backup). While it is on, an exported receiver in the service process SHALL accept `<applicationId>.action.CONNECT`, `.action.DISCONNECT` and `.action.TOGGLE` with an optional long extra `profile` (the id of an existing profile); it reads the setting on every broadcast, so a change acts from the next broadcast on. It MUST NOT start the VPN without a VPN consent the user already gave, and MUST NOT change any other setting or data. While the setting is off the receiver MUST change nothing.
 
 #### Scenario: Quick settings tile toggle
 - **WHEN** the user taps the quick settings tile with no active connection
 - **THEN** the app starts the currently selected profile; tapping again stops it
+
+#### Scenario: Another app starts a shortcut activity
+- **WHEN** another app (or `adb shell am start`) starts the toggle, enable or disable shortcut activity by name, with or without a `profile` extra
+- **THEN** Android refuses the start (the activity is not exported) and the connection does not change
+
+#### Scenario: Shortcut of a deleted server
+- **WHEN** the user taps a pinned shortcut of a server that no longer exists
+- **THEN** the app says the server no longer exists and the connection, running or not, stays as it was
+
+#### Scenario: Forged boot broadcast
+- **WHEN** another app sends an explicit broadcast with any action other than the boot ones to the boot receiver while auto connect is on
+- **THEN** the receiver ignores it and the VPN does not start
+
+#### Scenario: Automation app while external control is off
+- **WHEN** the setting «Allow other apps to control the VPN» is off and an app sends `<applicationId>.action.DISCONNECT` or `.action.TOGGLE` to the receiver
+- **THEN** the connection does not change
+
+#### Scenario: Automation app while external control is on
+- **WHEN** the user turned the setting on and an app sends `<applicationId>.action.CONNECT` with the id of an existing profile while the VPN is off and consent was given
+- **THEN** the app selects that profile and connects, as an explicit start; the same broadcast with an unknown id changes nothing
 
 ### Requirement: VPN and proxy modes
 The service SHALL support VPN mode (TUN device capturing device traffic, with per-app allow/bypass lists) and proxy-only mode, selected by the user's service mode setting.

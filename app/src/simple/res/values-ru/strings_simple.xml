@@ -549,4 +549,12 @@
     <string name="simple_restore_consent_title">VPN не восстановлен</string>
     <string name="simple_restore_consent_text">Разрешение на VPN отозвано, или его заняло другое VPN-приложение. Приложения выходят в сеть напрямую, без VPN.</string>
     <string name="simple_restore_connect">Подключить</string>
+    <!-- restrict-exported-vpn-controls: other apps, legacy shortcuts -->
+    <string name="simple_external_control">Разрешить управление VPN другим приложениям</string>
+    <string name="simple_external_control_summary">Для приложений автоматизации вроде Tasker. Пока включено, любое приложение на этом устройстве может включать и выключать VPN и менять сервер</string>
+    <string name="simple_shortcut_server_missing">Этого сервера больше нет</string>
+    <string name="simple_shortcut_confirm_connect">Включить VPN?</string>
+    <string name="simple_shortcut_confirm_connect_to">Включить VPN через «%1$s»?</string>
+    <string name="simple_shortcut_confirm_disconnect">Выключить VPN?</string>
+    <string name="simple_shortcut_confirm_switch">Переключить VPN на «%1$s»?</string>
 </resources>

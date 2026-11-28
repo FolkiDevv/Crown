@@ -559,4 +559,12 @@ The choice is not remembered: the next launch opens the new interface.</string>
     <string name="simple_restore_consent_title">VPN not restored</string>
     <string name="simple_restore_consent_text">The VPN permission was revoked or another VPN app took over. Apps now go online directly, without the VPN.</string>
     <string name="simple_restore_connect">Connect</string>
+    <!-- restrict-exported-vpn-controls: other apps, legacy shortcuts -->
+    <string name="simple_external_control">Allow other apps to control the VPN</string>
+    <string name="simple_external_control_summary">For automation apps such as Tasker. While on, any app on this device can turn the VPN on or off and switch servers</string>
+    <string name="simple_shortcut_server_missing">This server no longer exists</string>
+    <string name="simple_shortcut_confirm_connect">Connect the VPN?</string>
+    <string name="simple_shortcut_confirm_connect_to">Connect the VPN through «%1$s»?</string>
+    <string name="simple_shortcut_confirm_disconnect">Disconnect the VPN?</string>
+    <string name="simple_shortcut_confirm_switch">Switch the VPN to «%1$s»?</string>
 </resources>

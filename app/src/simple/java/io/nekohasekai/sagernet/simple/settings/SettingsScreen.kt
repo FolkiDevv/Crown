@@ -70,6 +70,8 @@ class SettingsActions(
     /** The daily update check and pre-releases (advanced mode, in-app updater builds). */
     val setUpdateCheck: (Boolean) -> Unit,
     val setBetaUpdates: (Boolean) -> Unit,
+    /** «Разрешить управление VPN другим приложениям» (advanced mode; restrict-exported-vpn-controls). */
+    val setExternalControl: (Boolean) -> Unit,
     /** A classic screen: the backup («Перенос на другое устройство») or a screen of the advanced mode. */
     val openClassicScreen: (ClassicScreen) -> Unit,
     /** The whole classic interface (advanced mode, after [ClassicWarningDialog]); not remembered (see SimpleUi). */
@@ -156,6 +158,14 @@ fun SettingsScreen(
         if (settings.advanced) {
             item { SectionDivider() }
             item { Header(R.string.simple_advanced_header) }
+            item {
+                SwitchItem(
+                    title = stringResource(R.string.simple_external_control),
+                    summary = stringResource(R.string.simple_external_control_summary),
+                    checked = settings.externalControl,
+                    onChange = actions.setExternalControl,
+                )
+            }
             items(ClassicScreen.entries.filter { it.advanced }, key = { it.name }) { screen ->
                 ClassicScreenItem(screen, actions.openClassicScreen)
             }

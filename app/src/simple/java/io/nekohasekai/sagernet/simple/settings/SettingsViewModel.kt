@@ -9,6 +9,7 @@ import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.add.SimpleImport
+import io.nekohasekai.sagernet.simple.control.ExternalControl
 import io.nekohasekai.sagernet.update.UpdateScheduler
 import io.nekohasekai.sagernet.utils.AlwaysOnVpn
 import io.nekohasekai.sagernet.utils.Theme
@@ -80,6 +81,8 @@ data class SettingsUiState(
     val betaUpdates: Boolean = false,
     /** «Постоянный VPN»: Android's always-on VPN for Crown, with or without blocking connections without VPN. */
     val alwaysOn: AlwaysOnVpn.State = AlwaysOnVpn.State.UNKNOWN,
+    /** Advanced mode: «Разрешить управление VPN другим приложениям» ([ExternalControl], off by default). */
+    val externalControl: Boolean = false,
 )
 
 /**
@@ -118,10 +121,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val updateCheck = DataStore.updateCheckAuto
         val betaUpdates = DataStore.allowBetaUpdate
         val alwaysOn = AlwaysOnVpn.state()
+        val externalControl = ExternalControl.isAllowed()
         mutableState.update {
             it.copy(
                 autostart = autostart, autoUpdate = autoUpdate, nightMode = night,
                 updateCheck = updateCheck, betaUpdates = betaUpdates, alwaysOn = alwaysOn,
+                externalControl = externalControl,
             )
         }
     }
@@ -196,6 +201,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setBetaUpdates(on: Boolean) {
         mutableState.update { it.copy(betaUpdates = on) }
         write { DataStore.allowBetaUpdate = on }
+    }
+
+    /** Read by the receiver in `:bg` on every broadcast, so it acts from the next one on. */
+    fun setExternalControl(on: Boolean) {
+        mutableState.update { it.copy(externalControl = on) }
+        write { ExternalControl.setAllowed(on) }
     }
 
     fun setAdvanced(on: Boolean) {

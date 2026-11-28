@@ -19,6 +19,13 @@
             app:key="alwaysOnVpn"
             app:persistent="false"
             app:title="@string/always_on_vpn" />
+        <!-- Crown (touch point 18): restrict-exported-vpn-controls, read by simple.control.ExternalControlReceiver -->
+        <SwitchPreference
+            app:defaultValue="false"
+            app:icon="@drawable/ic_baseline_security_24"
+            app:key="simple_external_control"
+            app:summary="@string/simple_external_control_summary"
+            app:title="@string/simple_external_control" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/cag_behaviour">

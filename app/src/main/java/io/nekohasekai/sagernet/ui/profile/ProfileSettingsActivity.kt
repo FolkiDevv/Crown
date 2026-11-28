@@ -26,7 +26,6 @@ import io.nekohasekai.sagernet.widget.AlertDialogFragment
 import io.nekohasekai.sagernet.widget.Empty
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.Key
-import io.nekohasekai.sagernet.QuickToggleShortcut
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
@@ -430,12 +429,11 @@ abstract class ProfileSettingsActivity<T : Outbound>(
                         IconCompat.createWithResource(
                             activity, R.drawable.ic_qu_shadowsocks_launcher
                         )
-                    ).setIntent(Intent(
-                        context, QuickToggleShortcut::class.java
-                    ).apply {
-                        action = Intent.ACTION_MAIN
-                        putExtra("profile", ent.id)
-                    }).build()
+                    ).setIntent(
+                        // Crown (touch point 18): Android 7 launchers start a pinned shortcut themselves, so it opens
+                        // the exported entry that asks first; from Android 8 the unexported toggle itself.
+                        io.nekohasekai.sagernet.simple.control.ShortcutIntents.pinnedToggle(activity, ent.id)
+                    ).build()
                 ShortcutManagerCompat.requestPinShortcut(activity, shortcut, null)
             }
 

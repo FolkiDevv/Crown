@@ -21,14 +21,10 @@
 package io.nekohasekai.sagernet
 
 import android.app.Activity
-import android.content.Intent
 import android.content.pm.ShortcutManager
 import android.os.Build
 import android.os.Bundle
 import androidx.core.content.getSystemService
-import androidx.core.content.pm.ShortcutInfoCompat
-import androidx.core.content.pm.ShortcutManagerCompat
-import androidx.core.graphics.drawable.IconCompat
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
@@ -41,22 +37,17 @@ class QuickToggleShortcut : Activity(), SagerConnection.Callback {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (intent.action == Intent.ACTION_CREATE_SHORTCUT) {
-            setResult(RESULT_OK, ShortcutManagerCompat.createShortcutResultIntent(this,
-                ShortcutInfoCompat.Builder(this, "toggle")
-                    .setIntent(Intent(this,
-                        QuickToggleShortcut::class.java).setAction(Intent.ACTION_MAIN))
-                    .setIcon(IconCompat.createWithResource(this,
-                        R.drawable.ic_qu_shadowsocks_launcher))
-                    .setShortLabel(getString(R.string.quick_toggle))
-                    .build()))
+        // Crown (touch point 18): not exported; the launcher's shortcut picker goes to simple.control.ShortcutEntryActivity.
+        // A shortcut of a server deleted since changes nothing (it used to stop the VPN with "profile_empty").
+        profileId = intent.getLongExtra("profile", -1L)
+        if (profileId >= 0L && !io.nekohasekai.sagernet.simple.control.ExternalControl.profileExists(profileId)) {
+            android.widget.Toast.makeText(this, R.string.simple_shortcut_server_missing, android.widget.Toast.LENGTH_SHORT).show()
             finish()
-        } else {
-            profileId = intent.getLongExtra("profile", -1L)
-            connection.connect(this, this)
-            if (Build.VERSION.SDK_INT >= 25) {
-                getSystemService<ShortcutManager>()!!.reportShortcutUsed(if (profileId >= 0) "shortcut-profile-$profileId" else "toggle")
-            }
+            return
+        }
+        connection.connect(this, this)
+        if (Build.VERSION.SDK_INT >= 25) {
+            getSystemService<ShortcutManager>()!!.reportShortcutUsed(if (profileId >= 0) "shortcut-profile-$profileId" else "toggle")
         }
     }
 

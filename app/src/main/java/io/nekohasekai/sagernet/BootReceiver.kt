@@ -21,6 +21,9 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        // Crown (touch point 18): exported for the boot broadcasts, which only the system may send; any other action
+        // (an explicit broadcast from another app) is ignored instead of counting as a boot.
+        if (!io.nekohasekai.sagernet.simple.control.ControlRules.isBootAction(intent.action)) return
         if (!DataStore.rememberEnable) {   // sanity check
             enabled = false
             return

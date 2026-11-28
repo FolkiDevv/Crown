@@ -1230,6 +1230,7 @@ private fun SettingsSection(
                 setAdvanced = settings::setAdvanced,
                 setUpdateCheck = settings::setUpdateCheck,
                 setBetaUpdates = settings::setBetaUpdates,
+                setExternalControl = settings::setExternalControl,
                 openClassicScreen = openClassicScreen,
                 openClassic = onOpenClassic,
                 openRepair = openRepair,
