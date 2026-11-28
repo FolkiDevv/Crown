@@ -768,11 +768,16 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
             // Another session (not this section's) runs or ran since, or the panel was cleared: this section's ended
             // unseen, as no other session begins or is cleared while it runs.
             ownTest = NONE
+            stateBeforeTest = null
             roundBusy = false
+            testAgain = false
+            addedTest = false
             roundPending.clear()
             queued.clear()
-            if (detecting.isNotEmpty()) {
+            // The stored results are read again without this section's live ones over them.
+            if (detecting.isNotEmpty() || liveLatency.isNotEmpty()) {
                 detecting = emptySet()
+                liveLatency.clear()
                 reload()
             }
             return
