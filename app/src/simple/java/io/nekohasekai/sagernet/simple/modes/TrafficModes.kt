@@ -254,30 +254,25 @@ object TrafficModes {
         // excludes every other writer of the database, the other process included, so this save starts from the
         // latest stored JSON and keeps whatever `:bg` wrote before it. Only the fields the runtime never writes
         // (groups, tiers, strategy) are changed, and only when they differ; should a stale `:bg` save put older
-        // values back, the next ensure (every application, app start and group change) sets them again.
+        // values back, the next ensure (every application, app start and group change) sets them again. The check
+        // settings move once per ManagedAuto.TUNING_VERSION, so a classic edit stays; a running core takes them up at
+        // its next start or reload, never through a restart of its own.
+        val tuningKey = key + TUNING_SUFFIX
         val kept = AutoSelectorProfiles.writes.withLock {
             if (stored <= 0L) return@withLock false
             SagerDatabase.instance.runInTransaction(Callable {
                 val existing = AutoSelectorProfiles.load(stored) ?: return@Callable false
-                val tiers = listOf(AutoSelector.Tier(-1, firstTier))
-                if (existing.gids != groups || existing.tiers != tiers || !existing.prioritized) {
-                    existing.gids = ArrayList(groups)
-                    existing.tiers = ArrayList(tiers)
-                    existing.strategy = AutoSelector.STRATEGY_PRIORITY
-                    AutoSelectorProfiles.save(stored, existing)
-                }
+                val tune = (store.getLong(tuningKey) ?: 0L) < ManagedAuto.TUNING_VERSION
+                if (ManagedAuto.update(existing, groups, firstTier, tune)) AutoSelectorProfiles.save(stored, existing)
+                if (tune) store.putLong(tuningKey, ManagedAuto.TUNING_VERSION)
                 true
             })
         }
         if (kept) return stored
-        val selector = AutoSelector().apply {
-            this.name = context.getString(name)
-            gids = ArrayList(groups)
-            strategy = AutoSelector.STRATEGY_PRIORITY
-            tiers = arrayListOf(AutoSelector.Tier(-1, firstTier))
-        }
+        val selector = ManagedAuto.create(context.getString(name), groups, firstTier)
         val profile = ProfileManager.addProfile(selector, selectorGroup())
         store.putLong(key, profile.id)
+        store.putLong(tuningKey, ManagedAuto.TUNING_VERSION)
         Logs.i("simple modes: added the managed auto-selector ${profile.id}")
         return profile.id
     }
@@ -297,6 +292,9 @@ object TrafficModes {
     }
 
     private const val SELECTOR_GROUP_NAME = "Auto"
+
+    /** After a managed selector's key: the ManagedAuto.TUNING_VERSION its check settings were last moved to. */
+    private const val TUNING_SUFFIX = "_tuning"
 
     // ------------------------------------------------------------------------------------------------ country
 
