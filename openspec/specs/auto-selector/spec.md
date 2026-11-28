@@ -13,6 +13,18 @@ The app SHALL, when auto-selector mode is enabled for the running connection, te
 - **WHEN** the active node fails its test while another candidate passes
 - **THEN** the app switches the connection to a passing candidate and shows the switch in the UI
 
+### Requirement: Failover time
+When the active node stops answering (connections refused, or accepted with no reply) while another candidate is
+confirmed working, the selector SHALL move new connections to that candidate within 20 s of the first failed
+connection. The app's managed selectors SHALL use check settings chosen for that (passive judging by real connections,
+a short watch interval of the active node), and the app MAY ask the running core for an immediate re-check of every
+member when its own check through the selector fails.
+
+#### Scenario: Server stops answering with a confirmed standby
+- **GIVEN** a running auto-selector with two members, both confirmed working
+- **WHEN** the active member starts accepting connections without ever replying
+- **THEN** within 20 s new connections go through the other member
+
 ### Requirement: Candidate scope
 The user SHALL be able to constrain auto-selector to a group and to a minimum number of candidates, and the selector SHALL only switch among profiles within that scope.
 

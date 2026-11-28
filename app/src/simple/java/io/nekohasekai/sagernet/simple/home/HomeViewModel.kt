@@ -551,11 +551,41 @@ class HomeViewModel(application: Application) : AndroidViewModel(application), S
                     else -> {
                         urlTestFailures++
                         liveLatency = null
+                        if (service != null) recheckAuto(service)
                     }
                 }
                 refreshWorkingLater()
                 publish()
                 delay(if (urlTestFailures > 0) RETRY_MS else INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
+     * A failed check while an auto-selector runs: the core re-checks every member now ([AutoRecheck]), so a confirmed
+     * standby can take over without waiting for the core's own schedule. `:bg` runs it on the core it has; nothing
+     * restarts.
+     */
+    private suspend fun recheckAuto(service: ISagerNetService) {
+        val status = autoStatus
+        withContext(Dispatchers.IO) {
+            try {
+                val store = DataStore.configurationStore
+                val now = SystemClock.elapsedRealtime()
+                val due = AutoRecheck.due(
+                    selectorRuns = status.phase == AutoSelectorStatus.PHASE_RUNNING,
+                    suspended = status.suspended,
+                    hasNetwork = SagerNet.underlyingNetwork != null,
+                    lastAt = store.getLong(AutoRecheck.KEY_LAST_AT) ?: 0L,
+                    now = now,
+                )
+                if (!due) return@withContext
+                Logs.i("simple home: a check through the auto-selector failed, asking it to re-check every server now")
+                // Stored only once `:bg` took the request: a dead service must not use up the limit.
+                service.autoSelectorRecheck()
+                store.putLong(AutoRecheck.KEY_LAST_AT, now)
+            } catch (e: Exception) {
+                Logs.w(e)
             }
         }
     }
