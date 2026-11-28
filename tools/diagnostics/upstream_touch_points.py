@@ -47,6 +47,7 @@ TOUCH_POINTS: dict[str, str] = {
     "app/src/main/java/io/nekohasekai/sagernet/SagerNet.kt": "12: a new :bg reports a wanted connection no restart brought back; 14: CrashHandler.install keeps Android's handler, a new :bg reports a crash; crown: displayed version with the Throne base; 21: start-up stops when the database does not open",
     "app/src/main/java/io/nekohasekai/sagernet/database/SettingsRegistry.kt": "12: restore keys are device-local; crown: pre-releases looked for by default on a preview build; 18: the external control switch is device-local",
     "app/src/main/java/io/nekohasekai/sagernet/outbound/json/JsonInput.kt": "13: nesting limit of the JSON read",
+    "app/src/main/java/io/nekohasekai/sagernet/outbound/config/ConfigGenerator.kt": "22: the managed auto-selectors' watch interval (SimpleHooks.watchIntervalSec)",
     "app/src/main/java/io/nekohasekai/sagernet/outbound/import/ProfileImport.kt": "13: the import report names the nesting limit",
     "app/src/main/java/io/nekohasekai/sagernet/ui/profiles/ProfileImports.kt": "13: the zip import catches StackOverflowError; 15: the scanner opened for its result",
     "app/src/main/java/io/nekohasekai/sagernet/utils/CrashHandler.kt": "14: the crash goes on to Android's handler (the process ends), a marker for the report instead of ProcessPhoenix; 21: a database that did not open leads to the data error screen, no marker and no report",

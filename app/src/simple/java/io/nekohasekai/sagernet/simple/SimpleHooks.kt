@@ -5,6 +5,9 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.outbound.types.AutoSelector
+import io.nekohasekai.sagernet.simple.modes.ManagedAuto
+import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.simple.regime.NetworkRegimeWatcher
 import io.nekohasekai.sagernet.simple.subs.FetchMark
 import io.nekohasekai.sagernet.simple.subs.SubscriptionAlerts
@@ -99,6 +102,24 @@ object SimpleHooks {
     }
 
     /** The service must never fail because of the simple UI. */
+    /**
+     * Touch point 22 (ConfigGenerator.buildAutoSelectorGroup): the watch interval of auto-selector [selectorId]'s
+     * config, the short one of a managed «Авто» ([io.nekohasekai.sagernet.simple.modes.ManagedAuto.watchIntervalSec]).
+     * Upstream's value when the settings cannot be read.
+     */
+    @JvmStatic
+    fun watchIntervalSec(selectorId: Long, selector: AutoSelector): Int = try {
+        val store = DataStore.configurationStore
+        val managed = selectorId > 0L && (
+            store.getLong(TrafficModes.KEY_MANAGED_AUTO) == selectorId ||
+                store.getLong(TrafficModes.KEY_MANAGED_AUTO_WHITELIST) == selectorId
+            )
+        ManagedAuto.watchIntervalSec(selector, managed)
+    } catch (e: Exception) {
+        Logs.w(e)
+        selector.watchIntervalSec
+    }
+
     private inline fun guarded(block: () -> Unit) {
         try {
             block()

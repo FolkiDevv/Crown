@@ -1035,7 +1035,8 @@ class ConfigGenerator @JvmOverloads constructor(
             "url" to selector.testURL.ifEmpty { settings.testUrl },
             "interval" to "${selector.intervalSec}s",
             "bench_interval" to "${selector.benchIntervalSec(memberTags.size)}s",
-            "watch_interval" to "${selector.watchIntervalSec}s",
+            // Crown (touch point 22): the managed «Авто» watches its active member more often
+            "watch_interval" to "${io.nekohasekai.sagernet.simple.SimpleHooks.watchIntervalSec(selectorId, selector)}s",
             "active_size" to selector.activeSize,
             "sampling" to AutoSelector.SAMPLING,
             "tolerance" to selector.toleranceMs,

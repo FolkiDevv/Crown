@@ -12,7 +12,7 @@ class ManagedAutoTest {
     private val groups = listOf(3L, 7L)
     private val tier = "^(?!.*(wl)).*$"
     private val done = ManagedAuto.TUNING_VERSION
-    private val pending = ManagedAuto.PENDING_BOTH
+    private val pending = ManagedAuto.PENDING_PASSIVE
 
     /** A selector as the simple UI made it before the check settings moved: the AutoSelector defaults. */
     private fun oldSelector() = AutoSelector().apply {
@@ -31,50 +31,50 @@ class ManagedAutoTest {
     fun newSelectorTakesTheFastSettings() {
         val selector = stored(ManagedAuto.create("Авто", groups, tier))
         assertTrue(selector.passive)
-        assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, selector.watchIntervalSec)
+        assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, ManagedAuto.watchIntervalSec(selector, managed = true))
         assertEquals(groups, selector.gids)
         assertEquals(listOf(AutoSelector.Tier(-1, tier)), selector.tiers)
         assertTrue(selector.prioritized)
         // Left at the defaults on purpose.
-        assertEquals(AutoSelector().dialRetries, selector.dialRetries)
         assertEquals(AutoSelector().expected, selector.expected)
         assertEquals(AutoSelector().intervalSec, selector.intervalSec)
     }
 
+    /** Only a managed selector gets the short watch, and never above its own interval; others keep upstream's. */
     @Test
-    fun existingSelectorAtTheOldDefaultsMoves() {
+    fun watchIntervalOfTheConfig() {
+        val selector = oldSelector()
+        assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, ManagedAuto.watchIntervalSec(selector, managed = true))
+        assertEquals(selector.watchIntervalSec, ManagedAuto.watchIntervalSec(selector, managed = false))
+        assertEquals(AutoSelector.WATCH_INTERVAL_SEC, ManagedAuto.watchIntervalSec(selector, managed = false))
+        selector.intervalSec = 3
+        assertEquals(3, ManagedAuto.watchIntervalSec(selector, managed = true))
+    }
+
+    @Test
+    fun existingSelectorAtTheOldDefaultMoves() {
         val selector = oldSelector()
         assertEquals(ManagedAuto.Update(save = true, tuning = pending), update(selector, 0L))
-        val saved = stored(selector)
-        assertTrue(saved.passive)
-        assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, saved.watchIntervalSec)
+        assertTrue(stored(selector).passive)
     }
 
     @Test
     fun handEditedSettingsStay() {
         val selector = oldSelector().apply {
-            watchIntervalSec = 30
-            dialRetries = 4
             expected = 2
             intervalSec = 120
         }
-        assertEquals(ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_PASSIVE), update(selector, 0L))
-        assertEquals(30, selector.watchIntervalSec)
-        assertEquals(4, selector.dialRetries)
+        assertEquals(ManagedAuto.Update(save = true, tuning = pending), update(selector, 0L))
         assertEquals(2, selector.expected)
         assertEquals(120, selector.intervalSec)
-        // passive still at the old default moves with the rest.
+        // passive still at the old default moves.
         assertTrue(selector.passive)
     }
 
     @Test
     fun nothingToMoveIsDoneAtOnce() {
-        val selector = oldSelector().apply {
-            passive = true
-            watchIntervalSec = 10
-        }
+        val selector = oldSelector().apply { passive = true }
         assertEquals(ManagedAuto.Update(save = false, tuning = done), update(selector, 0L))
-        assertEquals(10, selector.watchIntervalSec)
     }
 
     /** The next ensure finds the move stored: it is done, and nothing changes. */
@@ -91,43 +91,27 @@ class ManagedAutoTest {
         val selector = oldSelector()
         assertEquals(ManagedAuto.Update(save = true, tuning = done), update(selector, pending))
         assertTrue(selector.passive)
-        assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, selector.watchIntervalSec)
     }
 
-    /** Only passive moved (the interval was set by hand); a stale save put it back: it moves again. */
+    /** A marker of the builds that also moved a stored watch interval still confirms the passive move. */
     @Test
-    fun aStaleSaveOfAPartMoveIsMovedAgain() {
-        val selector = oldSelector().apply { watchIntervalSec = 30 }
-        assertEquals(ManagedAuto.Update(save = true, tuning = done), update(selector, ManagedAuto.PENDING_PASSIVE))
-        assertTrue(selector.passive)
-        assertEquals(30, selector.watchIntervalSec)
+    fun oldMarkersAreConfirmed() {
+        val stale = oldSelector()
+        assertEquals(ManagedAuto.Update(save = true, tuning = done), update(stale, ManagedAuto.PENDING_BOTH))
+        assertTrue(stale.passive)
+        // Only the interval had moved: nothing left to move, passive stays as it is.
+        val intervalOnly = oldSelector()
+        assertEquals(ManagedAuto.Update(save = false, tuning = done), update(intervalOnly, ManagedAuto.PENDING_WATCH))
+        assertFalse(intervalOnly.passive)
     }
 
     /** The second move is the last: passive turned off by hand after it is not turned on again. */
     @Test
     fun afterTheSecondMoveAHandEditStays() {
-        val selector = oldSelector().apply { watchIntervalSec = 30 }
-        val marker = update(selector, ManagedAuto.PENDING_PASSIVE).tuning
+        val selector = oldSelector()
+        val marker = update(selector, pending).tuning
         selector.passive = false
         assertEquals(ManagedAuto.Update(save = false, tuning = done), update(selector, marker))
-        assertFalse(selector.passive)
-    }
-
-    /** Only the interval moved (passive was on already); a stale save put 15 s back: it moves again. */
-    @Test
-    fun aStaleSaveOfTheIntervalAloneIsMovedAgain() {
-        val selector = oldSelector().apply { passive = true }
-        assertEquals(ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_WATCH), update(selector, 0L))
-        val stale = oldSelector().apply { passive = true }
-        assertEquals(ManagedAuto.Update(save = true, tuning = done), update(stale, ManagedAuto.PENDING_WATCH))
-        assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, stale.watchIntervalSec)
-    }
-
-    /** Between the move and its confirmation the user turned passive judging off: that stays. */
-    @Test
-    fun aHandEditBeforeTheConfirmationStays() {
-        val selector = oldSelector().apply { watchIntervalSec = ManagedAuto.WATCH_INTERVAL_SEC }
-        assertEquals(ManagedAuto.Update(save = false, tuning = done), update(selector, pending))
         assertFalse(selector.passive)
     }
 
@@ -137,16 +121,14 @@ class ManagedAutoTest {
         val selector = oldSelector()
         assertEquals(ManagedAuto.Update(save = false, tuning = done), update(selector, done))
         assertFalse(selector.passive)
-        assertEquals(15, selector.watchIntervalSec)
     }
 
     @Test
     fun groupsAndTiersAreStillKeptUpToDate() {
-        val selector = oldSelector().apply { passive = true; watchIntervalSec = 5 }
+        val selector = oldSelector().apply { passive = true }
         assertTrue(ManagedAuto.update(selector, listOf(9L), "other", done).save)
         assertEquals(listOf(9L), selector.gids)
         assertEquals(listOf(AutoSelector.Tier(-1, "other")), selector.tiers)
         assertTrue(selector.passive)
-        assertEquals(5, selector.watchIntervalSec)
     }
 }
