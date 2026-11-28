@@ -29,6 +29,14 @@ object ManagedAuto {
     private const val OLD_PASSIVE = false
     private const val OLD_WATCH_INTERVAL_SEC = 15
 
+    /**
+     * Markers of a move to [TUNING_VERSION] 1 that is stored but not yet confirmed, by what moved. A selector whose
+     * other setting was set by hand moves only one of them, and a stale save then puts back only that one.
+     */
+    const val PENDING_BOTH = -1L
+    const val PENDING_PASSIVE = -2L
+    const val PENDING_WATCH = -3L
+
     /** A new managed selector over [groups], [firstTier] the name filter of its first tier. */
     fun create(name: String, groups: List<Long>, firstTier: String): AutoSelector = AutoSelector().apply {
         this.name = name
@@ -47,10 +55,11 @@ object ManagedAuto {
      * by the stored marker [tuning]:
      * - [TUNING_VERSION]: done, nothing is moved again (a value put back by hand stays);
      * - older (0 = never): each check setting still at its old default moves, one set otherwise (in the classic
-     *   editor) stays; when anything moved the marker becomes -[TUNING_VERSION], moved but not yet seen stored;
-     * - -[TUNING_VERSION]: the next ensure confirms it. Only when every check setting is back at its old default (a
-     *   stale whole-selector save of `:bg`, which loaded it before the move, put the old JSON back) they move again;
-     *   a single one changed by hand stays.
+     *   editor) stays; when anything moved the marker becomes one of the pending ones below, which also says which
+     *   settings moved (moved, but not yet seen stored);
+     * - pending: the next ensure confirms it. Only when every setting that moved is back at its old default (a stale
+     *   whole-selector save of `:bg`, which loaded it before the move, put the old JSON back) they move again; when
+     *   only one of two moved settings is back, it was changed by hand and stays.
      */
     fun update(existing: AutoSelector, groups: List<Long>, firstTier: String, tuning: Long): Update {
         var changed = false
@@ -62,17 +71,24 @@ object ManagedAuto {
             changed = true
         }
         if (tuning == TUNING_VERSION) return Update(changed, tuning)
-        val reverted = existing.passive == OLD_PASSIVE && existing.watchIntervalSec == OLD_WATCH_INTERVAL_SEC
-        if (tuning == -TUNING_VERSION && !reverted) return Update(changed, TUNING_VERSION)
-        var moved = false
-        if (existing.passive == OLD_PASSIVE) {
-            existing.passive = PASSIVE
-            moved = true
+        val passiveOld = existing.passive == OLD_PASSIVE
+        val watchOld = existing.watchIntervalSec == OLD_WATCH_INTERVAL_SEC
+        // Which settings to move: on the first pass each one still at its old default; on a pending pass the ones
+        // that moved before, and only when all of them are back.
+        val (movePassive, moveWatch) = when (tuning) {
+            PENDING_BOTH -> (passiveOld && watchOld).let { it to it }
+            PENDING_PASSIVE -> passiveOld to false
+            PENDING_WATCH -> false to watchOld
+            else -> passiveOld to watchOld
         }
-        if (existing.watchIntervalSec == OLD_WATCH_INTERVAL_SEC) {
-            existing.watchIntervalSec = WATCH_INTERVAL_SEC
-            moved = true
+        if (movePassive) existing.passive = PASSIVE
+        if (moveWatch) existing.watchIntervalSec = WATCH_INTERVAL_SEC
+        val marker = when {
+            movePassive && moveWatch -> PENDING_BOTH
+            movePassive -> PENDING_PASSIVE
+            moveWatch -> PENDING_WATCH
+            else -> TUNING_VERSION
         }
-        return Update(changed || moved, if (moved) -TUNING_VERSION else TUNING_VERSION)
+        return Update(changed || movePassive || moveWatch, marker)
     }
 }

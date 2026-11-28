@@ -12,7 +12,7 @@ class ManagedAutoTest {
     private val groups = listOf(3L, 7L)
     private val tier = "^(?!.*(wl)).*$"
     private val done = ManagedAuto.TUNING_VERSION
-    private val pending = -ManagedAuto.TUNING_VERSION
+    private val pending = ManagedAuto.PENDING_BOTH
 
     /** A selector as the simple UI made it before the check settings moved: the AutoSelector defaults. */
     private fun oldSelector() = AutoSelector().apply {
@@ -58,7 +58,7 @@ class ManagedAutoTest {
             expected = 2
             intervalSec = 120
         }
-        assertTrue(update(selector, 0L).save)
+        assertEquals(ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_PASSIVE), update(selector, 0L))
         assertEquals(30, selector.watchIntervalSec)
         assertEquals(4, selector.dialRetries)
         assertEquals(2, selector.expected)
@@ -92,6 +92,29 @@ class ManagedAutoTest {
         assertEquals(ManagedAuto.Update(save = true, tuning = pending), update(selector, pending))
         assertTrue(selector.passive)
         assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, selector.watchIntervalSec)
+    }
+
+    /** Only passive moved (the interval was set by hand); a stale save put it back: it moves again. */
+    @Test
+    fun aStaleSaveOfAPartMoveIsMovedAgain() {
+        val selector = oldSelector().apply { watchIntervalSec = 30 }
+        val moved = ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_PASSIVE)
+        assertEquals(moved, update(selector, ManagedAuto.PENDING_PASSIVE))
+        assertTrue(selector.passive)
+        assertEquals(30, selector.watchIntervalSec)
+        val confirmed = ManagedAuto.Update(save = false, tuning = done)
+        assertEquals(confirmed, update(stored(selector), ManagedAuto.PENDING_PASSIVE))
+    }
+
+    /** Only the interval moved (passive was on already); a stale save put 15 s back: it moves again. */
+    @Test
+    fun aStaleSaveOfTheIntervalAloneIsMovedAgain() {
+        val selector = oldSelector().apply { passive = true }
+        assertEquals(ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_WATCH), update(selector, 0L))
+        val stale = oldSelector().apply { passive = true }
+        val again = ManagedAuto.Update(save = true, tuning = ManagedAuto.PENDING_WATCH)
+        assertEquals(again, update(stale, ManagedAuto.PENDING_WATCH))
+        assertEquals(ManagedAuto.WATCH_INTERVAL_SEC, stale.watchIntervalSec)
     }
 
     /** Between the move and its confirmation the user turned passive judging off: that stays. */
