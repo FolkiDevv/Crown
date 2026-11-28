@@ -161,6 +161,24 @@ class CrashReportTest {
     }
 
     @Test
+    fun withNotificationsOffNothingIsTakenUnseen() {
+        val now = 10_000_000L
+        val first = CrashMarker(app, now - 1_000, "A", 0)
+        val repeat = first.copy(repeats = 1)
+        val service = CrashMarker(bg, now - 1_000, "A", 0)
+        // Notifications on: the question for a first crash of the app, notifications for the rest.
+        assertEquals(CrashRules.Offer.DIALOG, CrashRules.offer(first, now, notifications = true))
+        assertEquals(CrashRules.Offer.NOTIFICATION, CrashRules.offer(repeat, now, notifications = true))
+        assertEquals(CrashRules.Offer.NOTIFICATION, CrashRules.offer(service, now, notifications = true))
+        // Off: the interface asks instead; a repeat only after the window, so a report that crashes cannot loop.
+        assertEquals(CrashRules.Offer.DIALOG, CrashRules.offer(first, now, notifications = false))
+        assertEquals(CrashRules.Offer.DIALOG, CrashRules.offer(service, now, notifications = false))
+        assertEquals(CrashRules.Offer.LATER, CrashRules.offer(repeat, now, notifications = false))
+        assertEquals(CrashRules.Offer.DIALOG, CrashRules.offer(repeat, now + CrashRules.REPEAT_MS, notifications = false))
+        assertEquals(CrashRules.Offer.DIALOG, CrashRules.offer(repeat, now - 2_000, notifications = false))
+    }
+
+    @Test
     fun markerRoundTripAndGarbage() {
         val crash = CrashMarker(bg, 1234L, "a.b\nc", 2)
         val decoded = assertNotNullAndGet(CrashRules.decode(CrashRules.encode(crash)))

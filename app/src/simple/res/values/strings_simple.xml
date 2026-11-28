@@ -573,6 +573,7 @@ The choice is not remembered: the next launch opens the new interface.</string>
     <string name="simple_crash_service_title">A Crown background process stopped because of an error</string>
     <string name="simple_crash_notification_text">Tap to send the log to the developers.</string>
     <string name="simple_crash_prompt_text">Crown closed unexpectedly last time. Send the log to the developers so they can fix the error?</string>
+    <string name="simple_crash_prompt_service_text">Send the log to the developers so they can fix the error?</string>
     <string name="simple_crash_send">Send log</string>
     <string name="simple_crash_dismiss">Don\'t send</string>
 </resources>

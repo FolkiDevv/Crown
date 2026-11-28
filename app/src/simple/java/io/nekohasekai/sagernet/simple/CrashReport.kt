@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -75,26 +76,36 @@ object CrashReport {
      */
     fun onBackgroundProcessStart(context: Context) = guarded {
         val pending = pending() ?: return@guarded
-        if (!CrashRules.isApp(pending.process)) claim()?.let { notify(context, it) }
+        // Notifications off: the marker stays for the interface's question, it is not taken unseen.
+        if (!CrashRules.isApp(pending.process) && canNotify(context)) claim()?.let { notify(context, it) }
     }
 
+    /** The question an interface asks about a crash. */
+    data class Prompt(@StringRes val title: Int, @StringRes val text: Int)
+
     /**
-     * Either interface opens (every onCreate, so a recreated activity asks again): true when it should ask whether to
-     * send the log ([answered] ends the question). Any other crash not reported yet goes to a notification.
+     * Either interface opens (every onCreate, so a recreated activity asks again): the question whether to send the log,
+     * or null ([answered] ends the question). Any other crash not reported yet goes to a notification; with notifications
+     * off the interface asks about it instead ([CrashRules.offer]).
      */
-    fun onInterfaceOpen(context: Context): Boolean = try {
+    fun onInterfaceOpen(context: Context): Prompt? = try {
         val pending = pending()
-        when {
-            pending == null -> false
-            CrashRules.prompts(pending) -> true
-            else -> {
+        if (pending == null) null else when (CrashRules.offer(pending, System.currentTimeMillis(), canNotify(context))) {
+            CrashRules.Offer.LATER -> null
+            CrashRules.Offer.DIALOG -> Prompt(
+                titleOf(pending),
+                if (CrashRules.isApp(pending.process)) R.string.simple_crash_prompt_text
+                else R.string.simple_crash_prompt_service_text,
+            )
+
+            CrashRules.Offer.NOTIFICATION -> {
                 claim()?.let { notify(context, it) }
-                false
+                null
             }
         }
     } catch (e: Exception) {
         Logs.w(e)
-        false
+        null
     }
 
     /** The interface's question is answered: [send] shares the log (BlankActivity), otherwise the report is dropped. */
@@ -109,6 +120,8 @@ object CrashReport {
      * actions instead of two.
      */
     fun offerWith(context: Context, builder: NotificationCompat.Builder) = guarded {
+        // That notification would not be seen either: the marker stays for the interface's question.
+        if (!canNotify(context)) return@guarded
         val shown = context.getSystemService<NotificationManager>()?.activeNotifications
             ?.any { it.tag == TAG && it.id == ID } == true
         // A newer crash than the one shown is taken too, or it would post a second report later.
@@ -121,12 +134,7 @@ object CrashReport {
 
     private fun notify(context: Context, crash: CrashMarker) {
         Logs.w("crash: ${crash.process} stopped with ${crash.exception}")
-        // The watchdog's crash leaves the VPN running: its title does not say the VPN stopped.
-        @StringRes val title = when {
-            CrashRules.isBackground(crash.process) -> R.string.simple_crash_vpn_title
-            CrashRules.isApp(crash.process) -> R.string.simple_crash_app_title
-            else -> R.string.simple_crash_service_title
-        }
+        val title = titleOf(crash)
         val text = context.getString(R.string.simple_crash_notification_text)
         // The app's process creates the channels off the main thread: they must exist before the post.
         SagerNet.updateNotificationChannels()
@@ -144,6 +152,24 @@ object CrashReport {
         } catch (e: SecurityException) {
             Logs.w(e)
         }
+    }
+
+    /** The watchdog's crash leaves the VPN running: its title does not say the VPN stopped. */
+    @StringRes
+    private fun titleOf(crash: CrashMarker): Int = when {
+        CrashRules.isBackground(crash.process) -> R.string.simple_crash_vpn_title
+        CrashRules.isApp(crash.process) -> R.string.simple_crash_app_title
+        else -> R.string.simple_crash_service_title
+    }
+
+    /** Whether a crash notification would be seen: notifications allowed (Android 13+ asks) and the channel not off. */
+    private fun canNotify(context: Context): Boolean = try {
+        NotificationManagerCompat.from(context).areNotificationsEnabled() && (Build.VERSION.SDK_INT < 26 ||
+            context.getSystemService<NotificationManager>()?.getNotificationChannel(PlatformNotifications.CHANNEL_WARNINGS)
+                ?.importance != NotificationManager.IMPORTANCE_NONE)
+    } catch (e: Exception) {
+        Logs.w(e)
+        true
     }
 
     /** BlankActivity shares a redacted log export; opened from a tap, so it is allowed from the background. */
@@ -207,6 +233,20 @@ object CrashRules {
 
     /** The interface asks about a crash of its own process; a repeat or a service process's crash gets a notification. */
     fun prompts(crash: CrashMarker): Boolean = isApp(crash.process) && crash.repeats == 0
+
+    enum class Offer { DIALOG, NOTIFICATION, LATER }
+
+    /**
+     * How an opening interface offers [crash] at [now]. With [notifications] off nothing may take it unseen: the interface
+     * asks instead, about a repeated crash of the app only once the repeat window is over (the loop guard holds).
+     */
+    fun offer(crash: CrashMarker, now: Long, notifications: Boolean): Offer = when {
+        prompts(crash) -> Offer.DIALOG
+        notifications -> Offer.NOTIFICATION
+        !isApp(crash.process) -> Offer.DIALOG
+        now >= crash.time && now - crash.time < REPEAT_MS -> Offer.LATER
+        else -> Offer.DIALOG
+    }
 
     fun encode(crash: CrashMarker): String = listOf(
         VERSION, crash.process, crash.time.toString(), crash.exception, crash.repeats.toString(),

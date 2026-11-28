@@ -172,10 +172,10 @@ class MainActivity : ThemedActivity(),
         if (savedInstanceState == null) intent?.let(::handleImportIntent)
         SubscriptionReportDialog.observe(this)
         // Crown (touch point 14): a crash of this process is reported here, not by the crashed process itself.
-        if (CrashReport.onInterfaceOpen(this)) {
+        CrashReport.onInterfaceOpen(this)?.let { prompt ->
             MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.simple_crash_app_title)
-                .setMessage(R.string.simple_crash_prompt_text)
+                .setTitle(prompt.title)
+                .setMessage(prompt.text)
                 .setPositiveButton(R.string.simple_crash_send) { _, _ -> CrashReport.answered(this, true) }
                 .setNegativeButton(R.string.simple_crash_dismiss) { _, _ -> CrashReport.answered(this, false) }
                 .setOnCancelListener { CrashReport.answered(this, false) }
