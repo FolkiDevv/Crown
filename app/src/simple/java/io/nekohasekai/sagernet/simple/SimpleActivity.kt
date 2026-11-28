@@ -200,6 +200,9 @@ class SimpleActivity : AppCompatActivity() {
     /** The battery-optimization prompt is open ([askBattery]); a rotation keeps it. */
     private val batteryPrompt = mutableStateOf(false)
 
+    /** The question whether to send the log of a crash of this process (CrashReport); the marker keeps it. */
+    private val crashPrompt = mutableStateOf(false)
+
     /** A screen this activity opened itself is in front (system settings, a classic screen, the scanner...). */
     private var ownLaunch = false
 
@@ -227,6 +230,8 @@ class SimpleActivity : AppCompatActivity() {
         // The notification channels of the subscription messages exist from the start, so Android lists them to set up.
         SubscriptionAlerts.ensureChannels(applicationContext)
         if (savedInstanceState == null) requestedSection.value = sectionOf(intent)
+        // Asked again after a recreation: the question ends only with an answer.
+        crashPrompt.value = CrashReport.onInterfaceOpen(this)
         if (savedInstanceState == null) {
             openAnnouncement(intent)
             openProvider(intent)
@@ -251,7 +256,9 @@ class SimpleActivity : AppCompatActivity() {
                     requestedSection = requestedSection.value,
                     onSectionShown = { requestedSection.value = null },
                 )
-                if (batteryPrompt.value) {
+                if (crashPrompt.value) {
+                    CrashPromptDialog(onSend = { answerCrash(true) }, onDismiss = { answerCrash(false) })
+                } else if (batteryPrompt.value) {
                     BatteryPromptDialog(onAllow = ::allowBackground, onLater = { batteryPrompt.value = false })
                 }
             }
@@ -315,6 +322,11 @@ class SimpleActivity : AppCompatActivity() {
         outState.putBoolean(STATE_BATTERY_PROMPT, batteryPrompt.value)
         // Called before onStop below Android 9: count the leaving already, so a process killed meanwhile keeps it.
         outState.putBoolean(STATE_LEFT_APP, leftApp || leaving())
+    }
+
+    private fun answerCrash(send: Boolean) {
+        crashPrompt.value = false
+        CrashReport.answered(this, send)
     }
 
     /** Every launch goes through here (startActivity too, and the activity result launchers). */
@@ -1268,6 +1280,25 @@ private fun BatteryPromptDialog(onAllow: () -> Unit, onLater: () -> Unit) {
         },
         dismissButton = {
             TextButton(onClick = onLater, modifier = button) { Text(stringResource(R.string.simple_offer_later)) }
+        },
+    )
+}
+
+/** A crash of the app closed it last time: send the log (CrashReport). */
+@Composable
+private fun CrashPromptDialog(onSend: () -> Unit, onDismiss: () -> Unit) {
+    val button = Modifier.focusRing(FocusShapes.Pill)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.simple_crash_app_title)) },
+        text = { Text(stringResource(R.string.simple_crash_prompt_text)) },
+        confirmButton = {
+            TextButton(onClick = onSend, modifier = button.focusWhenShown()) {
+                Text(stringResource(R.string.simple_crash_send))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = button) { Text(stringResource(R.string.simple_crash_dismiss)) }
         },
     )
 }

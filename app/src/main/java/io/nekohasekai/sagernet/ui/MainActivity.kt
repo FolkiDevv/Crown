@@ -47,6 +47,7 @@ import io.nekohasekai.sagernet.ktx.launchCustomTab
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.outbound.`import`.ProfileImport
+import io.nekohasekai.sagernet.simple.CrashReport
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.add.CrownLinks
 import io.nekohasekai.sagernet.ui.route.RouteImports
@@ -170,6 +171,16 @@ class MainActivity : ThemedActivity(),
 
         if (savedInstanceState == null) intent?.let(::handleImportIntent)
         SubscriptionReportDialog.observe(this)
+        // Crown (touch point 14): a crash of this process is reported here, not by the crashed process itself.
+        if (CrashReport.onInterfaceOpen(this)) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.simple_crash_app_title)
+                .setMessage(R.string.simple_crash_prompt_text)
+                .setPositiveButton(R.string.simple_crash_send) { _, _ -> CrashReport.answered(this, true) }
+                .setNegativeButton(R.string.simple_crash_dismiss) { _, _ -> CrashReport.answered(this, false) }
+                .setOnCancelListener { CrashReport.answered(this, false) }
+                .show()
+        }
 
         refreshNavMenu(DataStore.apiDashboardEnabled)
 

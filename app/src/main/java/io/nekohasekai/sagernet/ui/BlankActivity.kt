@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 import moe.matsuri.nb4a.utils.LogExport
 import moe.matsuri.nb4a.utils.SendLog
 
-/** Started by CrashHandler after a crash: shares a redacted log export, then finishes. */
+/** Opened from a crash report (notification or dialog, see CrashReport): shares a redacted log export, then finishes. */
 class BlankActivity : AppCompatActivity() {
 
     companion object {
@@ -36,6 +36,9 @@ class BlankActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 Logs.w(e)
             }
+            // Crown (touch point 14): the process lives on after a report (no rebirth): later crashes count again.
+            // Not in a finally: an Error escaping the share must still reach CrashHandler as a crash of the report.
+            CrashHandler.reporting = false
             finish()
         }
     }
