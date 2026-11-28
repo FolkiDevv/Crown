@@ -576,4 +576,29 @@ The choice is not remembered: the next launch opens the new interface.</string>
     <string name="simple_crash_prompt_service_text">Send the log to the developers so they can fix the error?</string>
     <string name="simple_crash_send">Send log</string>
     <string name="simple_crash_dismiss">Don\'t send</string>
+
+    <!-- The data error screen and notice (stop-wiping-database-on-open-error) -->
+    <string name="simple_data_error_title">Could not open the data</string>
+    <string name="simple_data_error_kept">Crown could not open the file with your subscriptions, servers and settings. Nothing was deleted: the file stays on the device as it is.</string>
+    <string name="simple_data_error_newer">The file was written by a newer version of Crown. Install that version again to use it.</string>
+    <string name="simple_data_error_space">The device is out of storage. Free up some space and press «Try again».</string>
+    <string name="simple_data_error_corrupt">The file is damaged, and no copy of it could be made, so it was kept. Free up some space and press «Try again», or save the file for support.</string>
+    <string name="simple_data_error_other">Press «Try again». If it does not help, restart the device, or save the file for support.</string>
+    <string name="simple_data_error_detail">Reason: %1$s</string>
+    <string name="simple_data_error_retry">Try again</string>
+    <string name="simple_data_error_retry_failed">Still could not open the data.</string>
+    <string name="simple_data_error_save">Save the data file</string>
+    <string name="simple_data_save_no_picker">There is no app on the device to choose where to save or open files.</string>
+    <string name="simple_data_save_nothing">There is no file to save.</string>
+    <string name="simple_data_saved">The file is saved.</string>
+    <string name="simple_data_save_failed">Could not save the file: %1$s</string>
+    <string name="simple_data_save_private">The saved file holds your subscription links and server keys. Send it only to people you trust, never to a public chat.</string>
+    <string name="simple_data_not_backup">This is not a Crown backup (.thrbackup file).</string>
+    <string name="simple_data_rebuilt_title">Your data was damaged</string>
+    <string name="simple_data_rebuilt_text">The file with your subscriptions, servers and settings was damaged, and Crown started over with empty data. A copy of the damaged file is kept. If you have a backup (a .thrbackup file), restore it.</string>
+    <string name="simple_data_rebuilt_restore">Restore a backup</string>
+    <string name="simple_data_rebuilt_save">Save the damaged file</string>
+    <string name="simple_data_rebuilt_dismiss">Got it</string>
+    <string name="simple_data_notice_title">Crown could not open its data</string>
+    <string name="simple_data_notice_text">The VPN did not start. Open Crown to see what happened.</string>
 </resources>

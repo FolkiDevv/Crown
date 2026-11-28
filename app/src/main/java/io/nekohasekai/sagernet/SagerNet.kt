@@ -22,6 +22,8 @@ import io.nekohasekai.sagernet.bg.CoreRuntime
 import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.simple.data.DataGate
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.group.RemoteRouteUpdater
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
@@ -56,6 +58,16 @@ class SagerNet : Application(),
 
         // Crown (touch point 14): a crash ends the process through Android's handler; the report comes later.
         CrashHandler.install(this, process)
+
+        // Crown (touch point 21): without the database nothing below may run, all of it reads or writes settings. The
+        // UI ends up on the data error screen (CrashHandler), the services refuse to start (DataGate.refuseStart).
+        if ((isMainProcess || isBgProcess) && !SagerDatabase.isAvailable()) {
+            if (isBgProcess) {
+                updateNotificationChannels()
+                DataGate.endProcessSoon()
+            }
+            return
+        }
 
         if (isMainProcess || isBgProcess) {
             SettingsMapper.installOutboundHooks()

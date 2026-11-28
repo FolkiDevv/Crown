@@ -50,6 +50,7 @@ import io.nekohasekai.sagernet.outbound.`import`.ProfileImport
 import io.nekohasekai.sagernet.simple.CrashReport
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.add.CrownLinks
+import io.nekohasekai.sagernet.simple.data.DataGate
 import io.nekohasekai.sagernet.ui.route.RouteImports
 import io.nekohasekai.sagernet.ui.settings.DnsSettingsFragment
 import io.nekohasekai.sagernet.ui.settings.XrayGeoSettingsFragment
@@ -90,6 +91,8 @@ class MainActivity : ThemedActivity(),
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (SimpleUi.redirect(this, restored = savedInstanceState != null)) return
+        // Crown (touch point 21): the data was damaged and rebuilt: say so once, offer the restore of a backup
+        DataGate.showRebuiltNotice(this)
         MessageStore.setCurrentActivity(this)
         val animateInitialControls = savedInstanceState == null
 

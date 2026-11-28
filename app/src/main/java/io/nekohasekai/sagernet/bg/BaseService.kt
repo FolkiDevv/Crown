@@ -26,6 +26,7 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileOrder
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.simple.data.DataGate
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 import io.nekohasekai.sagernet.utils.DefaultNetworkListener
@@ -718,6 +719,8 @@ class BaseService {
          * died (a null intent) starts the selected profile again, or stops when that is not wanted or not possible.
          */
         fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+            // Crown (touch point 21): no database, no start; the process stops without writing anything
+            if (DataGate.refuseStart(this as Service)) return Service.START_NOT_STICKY
             DataStore.baseService = this
             val restore = io.nekohasekai.sagernet.simple.ServiceRestore
 

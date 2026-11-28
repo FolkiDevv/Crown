@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.annotation.VisibleForTesting
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.CrashReport
+import io.nekohasekai.sagernet.simple.data.DataGate
 import kotlin.system.exitProcess
 
 /**
@@ -49,6 +50,18 @@ object CrashHandler : Thread.UncaughtExceptionHandler {
             Log.e(thread.toString(), throwable.stackTraceToString())
         } catch (e: Throwable) {
             // An Error here (out of memory) must not skip the hand-off below: the process would live on.
+        }
+
+        // Crown (touch point 21): the database did not open. Not a crash to report: no marker, no system dialog; the UI
+        // restarts into the data error screen, another process ends quietly.
+        val unavailable = try {
+            DataGate.onUncaught(throwable)
+        } catch (e: Throwable) {
+            false // reported below as an ordinary crash rather than leaving the process alive
+        }
+        if (unavailable) {
+            exit() // onUncaught ends the process itself; this only makes sure
+            return
         }
 
         // First: the log below may wait on the settings database.

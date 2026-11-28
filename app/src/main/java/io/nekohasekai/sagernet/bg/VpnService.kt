@@ -10,6 +10,7 @@ import android.os.ParcelFileDescriptor
 import io.nekohasekai.sagernet.*
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.*
+import io.nekohasekai.sagernet.simple.data.DataGate
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
 import io.nekohasekai.sagernet.utils.PlatformNotifications
 import io.throneproj.mobile.Mobile
@@ -138,6 +139,8 @@ class VpnService : BaseVpnService(),
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Crown (touch point 21): no database, no start (an always-on start too); nothing is read or written
+        if (DataGate.refuseStart(this)) return Service.START_NOT_STICKY
         // The system starts an always-on VPN whatever the service mode says; the rest of the app follows the mode.
         if (DataStore.serviceMode != Key.MODE_VPN && isAlwaysOnVpn()) DataStore.serviceMode = Key.MODE_VPN
         // Crown (touch point 12): a restart after the process died is in the background, no activity may start.

@@ -13,6 +13,20 @@ The app SHALL persist proxy profiles in a local database, each with a group memb
 - **WHEN** the user creates a profile and restarts the app
 - **THEN** the profile is still listed with its saved configuration
 
+#### Scenario: The database does not open
+- **WHEN** opening or migrating the database fails with anything but a corruption of the file (no access to it, an input/output error, no space, a failed or missing migration, a file written by a newer version)
+- **THEN** the file MUST be left as it is: the app SHALL NOT delete or recreate it, the UI process SHALL show the screen «Не удалось открыть данные» with «Повторить» and «Сохранить файл данных» in both interfaces without reading any setting, and the `:bg` process SHALL refuse to start a service, say so in a notification and end without writing to any database file
+- **AND** once the cause is gone, «Повторить» or the next start opens the same data
+
+#### Scenario: The database file is corrupted
+- **WHEN** SQLite reports the file corrupted while it is opened or used
+- **THEN** the file MUST be deleted and rebuilt only after a whole copy of it and its write-ahead log was made next to it (`sager_net.db.bak_<time>`); without such a copy the file SHALL be kept and the open fails as above
+- **AND** after a rebuild the next start of either interface SHALL tell the user the data was damaged and offer to restore a `.thrbackup` backup and to save the copy of the damaged file
+
+#### Scenario: Schema versions without a migration
+- **WHEN** the database version is raised
+- **THEN** a migration path from every version since 8 to the new one MUST exist, checked by a unit test; Room SHALL fall back to a destructive migration only for versions older than 8
+
 ### Requirement: Group model
 The app SHALL organize profiles into ordered groups; a group is a subscription if and only if it has a subscription URL. Groups SHALL support per-group options including skip-auto-update, auto-clear-unavailable, test/traffic sorting, front and landing proxy chaining, and display order for tab arrangement.
 
