@@ -106,7 +106,7 @@ internal class TestSession(
         try {
             coroutineScope {
                 val refresher = launch { notification.refreshLoop() }
-                // Crown: URL results waiting for their batch are stored at the latest [URL_FLUSH_MS] after the first.
+                // Crown: URL results waiting for their batch are stored within about 2 × [URL_FLUSH_MS] of the first.
                 val flusher = launch {
                     while (true) {
                         delay(URL_FLUSH_MS)

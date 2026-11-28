@@ -250,6 +250,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     /** The add flow added servers: they are tested now, even while the section is hidden (simple-ui 5.3). */
     fun testAdded() {
+        // A hide just before must not stop this test.
+        hideJob?.cancel()
         addedTest = true
         reload(thenTest = true)
     }
@@ -364,6 +366,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     }
 
     override fun onCleared() {
+        // The activity is finishing (not rotating): its pending hide never fires, so the own session stops now.
+        stopOwnTest()
         ProfileManager.removeListener(this)
         super.onCleared()
     }
@@ -739,6 +743,8 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         testAgain = false
         addedTest = false
         testAfterLoad = false
+        // Rows asked for but not tested yet are asked for again when they show.
+        shownAsked.removeAll(wanted)
         wanted.clear()
         wantJob?.cancel()
         val test = TestSessionClient.state.value
@@ -759,16 +765,15 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     private fun onTestState(test: TestUiState) {
         if (ownTest == NONE || test === stateBeforeTest) return
         if (test.kind != ownTest || test.startedAt != ownStartedAt) {
-            // The session ended and another one (not this section's) runs now.
-            if (test.running) {
-                ownTest = NONE
-                roundBusy = false
-                roundPending.clear()
-                queued.clear()
-                if (detecting.isNotEmpty()) {
-                    detecting = emptySet()
-                    reload()
-                }
+            // Another session (not this section's) runs or ran since, or the panel was cleared: this section's ended
+            // unseen, as no other session begins or is cleared while it runs.
+            ownTest = NONE
+            roundBusy = false
+            roundPending.clear()
+            queued.clear()
+            if (detecting.isNotEmpty()) {
+                detecting = emptySet()
+                reload()
             }
             return
         }
