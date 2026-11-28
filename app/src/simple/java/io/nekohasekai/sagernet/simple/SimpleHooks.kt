@@ -101,7 +101,6 @@ object SimpleHooks {
         store.putLong(KEY_SERVICE_STARTS, (store.getLong(KEY_SERVICE_STARTS) ?: 0L) + 1)
     }
 
-    /** The service must never fail because of the simple UI. */
     /**
      * Touch point 22 (ConfigGenerator.buildAutoSelectorGroup): the watch interval of auto-selector [selectorId]'s
      * config, the short one of a managed «Авто» ([io.nekohasekai.sagernet.simple.modes.ManagedAuto.watchIntervalSec]).
@@ -120,6 +119,7 @@ object SimpleHooks {
         selector.watchIntervalSec
     }
 
+    /** The service must never fail because of the simple UI. */
     private inline fun guarded(block: () -> Unit) {
         try {
             block()
