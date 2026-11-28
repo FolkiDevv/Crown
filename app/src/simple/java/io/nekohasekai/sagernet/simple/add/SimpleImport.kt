@@ -23,7 +23,6 @@ import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.simple.SimpleUi
 import io.nekohasekai.sagernet.simple.modes.TrafficModes
 import io.nekohasekai.sagernet.outbound.Outbound
-import io.nekohasekai.sagernet.simple.servers.CountryFromName
 import io.nekohasekai.sagernet.ui.SubscribeFlows
 import io.nekohasekai.sagernet.ui.profile.ProfileTextImport
 import io.nekohasekai.sagernet.validation.vplural
@@ -426,23 +425,44 @@ object SimpleImport {
         return ((seconds + 1800) / 3600).toInt()
     }
 
-    /** What the summary of an added subscription shows (simple-ui "Сводка импорта"). */
-    fun summary(gid: Long, enabled: List<Enabled>, updateHours: Int): ImportSummary? {
+    /**
+     * What the summary of an added subscription shows at once (simple-ui "Сводка импорта"), with its servers: the
+     * countries, slow to tell on a large subscription, are counted from them afterwards ([ImportCounts.countries]) and
+     * are 0 here. The servers are read without their outbound data and the managed auto-selectors once, not per server.
+     */
+    fun summary(gid: Long, enabled: List<Enabled>, updateHours: Int): Pair<ImportSummary, List<ImportCounts.Row>>? {
         val group = GroupRepo.get(gid) ?: return null
-        val members = SagerDatabase.proxyDao.getByGroup(gid).filter { !TrafficModes.isManagedSelector(it.id) }
-        val countries = members.mapNotNull { p -> CountryFromName.resolve(p.outbound.name, p.testCountry).code }
-            .toSet()
+        val servers = ImportCounts.servers(profileRows(gid), TrafficModes.managedSelectors())
         val info: SubUserInfo = group.subMetadata
         return ImportSummary(
             name = info.title.takeIf { it.isNotBlank() } ?: group.displayName(),
-            servers = members.size,
-            countries = countries.size,
+            servers = servers.size,
+            countries = 0,
             remaining = if (info.valid && info.hasQuota && info.total > 0) info.remaining else null,
             unlimited = info.valid && info.hasQuota && info.total <= 0L,
             expire = info.expire.takeIf { info.valid && it > 0L },
             enabled = enabled,
             updateHours = updateHours,
-        )
+        ) to servers
+    }
+
+    /**
+     * The profiles of group [gid] in one light query: the stored name and exit country, the outbound data only of a
+     * profile without a stored name (written before names were stored), whose name it then holds.
+     */
+    private fun profileRows(gid: Long): List<ImportCounts.Row> = SagerDatabase.instance.query(
+        "SELECT `id`, `type`, `name`, `test_country`, CASE WHEN `name` IS NULL OR `name` = '' THEN `outbound_json` END " +
+            "FROM `${ProxyEntity.TABLE}` WHERE `gid` = ?",
+        arrayOf<Any>(gid),
+    ).use { c ->
+        val rows = ArrayList<ImportCounts.Row>()
+        while (c.moveToNext()) {
+            val name = c.getString(2)?.takeIf { it.isNotEmpty() } ?: c.getString(4)?.let { json ->
+                runCatching { ProxyEntity.parseOutbound(c.getString(1).orEmpty(), json).name }.getOrNull()
+            }
+            rows.add(ImportCounts.Row(c.getLong(0), name.orEmpty(), c.getString(3)))
+        }
+        rows
     }
 
     // ------------------------------------------------------------------------------------------------ files
@@ -528,7 +548,7 @@ enum class Enabled { AUTO_SERVER, AUTO_UPDATE, AUTO_MODE }
 data class ImportSummary(
     val name: String,
     val servers: Int,
-    /** Distinct countries recognised by the flags in the server names. */
+    /** Distinct countries recognised by the flags in the server names; 0 until counted (AddViewModel), or none. */
     val countries: Int,
     /** Traffic left in bytes, null when the provider sends no limit. */
     val remaining: Long?,

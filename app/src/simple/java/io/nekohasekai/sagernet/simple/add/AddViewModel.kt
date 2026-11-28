@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.simple.add
 import android.app.Application
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
@@ -281,6 +282,7 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
             notice(Notice(R.string.simple_add_subscription_exists))
             return
         }
+        val started = SystemClock.elapsedRealtime()
         mutableState.update { it.copy(busy = AddBusy.SUBSCRIPTION) }
         // The download and its finishing touches (the update interval, or removing a group that never loaded) run in
         // the import scope, not in this ViewModel's: leaving the screen must not strand a half-added subscription.
@@ -311,11 +313,42 @@ class AddViewModel(application: Application) : AndroidViewModel(application) {
                 if (updateHours > 0) enabled.add(Enabled.AUTO_UPDATE)
                 if (auto) enabled.add(Enabled.AUTO_MODE)
                 eventChannel.send(AddEvent.Added)
-                val summary = withContext(Dispatchers.IO) { SimpleImport.summary(result.gid, enabled, updateHours) }
-                if (summary != null) show(AddDialog.Summary(summary))
+                val (summary, servers) = withContext(Dispatchers.IO) {
+                    SimpleImport.summary(result.gid, enabled, updateHours)
+                } ?: return
+                val shown = AddDialog.Summary(summary)
+                show(shown)
+                Logs.i("simple add: summary of subscription ${result.gid} (${summary.servers} servers) shown ${since(started)} ms after the add")
+                countCountries(shown, servers, started)
             }
         }
     }
+
+    /**
+     * The countries of a large subscription take a while to tell from its server names: the summary [shown] goes up
+     * without them and gets them here once counted. Only that sheet does: closed or replaced by another one meanwhile
+     * (a second add), the count is dropped. The sheet is state of this ViewModel, so a recreated activity shows it too.
+     */
+    private fun countCountries(shown: AddDialog.Summary, servers: List<ImportCounts.Row>, started: Long) {
+        viewModelScope.launch {
+            val countries = try {
+                withContext(Dispatchers.Default) { ImportCounts.countries(servers) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logs.w("simple add: counting the countries of the summary", e)
+                return@launch
+            }
+            Logs.i("simple add: $countries countries of ${servers.size} servers counted ${since(started)} ms after the add")
+            if (countries > 0) {
+                mutableState.update {
+                    if (it.dialog === shown) it.copy(dialog = AddDialog.Summary(shown.summary.copy(countries = countries))) else it
+                }
+            }
+        }
+    }
+
+    private fun since(started: Long): Long = SystemClock.elapsedRealtime() - started
 
     private suspend fun addServers(plan: SimpleImport.Plan.Servers) {
         if (withContext(Dispatchers.IO) { SimpleImport.isAdded(plan) }) {

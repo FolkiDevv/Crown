@@ -185,4 +185,12 @@ data class Managed(
     val auto: Long,
     val autoWhitelist: Long,
     val country: Long = 0L,
-)
+) {
+    /** The managed auto-selectors, which stand in for no server of their own. */
+    val selectors: Set<Long> get() = selectorSet(auto, autoWhitelist, country)
+
+    companion object {
+        /** The ids of the managed auto-selectors that exist (0 = missing). */
+        fun selectorSet(vararg ids: Long): Set<Long> = ids.filterTo(HashSet()) { it > 0L }
+    }
+}
