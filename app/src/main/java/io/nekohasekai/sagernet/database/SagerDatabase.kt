@@ -12,7 +12,8 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.preference.SettingEntry
-import java.io.File
+import io.nekohasekai.sagernet.simple.data.DataGate
+import io.nekohasekai.sagernet.simple.data.DatabaseUnavailableException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -22,7 +23,7 @@ import kotlinx.coroutines.launch
         ProxyGroup::class, ProxyEntity::class, RouteProfileEntity::class, RouteRuleEntity::class,
         SettingEntry::class, MarkerEntity::class,
     ],
-    version = 20,
+    version = SagerDatabase.VERSION,
     autoMigrations = [
         AutoMigration(from = 8, to = 9),
         AutoMigration(from = 12, to = 13),
@@ -40,6 +41,12 @@ abstract class SagerDatabase : RoomDatabase() {
     companion object {
 
         private const val TAG = "SagerDatabase"
+
+        /** The schema version (@Database). Crown: a test checks the migrations reach it from [FIRST_MIGRATED]. */
+        const val VERSION = 20
+
+        /** The oldest version a migration starts from; older files (never seen by this app) are rebuilt empty. */
+        const val FIRST_MIGRATED = 8
 
         /** The settings database of v11 and older; its rows are not carried over. */
         private const val LEGACY_SETTINGS_DB = "configuration.db"
@@ -197,58 +204,82 @@ abstract class SagerDatabase : RoomDatabase() {
 
         fun defaultGroupName(): String = SagerNet.application.getString(R.string.group_default_name)
 
+        /** The hand-written migrations; the auto-migrations are in @Database. */
+        val MIGRATIONS: Array<Migration>
+            get() = arrayOf(
+                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
+            )
+
         @OptIn(DelicateCoroutinesApi::class)
-        private fun buildProfileDatabase(): SagerDatabase =
+        private fun buildProfileDatabase(multiInstance: Boolean): SagerDatabase =
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
-                .addMigrations(
-                    MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
-                )
+                // Crown (touch point 21): a damaged file is deleted by SQLite's handler only once a copy of it exists
+                .openHelperFactory(DataGate.GuardedOpenHelperFactory())
+                .addMigrations(*MIGRATIONS)
                 .addCallback(callback)
                 // both processes use the file: WAL lets readers in either one run while the other writes
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .allowMainThreadQueries()
-                .enableMultiInstanceInvalidation()
-                .fallbackToDestructiveMigration()
-                .fallbackToDestructiveMigrationOnDowngrade()
+                .apply { if (multiInstance) enableMultiInstanceInvalidation() }
+                // Crown (21): only versions older than the first migration are rebuilt. A missing migration or a
+                // file of a newer version (a downgrade) fails the open, and the data stays for the error screen.
+                .fallbackToDestructiveMigrationFrom(*(1 until FIRST_MIGRATED).toList().toIntArray())
                 .setQueryExecutor { GlobalScope.launch { it.run() } }
                 .build()
 
-        // Failures are logged with android.util.Log: Logs reads the log level from the settings in this database.
-        val instance by lazy {
-            SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
-            val db = buildProfileDatabase()
-            // A corrupted file throws on first access: keep a copy, rebuild an empty database, keep the app starting.
-            val opened = try {
-                db.openHelper.writableDatabase
-                db
-            } catch (e: Exception) {
-                Log.e(TAG, "open failed", e)
-                runCatching { db.close() }
-                backupCorruptedDatabase()
-                SagerNet.application.deleteDatabase(Key.DB_PROFILE)
-                buildProfileDatabase()
-            }
-            SagerNet.application.deleteDatabase(LEGACY_SETTINGS_DB)
-            opened
+        @Volatile
+        private var opened: SagerDatabase? = null
+
+        /** Why the last open of this process failed; null once one succeeded. */
+        @Volatile
+        var openFailure: Throwable? = null
+            private set
+
+        /**
+         * Crown (21): the database of this process. Throws [DatabaseUnavailableException] when it did not open; the file
+         * is then left as it is (only SQLite's corruption handler removes one, after a copy).
+         */
+        val instance: SagerDatabase
+            get() = opened ?: open(retry = false)
+
+        /** The database of this process is open; no open is attempted, nothing waits. */
+        val isOpen: Boolean get() = opened != null
+
+        /** True when the database is open; [retry]: try again after a failed open of this process. */
+        fun isAvailable(retry: Boolean = false): Boolean = try {
+            open(retry)
+            true
+        } catch (e: DatabaseUnavailableException) {
+            false
         }
 
-        /** Copies the database file next to itself with a timestamp before it is deleted and rebuilt. */
-        private fun backupCorruptedDatabase() {
-            runCatching {
-                val dbFile = SagerNet.application.getDatabasePath(Key.DB_PROFILE)
-                if (dbFile.exists()) {
-                    val backupFile = File(
-                        dbFile.parentFile, dbFile.name + ".bak_" + System.currentTimeMillis()
-                    )
-                    dbFile.copyTo(backupFile, overwrite = false)
-                    // the latest commits may still be in the write-ahead log
-                    val wal = File(dbFile.path + "-wal")
-                    if (wal.exists()) wal.copyTo(File(backupFile.path + "-wal"), overwrite = false)
-                    Log.i(TAG, "Corrupted database backed up as ${backupFile.name}")
-                }
-            }.onFailure {
-                Log.w(TAG, "Failed to backup corrupted database before rebuild", it)
+        // Failures are logged with android.util.Log: Logs reads the log level from the settings in this database.
+        @Synchronized
+        private fun open(retry: Boolean): SagerDatabase {
+            opened?.let { return it }
+            // A failure stays until an explicit retry: the process skipped its start-up, which needs the settings.
+            if (!retry) openFailure?.let { throw DatabaseUnavailableException(it) }
+            SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
+            // First without the multi-instance invalidation: build() binds its service in :bg, and a failed open never
+            // unbinds (close() needs an open database), which would keep starting a :bg that cannot open either.
+            openOrFail(buildProfileDatabase(multiInstance = false)).close()
+            val db = openOrFail(buildProfileDatabase(multiInstance = true))
+            openFailure = null
+            opened = db
+            SagerNet.application.deleteDatabase(LEGACY_SETTINGS_DB)
+            return db
+        }
+
+        private fun openOrFail(db: SagerDatabase): SagerDatabase {
+            try {
+                db.openHelper.writableDatabase
+            } catch (e: Exception) {
+                runCatching { db.close() }
+                Log.e(TAG, "open failed", e)
+                openFailure = e
+                throw DatabaseUnavailableException(e)
             }
+            return db
         }
 
         val groupDao get() = instance.groupDao()

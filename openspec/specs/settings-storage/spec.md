@@ -13,6 +13,11 @@ The app SHALL provide typed, named accessors for all settings backed by persiste
 - **WHEN** the user changes a setting in the UI while a connection service runs
 - **THEN** the service observes the new value on its next read
 
+#### Scenario: Settings database that does not open
+- **WHEN** the database holding the settings table cannot be opened or migrated and the file is not corrupted
+- **THEN** the settings MUST NOT be reset: no default SHALL be read in place of a stored value or written over it, the file SHALL stay as it is, and the app SHALL show the data error screen (UI) or refuse to start the service (`:bg`) as described in `profile-management` «Profile persistence»
+- **AND** a rebuild of the file after a corruption SHALL happen only once a copy of it exists, and the user SHALL be told
+
 ### Requirement: Settings registry contract
 Each supported setting SHALL be registered with its key, type, and default; unrecognized keys encountered during import or migration SHALL be rejected or ignored without corrupting existing settings.
 

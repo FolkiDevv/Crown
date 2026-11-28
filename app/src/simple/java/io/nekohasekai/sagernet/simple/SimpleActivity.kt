@@ -90,6 +90,7 @@ import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.simple.add.AddActions
+import io.nekohasekai.sagernet.simple.data.DataGate
 import io.nekohasekai.sagernet.simple.add.AddBusyDialog
 import io.nekohasekai.sagernet.simple.add.AddEvent
 import io.nekohasekai.sagernet.simple.add.AddResultDialog
@@ -234,6 +235,9 @@ class SimpleActivity : AppCompatActivity() {
             openAnnouncement(intent)
             openProvider(intent)
         }
+        // The data was damaged and rebuilt (stop-wiping-database-on-open-error): said once, with the restore, also
+        // when a restore after process death recreates this screen.
+        DataGate.showRebuiltNotice(this)
         setContent {
             SimpleTheme {
                 SimpleApp(

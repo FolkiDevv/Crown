@@ -87,13 +87,17 @@ private val DarkColors: ColorScheme = darkColorScheme(
     surfaceContainerHighest = Color(0xFF3C3235),
 )
 
+/**
+ * [fromSettings] false: the system's light/dark and accent colours, nothing read from the settings (the data error
+ * screen, whose database did not open).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SimpleTheme(content: @Composable () -> Unit) {
+fun SimpleTheme(fromSettings: Boolean = true, content: @Composable () -> Unit) {
     val systemDark = isSystemInDarkTheme()
-    val dark = if (DataStore.nightTheme == 0) systemDark else Theme.usingNightMode()
+    val dark = if (!fromSettings || DataStore.nightTheme == 0) systemDark else Theme.usingNightMode()
     val colors = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-        (DataStore.configurationStore.getBoolean(Key.USE_SYSTEM_THEME) ?: true)
+        (!fromSettings || (DataStore.configurationStore.getBoolean(Key.USE_SYSTEM_THEME) ?: true))
     ) {
         val context = LocalContext.current
         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)

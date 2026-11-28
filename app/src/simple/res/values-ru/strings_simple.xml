@@ -566,4 +566,29 @@
     <string name="simple_crash_prompt_service_text">Отправить журнал разработчикам, чтобы они исправили ошибку?</string>
     <string name="simple_crash_send">Отправить журнал</string>
     <string name="simple_crash_dismiss">Не отправлять</string>
+
+    <!-- Экран и уведомление об ошибке данных (stop-wiping-database-on-open-error) -->
+    <string name="simple_data_error_title">Не удалось открыть данные</string>
+    <string name="simple_data_error_kept">Crown не смог открыть файл с подписками, серверами и настройками. Ничего не удалено: файл остаётся на устройстве как есть.</string>
+    <string name="simple_data_error_newer">Файл записан более новой версией Crown. Чтобы им пользоваться, установите эту версию снова.</string>
+    <string name="simple_data_error_space">На устройстве закончилось место. Освободите место и нажмите «Повторить».</string>
+    <string name="simple_data_error_corrupt">Файл повреждён, а сделать его копию не удалось, поэтому он оставлен как есть. Освободите место и нажмите «Повторить» или сохраните файл для поддержки.</string>
+    <string name="simple_data_error_other">Нажмите «Повторить». Если не поможет, перезагрузите устройство или сохраните файл для поддержки.</string>
+    <string name="simple_data_error_detail">Причина: %1$s</string>
+    <string name="simple_data_error_retry">Повторить</string>
+    <string name="simple_data_error_retry_failed">Открыть данные по-прежнему не удаётся.</string>
+    <string name="simple_data_error_save">Сохранить файл данных</string>
+    <string name="simple_data_save_no_picker">На устройстве нет приложения, чтобы выбрать, куда сохранить или откуда открыть файл.</string>
+    <string name="simple_data_save_nothing">Сохранять нечего: файла нет.</string>
+    <string name="simple_data_saved">Файл сохранён.</string>
+    <string name="simple_data_save_failed">Не удалось сохранить файл: %1$s</string>
+    <string name="simple_data_save_private">В сохранённом файле — ваши ссылки подписок и ключи серверов. Передавайте его только тем, кому доверяете, и не выкладывайте в общий чат.</string>
+    <string name="simple_data_not_backup">Это не резервная копия Crown (файл .thrbackup).</string>
+    <string name="simple_data_rebuilt_title">Данные были повреждены</string>
+    <string name="simple_data_rebuilt_text">Файл с подписками, серверами и настройками оказался повреждён, и Crown начал с пустыми данными. Копия повреждённого файла сохранена. Если у вас есть резервная копия (файл .thrbackup), восстановите её.</string>
+    <string name="simple_data_rebuilt_restore">Восстановить из резервной копии</string>
+    <string name="simple_data_rebuilt_save">Сохранить повреждённый файл</string>
+    <string name="simple_data_rebuilt_dismiss">Понятно</string>
+    <string name="simple_data_notice_title">Crown не смог открыть свои данные</string>
+    <string name="simple_data_notice_text">VPN не запущен. Откройте Crown, чтобы узнать, что случилось.</string>
 </resources>

@@ -205,6 +205,11 @@
             android:exported="false"
             android:launchMode="singleTask"
             android:theme="@style/simple_theme" />
+        <!-- Crown (touch point 21): the data error screen of both interfaces; it never opens the database -->
+        <activity
+            android:name="io.nekohasekai.sagernet.simple.data.DataProblemActivity"
+            android:exported="false"
+            android:theme="@style/simple_theme" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.VpnRequestActivity"
             android:excludeFromRecents="true"
