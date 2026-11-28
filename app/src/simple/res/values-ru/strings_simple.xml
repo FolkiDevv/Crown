@@ -557,4 +557,5 @@
     <string name="simple_shortcut_confirm_connect_to">Включить VPN через «%1$s»?</string>
     <string name="simple_shortcut_confirm_disconnect">Выключить VPN?</string>
     <string name="simple_shortcut_confirm_switch">Переключить VPN на «%1$s»?</string>
+    <string name="simple_shortcut_state_changed">VPN за это время изменился, ничего не сделано. Нажмите ярлык ещё раз</string>
 </resources>

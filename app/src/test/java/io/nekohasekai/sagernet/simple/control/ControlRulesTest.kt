@@ -56,6 +56,30 @@ class ControlRulesTest {
     }
 
     @Test
+    fun aConfirmedToggleDoesWhatTheDialogSaid() {
+        // «Connect?» shown while stopped; the VPN came up before «OK»: the toggle would now stop it, so nothing is done.
+        val shown = ControlRules.decide(Request.TOGGLE, State.Stopped, Profile.None, 1L)
+        assertEquals(Command.Start(null), shown)
+        val now = ControlRules.decide(Request.TOGGLE, State.Connected, Profile.None, 1L)
+        assertEquals(Command.Ignore, ControlRules.confirmed(shown, now))
+        // «Disconnect?» shown; it stopped meanwhile: no start.
+        assertEquals(
+            Command.Ignore,
+            ControlRules.confirmed(Command.Stop, ControlRules.decide(Request.TOGGLE, State.Stopped, Profile.None, 1L)),
+        )
+        // «Switch to 2?» shown; the user selected 2 meanwhile: the toggle would now stop it.
+        assertEquals(
+            Command.Ignore,
+            ControlRules.confirmed(Command.Switch(2L), ControlRules.decide(Request.TOGGLE, State.Connected, profile(2L), 2L)),
+        )
+        // Unchanged: exactly what was asked.
+        assertEquals(Command.Start(2L), ControlRules.confirmed(Command.Start(2L), Command.Start(2L)))
+        assertEquals(Command.Stop, ControlRules.confirmed(Command.Stop, Command.Stop))
+        // The state could not be read (service gone): nothing.
+        assertEquals(Command.Ignore, ControlRules.confirmed(Command.Stop, null))
+    }
+
+    @Test
     fun connectNeverStops() {
         assertEquals(Command.Start(null), ControlRules.decide(Request.CONNECT, State.Stopped, Profile.None, 1L))
         assertEquals(Command.Start(2L), ControlRules.decide(Request.CONNECT, State.Idle, profile(2L), 1L))

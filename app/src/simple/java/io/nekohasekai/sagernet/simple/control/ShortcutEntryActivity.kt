@@ -48,8 +48,8 @@ object ShortcutIntents {
 /**
  * The only exported way to the launcher shortcuts. ACTION_CREATE_SHORTCUT (the launcher's shortcut picker) gets the
  * toggle shortcut and changes nothing. [ShortcutIntents.ACTION_CONFIRM_TOGGLE] (a legacy shortcut, Android 7.0–7.1)
- * asks «Disconnect?» / «Connect?» / «Switch to …?» and toggles only when the user agrees; on Android 8+ no shortcut of
- * the app comes this way, so it does nothing there.
+ * asks «Disconnect?» / «Connect?» / «Switch to …?» and does exactly that once the user agrees, if the state still
+ * calls for it; on Android 8+ no shortcut of the app comes this way, so it does nothing there.
  */
 class ShortcutEntryActivity : Activity(), SagerConnection.Callback {
 
@@ -114,14 +114,7 @@ class ShortcutEntryActivity : Activity(), SagerConnection.Callback {
         dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(R.string.app_name)
             .setMessage(message)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                // From the app itself the unexported toggle is allowed; it checks the state again.
-                startActivity(
-                    Intent(this, QuickToggleShortcut::class.java).setAction(Intent.ACTION_MAIN).apply {
-                        (profile as? ControlRules.Profile.Existing)?.let { putExtra(ControlRules.EXTRA_PROFILE, it.id) }
-                    }
-                )
-            }
+            .setPositiveButton(android.R.string.ok) { _, _ -> runConfirmed(command) }
             .setNegativeButton(android.R.string.cancel, null)
             .setOnDismissListener { finish() }
             .show()
@@ -129,6 +122,34 @@ class ShortcutEntryActivity : Activity(), SagerConnection.Callback {
                 // Another app's window over the dialog must not tap «OK» for the user.
                 it.getButton(DialogInterface.BUTTON_POSITIVE)?.filterTouchesWhenObscured = true
             }
+    }
+
+    /**
+     * Carries out what the dialog asked ([shown]) and nothing else: if the service state or the selected profile
+     * changed since, the toggle now means something else (a «Connect?» would stop the VPN), so nothing is done.
+     */
+    private fun runConfirmed(shown: ControlRules.Command) {
+        val now = try {
+            connection.service?.let { service ->
+                ControlRules.decide(
+                    ControlRules.Request.TOGGLE, BaseService.State.entries[service.state], profile, DataStore.selectedProxy
+                )
+            }
+        } catch (e: Exception) {
+            Logs.w(e)
+            null
+        }
+        val command = ControlRules.confirmed(shown, now)
+        if (command == ControlRules.Command.Ignore) {
+            Logs.w("shortcut: the connection changed since the question ($shown, now $now), nothing done")
+            Toast.makeText(this, R.string.simple_shortcut_state_changed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            ExternalControl.run(command)
+        } catch (e: Exception) {
+            Logs.w("shortcut: $command failed", e)
+        }
     }
 
     private fun name(id: Long) = ProfileManager.getProfile(id)?.displayName() ?: id.toString()

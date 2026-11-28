@@ -567,4 +567,5 @@ The choice is not remembered: the next launch opens the new interface.</string>
     <string name="simple_shortcut_confirm_connect_to">Connect the VPN through «%1$s»?</string>
     <string name="simple_shortcut_confirm_disconnect">Disconnect the VPN?</string>
     <string name="simple_shortcut_confirm_switch">Switch the VPN to «%1$s»?</string>
+    <string name="simple_shortcut_state_changed">The VPN changed meanwhile, nothing was done. Tap the shortcut again</string>
 </resources>

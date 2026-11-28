@@ -79,6 +79,12 @@ object ControlRules {
         }
     }
 
+    /**
+     * What to carry out after the user confirmed [shown]: [shown] itself while the state gives the same command
+     * ([now], null when the state cannot be read), otherwise nothing — never what the toggle would mean by then.
+     */
+    fun confirmed(shown: Command, now: Command?): Command = if (now == shown) shown else Command.Ignore
+
     /** The automation action for an intent action, null for any other: "<applicationId>.action.CONNECT" and so on. */
     fun request(packageName: String, action: String?): Request? = when (action) {
         "$packageName$ACTION_CONNECT" -> Request.CONNECT
