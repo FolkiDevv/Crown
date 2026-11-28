@@ -171,16 +171,6 @@ class MainActivity : ThemedActivity(),
 
         if (savedInstanceState == null) intent?.let(::handleImportIntent)
         SubscriptionReportDialog.observe(this)
-        // Crown (touch point 14): a crash of this process is reported here, not by the crashed process itself.
-        CrashReport.onInterfaceOpen(this)?.let { prompt ->
-            MaterialAlertDialogBuilder(this)
-                .setTitle(prompt.title)
-                .setMessage(prompt.text)
-                .setPositiveButton(R.string.simple_crash_send) { _, _ -> CrashReport.answered(this, true) }
-                .setNegativeButton(R.string.simple_crash_dismiss) { _, _ -> CrashReport.answered(this, false) }
-                .setOnCancelListener { CrashReport.answered(this, false) }
-                .show()
-        }
 
         refreshNavMenu(DataStore.apiDashboardEnabled)
 
@@ -679,6 +669,30 @@ class MainActivity : ThemedActivity(),
     override fun onStart() {
         connection.updateConnectionId(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND)
         super.onStart()
+        syncCrashPrompt()
+    }
+
+    /** The question about a crash this activity asks (Crown, touch point 14); it lives until answered or taken. */
+    private var crashDialog: androidx.appcompat.app.AlertDialog? = null
+
+    /**
+     * Crown (touch point 14): a crash is reported here, not by the crashed process. Each start, so a crash while this
+     * activity lived (notifications off) is asked about too, and a question a notification took meanwhile goes away.
+     */
+    private fun syncCrashPrompt() {
+        val prompt = CrashReport.onInterfaceOpen(this)
+        if (prompt == null) {
+            crashDialog?.dismiss()
+            crashDialog = null
+        } else if (crashDialog?.isShowing != true) {
+            crashDialog = MaterialAlertDialogBuilder(this)
+                .setTitle(prompt.title)
+                .setMessage(prompt.text)
+                .setPositiveButton(R.string.simple_crash_send) { _, _ -> CrashReport.answered(this, true) }
+                .setNegativeButton(R.string.simple_crash_dismiss) { _, _ -> CrashReport.answered(this, false) }
+                .setOnCancelListener { CrashReport.answered(this, false) }
+                .show()
+        }
     }
 
     override fun onStop() {
@@ -687,6 +701,7 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun onDestroy() {
+        crashDialog?.dismiss()
         super.onDestroy()
         DataStore.configurationStore.unregisterChangeListener(this)
         connection.disconnect(this)

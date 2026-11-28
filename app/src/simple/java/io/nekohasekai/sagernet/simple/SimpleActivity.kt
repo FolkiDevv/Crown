@@ -230,8 +230,6 @@ class SimpleActivity : AppCompatActivity() {
         // The notification channels of the subscription messages exist from the start, so Android lists them to set up.
         SubscriptionAlerts.ensureChannels(applicationContext)
         if (savedInstanceState == null) requestedSection.value = sectionOf(intent)
-        // Asked again after a recreation: the question ends only with an answer.
-        crashPrompt.value = CrashReport.onInterfaceOpen(this)
         if (savedInstanceState == null) {
             openAnnouncement(intent)
             openProvider(intent)
@@ -396,6 +394,9 @@ class SimpleActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Each start, also after a recreation: a crash while this activity lived is asked about too (notifications off),
+        // and a question a notification took meanwhile goes away. It ends only with an answer.
+        crashPrompt.value = CrashReport.onInterfaceOpen(this)
         home.setForeground(true)
         modes.refresh()
         // Groups added meanwhile in :bg (a subscription added in the classic interface) join the «Авто» selectors.
