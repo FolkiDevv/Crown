@@ -85,6 +85,7 @@ import androidx.window.core.layout.WindowWidthSizeClass
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.bg.VpnAuthClient
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
@@ -136,12 +137,14 @@ import io.nekohasekai.sagernet.ui.AppManagerActivity
 import io.nekohasekai.sagernet.ui.GroupSettingsActivity
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.ScannerActivity
+import io.nekohasekai.sagernet.ui.VpnAuthActivity
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
 import io.nekohasekai.sagernet.ui.profile.ProfileSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.profileSettingsIntent
 import io.nekohasekai.sagernet.update.UpdateActivity
 import io.nekohasekai.sagernet.utils.AlwaysOnVpn
 import io.nekohasekai.sagernet.utils.BatteryOptimizations
+import io.nekohasekai.sagernet.utils.Theme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -223,6 +226,13 @@ class SimpleActivity : AppCompatActivity() {
     /** The clipboard is looked at once each time the interface comes to the front, when its window has the focus. */
     private var clipboardCheck = false
 
+    // As ThemedActivity: the night mode AppCompat holds is resolved again (the system's may have changed) before it
+    // derives this activity's configuration, which SimpleTheme reads for "follow the system".
+    override fun attachBaseContext(newBase: Context) {
+        Theme.applyNightTheme()
+        super.attachBaseContext(newBase)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -270,6 +280,17 @@ class SimpleActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 repair.consentRequests.collect { askRepairConsent() }
+            }
+        }
+        // A VPN sign-in (OpenVPN, OpenConnect) the connection waits for opens over the interface, as in classic
+        // (MainActivity.promptVpnSignIn): the service posts its notification silently while this screen is in front.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                VpnAuthClient.state.collect {
+                    val challenge = VpnAuthClient.unprompted() ?: return@collect
+                    VpnAuthClient.markPrompted(challenge)
+                    startActivity(VpnAuthActivity.intent(this@SimpleActivity, challenge.tag))
+                }
             }
         }
         lifecycleScope.launch {

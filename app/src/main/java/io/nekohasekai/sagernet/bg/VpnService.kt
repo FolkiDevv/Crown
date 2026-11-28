@@ -146,15 +146,14 @@ class VpnService : BaseVpnService(),
         // Crown (touch point 12): a restart after the process died is in the background, no activity may start.
         val restore = io.nekohasekai.sagernet.simple.ServiceRestore
         val restart = restore.isRestart(intent)
-        if (DataStore.serviceMode == Key.MODE_VPN) {
-            if (prepare(this) != null) {
-                if (restart) restore.onConsentMissing(this)
-                else startActivity(
-                    Intent(
-                        this, VpnRequestActivity::class.java
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            } else return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
+        val vpnMode = DataStore.serviceMode == Key.MODE_VPN
+        if (vpnMode && prepare(this) == null) return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
+        if (restart) {
+            if (vpnMode) restore.onConsentMissing(this)
+        } else {
+            // Started as a foreground service: stopping before startForeground crashes the process (see startProxy).
+            if (data.notification == null) data.notification = createNotification("")
+            if (vpnMode) startActivity(Intent(this, VpnRequestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         if (restart) restore.leaveForeground(this)
         stopRunner(false, if (restart) restore.takeReason() else null)
@@ -217,6 +216,9 @@ class VpnService : BaseVpnService(),
             }
         }
 
+        // Without the mixed inbound the app's own proxied requests (subscriptions, downloads) count on the tun
+        // carrying them, so the per-app lists never leave this app outside (HTTPRequestHelper RequestUsesMixedInbound).
+        val keepSelf = DataStore.mixedInboundDisabled
         val allowed = ArrayList<String>()
         val includePackage = options.getIncludePackage()
         if (includePackage.hasNext()) {
@@ -228,12 +230,16 @@ class VpnService : BaseVpnService(),
                 }
             }
             // None of the chosen apps is installed: an empty allow list would capture every app instead of none.
-            if (allowed.isEmpty()) builder.addAllowedApplication(packageName).also { allowed += packageName }
+            if (allowed.isEmpty() || (keepSelf && packageName !in allowed)) {
+                builder.addAllowedApplication(packageName)
+                allowed += packageName
+            }
         }
         val denied = ArrayList<String>()
         val excludePackage = options.getExcludePackage()
         if (excludePackage.hasNext()) {
             excludePackage.toList().forEach {
+                if (keepSelf && it == packageName) return@forEach
                 try {
                     builder.addDisallowedApplication(it)
                     denied += it
